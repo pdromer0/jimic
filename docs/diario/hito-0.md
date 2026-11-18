@@ -6,8 +6,9 @@ reflexiones, al final, son de Pedro.
 
 ## 2026-11-17 · Fases 0 y 1 — Preguntas y máquina
 
-**Qué se hizo:** en el chat, las respuestas de la fase 0 (decisiones 41 a 54 del diseño) y la
-comprobación de la máquina: WSL2, `.wslconfig` con 7 GB, git, jq, gh, uv y Claude Code.
+**Qué se hizo:** en el chat, el 17-nov-2026 (la comprobación de la máquina terminó el 18), las
+respuestas de la fase 0 (decisiones 41 a 54 del diseño) y la comprobación de la máquina: WSL2,
+`.wslconfig` con 7 GB, git, jq, gh, uv y Claude Code.
 
 **Qué aprendí:** las desviaciones del núcleo **añaden** piezas (repositorio público, pyright,
 gitleaks) y cada una lleva su ADR; ninguna toca las nueve decisiones de fondo.
