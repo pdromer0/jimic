@@ -33,3 +33,10 @@ Closes #
 <!-- Lo que queda, con su destino. -->
 
 ## Ajustes de la revisión
+
+## Métricas de la tarea
+
+- Idas y vueltas de Pedro entre el chat y el agente:
+- Tiempo de pared de la aprobación del plan a la apertura del PR:
+- Rondas de revisión:
+- Qué encontró cada revisor:
