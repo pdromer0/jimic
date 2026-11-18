@@ -1,3 +1,5 @@
+<!-- Nada personal: si hace falta un ejemplo, invéntalo. -->
+
 Closes #
 
 ## Resumen

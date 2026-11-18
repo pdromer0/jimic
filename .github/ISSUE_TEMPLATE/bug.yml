@@ -2,6 +2,9 @@ name: Bug
 description: Algo no funciona como debería.
 labels: ["tipo:bug"]
 body:
+  - type: markdown
+    attributes:
+      value: "Nada personal: si hace falta un ejemplo, invéntalo."
   - type: textarea
     id: que-pasa
     attributes:

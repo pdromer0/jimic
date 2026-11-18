@@ -5,6 +5,8 @@ body:
   - type: markdown
     attributes:
       value: |
+        Nada personal: si hace falta un ejemplo, invéntalo.
+
         El issue resume y enlaza la especificación; no la copia. Las dependencias se marcan con las
         nativas de GitHub (Relationships → Blocked by). El PR que la cierra lleva «Closes #N».
   - type: textarea

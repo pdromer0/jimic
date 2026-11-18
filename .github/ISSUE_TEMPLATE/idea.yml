@@ -2,6 +2,9 @@ name: Idea
 description: Una propuesta sin decidir.
 labels: ["tipo:idea"]
 body:
+  - type: markdown
+    attributes:
+      value: "Nada personal: si hace falta un ejemplo, invéntalo."
   - type: textarea
     id: que
     attributes:
