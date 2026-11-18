@@ -22,7 +22,7 @@ piezas:
 
 | Desviación | ADR |
 | --- | --- |
-| Repositorio público sin nada personal, con escaneo de secretos y bloqueo al hacer push de GitHub, CodeQL con bloqueo de «High or higher», aprobación del CI para PR de fuera, informe privado de vulnerabilidades con `SECURITY.md` y sin licencia por ahora (decisiones 43, 50, 52 y 53) | 0002 |
+| Repositorio público sin nada personal, con escaneo de secretos y bloqueo al hacer push de GitHub, CodeQL con bloqueo de «High or higher», aprobación del CI para PR de fuera, informe privado de vulnerabilidades con `SECURITY.md` y sin licencia por ahora (decisiones 43, 50, 52 y 53); las acciones del CI, fijadas por el SHA del commit con la versión en un comentario | 0002 |
 | pyright en modo estándar en N1, N3 y CI (decisión 46) | 0003 |
 | gitleaks en pre-commit (decisión 49) | 0004 |
 
@@ -173,7 +173,7 @@ leerlo) y qué versión de Python se usa.
 | 0 Preguntas | Hecha (17-nov-2026) | Decisiones 41 a 54 del diseño |
 | 1 Máquina | Comprobada (17 y 18-nov-2026) | Tabla anterior |
 | 2 Repositorio y calidad | Hecha (18-nov-2026) | Commit inicial en `main`; pyright 1.1.414 y gitleaks v8.30.1 en pre-commit |
-| 3 CI y ruleset | | |
+| 3 CI y ruleset | CI hecho (18-nov-2026); faltan el ruleset y los ajustes de Pedro | PR #1; checkout v7.0.1, setup-uv v10.3.3 y cache v6.1.0, por SHA |
 | 4 Agentes | | |
 | 5 GitHub | | |
 | 6 Primera tarea | | |
@@ -209,3 +209,18 @@ leerlo) y qué versión de Python se usa.
 - **Fase 2. Un verde que no prueba nada.** `scripts/n3.sh` antes del primer `git add`:
   `pre-commit run --all-files` solo ve los ficheros de git, se salta todos los hooks y sale en
   verde. Con el árbol preparado, los ocho hooks se ejecutan.
+- **Fase 3. gitleaks en el CI: caché de pre-commit.** Sin caché, el CI instala los entornos de
+  pre-commit en cada ejecución; gitleaks se compila en unos 24 s (no los 7 minutos de local:
+  el log no dice qué Go usa, pero por el tamaño de la caché, 26 MiB, sería el `go` que trae la
+  imagen `ubuntu-26.04`). Solución: `actions/cache` de `~/.cache/pre-commit` con la clave del hash
+  de `.pre-commit-config.yaml`. Medido en el PR #1: primera ejecución, sin caché, pre-commit 31 s y
+  job 43 s; segunda, con caché, pre-commit 1 s y job 7 s (en rojo por el fallo deliberado); tercera,
+  pre-commit 1 s y job 13 s. Límites: la caché de un PR solo la ve ese PR (tras el squash, el
+  primer push a `main` vuelve a compilar una vez), solo se guarda con el job en verde y GitHub la
+  borra tras 7 días sin uso. `setup-uv` ya guarda la caché de uv por su cuenta
+  (`enable-cache: auto`).
+- **Fase 3. Comprobación deliberada.** Un test con un `assert` de una versión incorrecta (no
+  `assert False`, que ruff marca con B011): el commit pasa los hooks locales y el CI se para en
+  `uv run pytest` con `FAILED …test_fallo_deliberado_de_la_fase_3 - AssertionError: fallo
+  deliberado de la fase 3`, con pre-commit en verde. Pedro lo leyó con `gh run view --log-failed`;
+  se quitó en el commit siguiente y el CI volvió a verde.
