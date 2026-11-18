@@ -113,7 +113,8 @@ PR de solo documentación en los 20 últimos: 0; CI de un PR: mediana 19 s
 - [x] La prueba en seco paró donde debía, **reducida** (#4: solo `/tarea-jimic` con la dependencia
   abierta); la 6b recorrió el ciclo hasta `/sincronizar` (no quedan ni la rama local ni la remota).
 - [x] `scripts/disparadores.sh --github`, en este balance.
-- [ ] La etiqueta `v0.0-hito0`: la crea Pedro tras la fusión.
+- [x] La etiqueta `v0.0-hito0`, creada por Pedro tras la fusión (apunta a 0ca2ef3, la fusión del
+  PR #8; comprobado el 18-nov-2026).
 - [x] Pedro sabe explicar WSL, uv, ruff, pytest y su límite, pre-commit, GitHub Flow, Actions, el
   ruleset, el modo plan, los hooks y los niveles de tests: confirmado el 18-nov-2026 con el repaso
   del chat (11 de 11), con la guía del [diario](../diario/hito-0.md#pedro-sabe-explicar).
