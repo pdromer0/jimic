@@ -114,9 +114,9 @@ PR de solo documentación en los 20 últimos: 0; CI de un PR: mediana 19 s
   abierta); la 6b recorrió el ciclo hasta `/sincronizar` (no quedan ni la rama local ni la remota).
 - [x] `scripts/disparadores.sh --github`, en este balance.
 - [ ] La etiqueta `v0.0-hito0`: la crea Pedro tras la fusión.
-- [ ] Pedro sabe explicar WSL, uv, ruff, pytest y su límite, pre-commit, GitHub Flow, Actions, el
-  ruleset, el modo plan, los hooks y los niveles de tests: lo confirma Pedro en la revisión del PR,
-  con la guía del [diario](../diario/hito-0.md#pedro-sabe-explicar).
+- [x] Pedro sabe explicar WSL, uv, ruff, pytest y su límite, pre-commit, GitHub Flow, Actions, el
+  ruleset, el modo plan, los hooks y los niveles de tests: confirmado el 18-nov-2026 con el repaso
+  del chat (11 de 11), con la guía del [diario](../diario/hito-0.md#pedro-sabe-explicar).
 
 **Pendiente para después del hito.**
 
@@ -195,7 +195,8 @@ la cortó f6ee89b.
 - `tablero` entra en las propuestas como P1 del H1, por decisión de Pedro al revisar el plan.
 - Dos pruebas de la lista de aceptación sin registro escrito (el formato parado en la fase 2 y el
   GH013 de la fase 3) se anotan en `arranque.md` con las notas de Pedro.
-- «Pedro sabe explicar» queda sin marcar: lo confirma Pedro en la revisión del PR.
+- «Pedro sabe explicar» quedó sin marcar hasta la revisión del PR; Pedro lo confirmó el
+  18-nov-2026 con el repaso del chat (11 de 11).
 - `README.md`, vacío desde `uv init`, gana una portada mínima con la línea de la licencia.
 
 **Valores a mano** (un script del scratchpad sobre `git log` y la API de GitHub, con lectura por
@@ -233,5 +234,10 @@ llamadas a la API iban lentas; la salida fue idéntica.
   - El formato y el GH013, anotados a posteriori: es el testimonio de Pedro, con sus notas, que
     pidió registrarlo; no sale de la memoria del agente.
 
-**Pendiente.** La etiqueta `v0.0-hito0` y «Pedro sabe explicar», de Pedro. Las propuestas del
-balance, como tareas de proceso al planificar el H1.
+**Pendiente.** La etiqueta `v0.0-hito0`, de Pedro. Las propuestas del balance, como tareas de
+proceso al planificar el H1.
+
+**Ajustes de la revisión** (Pedro, en el PR #8, solo documentación):
+- Una cuarta lección en `lecciones.md`: lo que se ajusta en la web de GitHub se comprueba por la
+  API (fases 3 y 4).
+- «Pedro sabe explicar», marcado: confirmado el 18-nov-2026 con el repaso del chat (11 de 11).

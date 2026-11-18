@@ -144,8 +144,8 @@ del registro, y se aclaró el README de `decisiones/`.
 
 ## Pedro sabe explicar
 
-Guía para repasar los conceptos del criterio de aceptación; Pedro confirma en el PR del cierre
-que sabe explicarlos.
+Guía para repasar los conceptos del criterio de aceptación. Pedro confirmó que sabe explicarlos
+el 18-nov-2026, con el repaso del chat (11 de 11).
 
 - **WSL**: un Linux real (Ubuntu) dentro de Windows, en una máquina virtual ligera. JimiC vive en
   `~/proyectos/jimic`, no en `/mnt/c`, y `.wslconfig` le pone un techo de memoria (7 GB) para que
