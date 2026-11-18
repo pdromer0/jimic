@@ -1,0 +1,16 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# Medidas y sellos locales de los scripts del método
+.cache/
+# Worktrees de los subagentes de Claude Code
+.claude/worktrees/
+.env

@@ -1,0 +1,50 @@
+[project]
+name = "jimic"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "pdromer0", email = "115772852+pdromer0@users.noreply.github.com" }
+]
+requires-python = ">=3.14"
+dependencies = []
+
+[project.scripts]
+jimic = "jimic.cli:main"
+
+[build-system]
+requires = ["uv_build>=0.13.6,<0.14.0"]
+build-backend = "uv_build"
+
+[tool.ruff]
+line-length = 100
+src = ["src"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--strict-markers"
+# Límite por test, en segundos: la red contra un bucle sin fin. Se fija midiendo antes el test
+# rápido más lento y dejando un margen de 2 o más.
+timeout = 60
+timeout_method = "signal"
+markers = [
+    "slow: tests largos; el hook Stop no los ejecuta",
+]
+
+[tool.pyright]
+include = ["src", "tests"]
+pythonVersion = "3.14"
+typeCheckingMode = "standard"
+reportUnnecessaryTypeIgnoreComment = "error"
+
+[dependency-groups]
+dev = [
+    "pre-commit>=4.7.0",
+    "pyright[nodejs]>=1.1.414",
+    "pytest>=9.2.0",
+    "pytest-timeout>=2.4.0",
+    "ruff>=0.17.5",
+]
