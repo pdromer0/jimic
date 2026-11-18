@@ -723,3 +723,13 @@ métricas del PR. Incluye la espera de la sesión nueva.
   módulos. Destino: el método.
 - Los puntos del revisor sobre la 1.3 (YAML 1.2, `input_value`, el enlace de `key_task`, los cinco
   ficheros). Destino: el plan de la 1.3.
+- Prioridad al llevarlo al método: el «solo lectura» del revisor depende del prompt y hereda el
+  `allow` del proyecto. Hasta entonces, en cada tarea ★ el agente compara `git status` antes y
+  después de lanzar el revisor. Destino: la plantilla del módulo; mientras, cada tarea ★.
+- La línea 546 de este fichero (anexo de la P1) pasa de 100 columnas. Destino: el próximo PR de
+  documentación.
+
+**Ajustes de la revisión del chat** (sin bloqueantes; 2 hallazgos, los 2 a «Pendiente»; solo
+documentación, sin otra N3 por `tarea.md` §4): la prioridad del «solo lectura» y la línea larga
+del anexo de la P1, arriba. Las métricas del PR se completan con las cifras del chat: 3 idas y
+vueltas y 1 ronda de revisión.
