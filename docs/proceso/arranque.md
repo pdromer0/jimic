@@ -120,9 +120,11 @@ CodeQL; la pestaña *Security* lista CodeQL y el escaneo de secretos.
 3. `SECURITY.md` corto, en español: cómo avisar por el informe privado de vulnerabilidades y qué
    interesa (saltarse la guardia, fugas de datos personales, inyección de instrucciones).
 4. Las plantillas de issues y de PR llevan el aviso «Nada personal: si hace falta un ejemplo,
-   invéntalo».
+   invéntalo». **Se aplica en la fase 5**, al instalar esas plantillas.
 5. Cuando el H1 fije la carpeta de los ficheros personales, se añade su `deny` de lectura a
    `.claude/settings.json`, como el de `.env`.
+6. **Añadido de JimiC:** `Bash(uv run pyright*)` en el `allow` de `.claude/settings.json`, junto
+   al de ruff: pyright es parte de la N1 (decisión 46).
 
 ### Fase 5: GitHub como gestor del trabajo
 

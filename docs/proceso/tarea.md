@@ -19,6 +19,15 @@ empezar: cada uno añade los pasos de un módulo activo y dice en qué punto del
 - **Git.** La rama es la del issue, con prefijo `feat/`, `fix/`, `docs/`, `refactor/`, `test/`,
   `chore/` o `ci/`. Nunca `main`, nunca push forzado, nunca fusionar.
 - Si un paso necesita algo que no puedes hacer, para y dilo; no lo rodees.
+- **Nada personal** en issues, PR, «Notas del chat», commits ni logs: el repositorio es público.
+  Si hace falta un ejemplo, se inventa.
+- **Silencios de pyright:** cada `# type: ignore` lleva el código del error y su motivo; `Any`,
+  solo con un comentario que lo justifique. Las librerías sin tipos se encierran en las
+  herramientas propias, que declaran lo que devuelven.
+- **gitleaks:** en los tests, valores falsos evidentes (`"test-token-123"`); cada excepción,
+  justificada en `.gitleaks.toml`.
+- **Lo bruto del piloto y los casos reales** nunca entran en el repositorio; solo su versión
+  destilada o sintética.
 
 ## 1. Arranque
 
