@@ -29,8 +29,8 @@ hooks y los niveles de tests.
 
 **Qué se entregó.** El núcleo del método EDsim v2
 (ADR [0001](../decisiones/0001-adoptamos-el-metodo-edsim.md)) con sus tres desviaciones
-([0002](../decisiones/0002-repositorio-publico.md), [0003](../decisiones/0003-pyright.md) y [0004](../decisiones/0004-gitleaks.md)), y `jimic doctor`
-como primera tarea de punta a punta. Las fases 0 y 1, en el chat (17 y 18-nov-2026); de la 2 a la
+([0002](../decisiones/0002-repositorio-publico.md), [0003](../decisiones/0003-pyright.md) y
+[0004](../decisiones/0004-gitleaks.md)), y `jimic doctor` como primera tarea de punta a punta. Las fases 0 y 1, en el chat (17 y 18-nov-2026); de la 2 a la
 6b, el 18-nov-2026, del primer commit (102abff, 11:26) a la fusión de la 6b (40685fe, 14:05):
 **2 h 39 min**. El detalle de cada fase está en [arranque.md](../proceso/arranque.md).
 
@@ -111,8 +111,8 @@ PR de solo documentación en los 20 últimos: 0; CI de un PR: mediana 19 s
 - [x] Etiquetas, milestones y plantillas en `main` (fase 5, PR #3).
 - [x] La prueba en seco paró donde debía, **reducida** (#4: solo `/tarea-jimic` con la dependencia
   abierta); la 6b recorrió el ciclo hasta `/sincronizar` (no quedan ni la rama local ni la remota).
-- [ ] La etiqueta `v0.0-hito0`: la crea Pedro tras la fusión. `scripts/disparadores.sh`, en este
-  balance.
+- [x] `scripts/disparadores.sh --github`, en este balance.
+- [ ] La etiqueta `v0.0-hito0`: la crea Pedro tras la fusión.
 - [ ] Pedro sabe explicar WSL, uv, ruff, pytest y su límite, pre-commit, GitHub Flow, Actions, el
   ruleset, el modo plan, los hooks y los niveles de tests: lo confirma Pedro en la revisión del PR,
   con la guía del [diario](../diario/hito-0.md#pedro-sabe-explicar).
