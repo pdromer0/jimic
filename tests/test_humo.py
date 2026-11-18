@@ -27,8 +27,3 @@ def test_el_comando_de_project_scripts_esta_instalado_y_responde():
     )
     assert resultado.returncode == 0, resultado.stderr
     assert version("jimic") in resultado.stdout
-
-
-def test_fallo_deliberado_de_la_fase_3():
-    """Fallo a propósito para ver que el CI lo para; se quita en el commit siguiente."""
-    assert version("jimic") == "0.0.0", "fallo deliberado de la fase 3"
