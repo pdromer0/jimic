@@ -561,7 +561,9 @@ commits y ~331 KB). Las fichas tardan unos 10 s en entrar en Backlog y en pasar 
 
 **Qué se hizo.** Issue #11, rama `chore/p2-metricas-pr`, PR #34. Commits: `chore(metricas-pr)`
 (e808408), que instala el módulo con `instalar.py` y añade la sección a la plantilla del PR, y
-`docs(modulos)` (2d0f069), que lo deja en `piloto`. Este anexo es el tercero, `docs(hito-1)`.
+`docs(modulos)` (2d0f069), que lo deja en `piloto`. Este anexo es el tercero, `docs(hito-1)`. Los
+de la ronda de ajustes son `docs(metricas-pr)` (25b973c), `docs(agents)` (e4bbcf8) y la
+actualización de este anexo.
 
 **Decisiones del diff.**
 - `instalar.py` solo añade `docs/proceso/pasos/metricas-pr.md`; el módulo no tiene MANIFIESTO ni
@@ -611,8 +613,25 @@ sección de métricas del PR.
     rellene.
 - A `/cerrar-hito`: el script del balance que promete el paso del módulo no existe todavía.
 
+**Ajustes de la revisión del chat** (3 hallazgos, los 3 corregidos; solo documentación, sin otra
+N3 por `tarea.md` §4):
+- La plantilla lleva, bajo «Métricas de la tarea», un comentario con el formato que lee el script
+  del balance (un entero, o `H:MM (HH:MM → HH:MM)` en el tiempo de pared; una línea por revisor)
+  y quién rellena cada línea: el agente el tiempo de pared en §6, y el chat el resto, que el
+  agente escribe con `scripts/gh.sh editar-pr` en §7. Esto resuelve en el repositorio los dos
+  hallazgos de texto libre y de actor que la revisión propia había llevado al método.
+- `AGENTS.md`: «Hito en curso» apunta a `docs/specs/hito-1.md`. El hook `SessionStart` lo sigue
+  leyendo, porque busca `^- Hito en curso`.
+- Las métricas del PR se reescriben con las cifras del chat: 1 ida y vuelta, 0:05 de tiempo de
+  pared, 1 ronda de revisión.
+
+**Sin datos.** La P1 (#33) y el PR #9 se abrieron antes de la sección de métricas y no la
+llevan: el balance debe contarlos como «sin datos», no como cero.
+
 **Pendiente.**
 - Escribir el script del balance (medianas por tarea) antes de cerrar el H1. Destino: la tarea de
   cierre del hito.
 - Llevar al método los dos hallazgos del texto libre y del actor «el chat». Destino: la plantilla
   del módulo.
+- Cambia una línea de las instrucciones de los agentes (`AGENTS.md`, «Hito en curso»): cuenta para
+  el disparador del módulo `diagnostico`. Destino: el cierre del hito.
