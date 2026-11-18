@@ -193,7 +193,7 @@ Leídos con `gh api` (solo lectura), salvo la aprobación de los PR de fuera, qu
 | 1 Máquina | Comprobada (17 y 18-nov-2026) | Tabla anterior |
 | 2 Repositorio y calidad | Hecha (18-nov-2026) | Commit inicial en `main`; pyright 1.1.414 y gitleaks v8.30.1 en pre-commit |
 | 3 CI y ruleset | Hecha (18-nov-2026) | PR #1; checkout v7.0.1, setup-uv v10.3.3 y cache v6.1.0, por SHA; ajustes en la tabla «Fase 3» |
-| 4 Agentes | | |
+| 4 Agentes | Hecha (18-nov-2026); falta la comprobación de Pedro en una sesión nueva tras fusionar | PR #2; núcleo instalado, `diseno.md` publicable, reglas de JimiC en `tarea.md`, `SECURITY.md` y `gitleaks-historia` en N3 y CI |
 | 5 GitHub | | |
 | 6 Primera tarea | | |
 | 7 Cierre del hito 0 | | |
