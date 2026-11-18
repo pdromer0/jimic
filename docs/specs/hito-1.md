@@ -482,3 +482,77 @@ secciones de esta especificación que le tocan; nada personal (los ejemplos, inv
 <Lo escribe la tarea de cierre.>
 
 ## Anexo: guía de referencia del hito 1
+
+### Tarea P1: módulo `tablero`
+
+**Qué se hizo.** Issue #10, rama `chore/p1-tablero`, PR #33. Commits: `chore(tablero)` (c2bc1c8),
+que instala el módulo con `instalar.py`, y `docs(modulos)` (9f0af47), que lo deja en `piloto`.
+Los de la revisión son `docs(tablero)` (139e9db) y `docs(hito-1)`, que es este anexo.
+Fuera del repositorio: el Project #4 «JimiC» (Board), enlazado a `jimic` con `gh project link`.
+
+**Decisiones del diff.**
+- `settings.json` se fusiona con el instalador. Reparte en varias líneas el hook `SessionStart`,
+  pero el JSON es el mismo más el permiso de `tablero.sh mover` (comprobado con `json.load`). La
+  copia anterior queda en `.cache/metodo/respaldo/tablero/` para retirar el módulo.
+- `scripts/tablero.sh`, en 755. La plantilla lo trae en 644, y el permiso lo invoca directamente.
+- El auto-add solo añade issues (`is:issue`): así un PR no es una ficha más junto a la de su issue.
+  «Cerrado y PR fusionado → Hecho» son los workflows de serie *Item closed* y *Pull request
+  merged*. Como los PR no son fichas, lo que lleva a Hecho es *Item closed*, cuando el PR fusionado
+  cierra su issue.
+- Las columnas de serie se renombraron (Todo, In Progress, Done) y conservan su id. «En revisión»
+  se creó sin tilde y se corrigió con un renombrado, con el mismo id (`48d6729b`).
+- `gh auth refresh -s project` no hizo falta: el token ya tenía el permiso `project`.
+- Los 22 issues del H1 (#10–#31) ya estaban en Backlog al crear el tablero. El #10 pasó a En curso
+  con `tablero.sh`.
+- `tablero.sh` no lleva tests de pytest, igual que `gh.sh`: un `gh` falso probaría el doble y no
+  GraphQL. Se verificó a mano contra el tablero real.
+- Los ficheros del núcleo no cambian: el paso del módulo vive en `docs/proceso/pasos/tablero.md`.
+
+**Valores a mano** (ejecutados con `python3 -`):
+- La tabla «Tareas y orden» tiene 22 tareas, y la API da 22 issues abiertos en el milestone, del #10
+  al #31.
+- `^[1-9][0-9]*$` acepta `10`, y rechaza `0`, `010`, `1e3`, `"10 "` y `""`.
+- `content.repository` en `gh project item-list` es `owner/repo`, como compara el script.
+
+**Comprobaciones a mano.**
+- `tablero.sh` sale con 64 sin argumentos, con N inválido o con la columna vacía. Sale con 3 sin
+  GraphQL (`GH_TOKEN=test-token-123`, «gh project no responde»), con el título `Jimic` y con una
+  columna inexistente o mal escrita (`En Curso`). `mover 10 "En curso"` mueve la ficha, como
+  confirma `item-list`.
+- Issue de prueba #32: entró solo en Backlog en unos 10 s. Cerrado como *not planned*, pasó a Hecho
+  en unos 10 s, y su ficha está archivada.
+- El tablero tiene 22 fichas activas: 21 en Backlog y el #10 en En curso.
+- `disparadores.sh --github` ya no propone `tablero` (23 issues abiertos).
+
+**Versiones incorrectas** (predicción frente a observado; aplicadas a `tablero.sh` y deshechas):
+- A, quitar la comprobación de la columna: predije que `mover 10 "Inexistente"` seguiría saliendo
+  con 3, pero con «no se pudo mover», y que «En curso» seguiría funcionando. Observado: así.
+- B, quitar `|| item=$(ficha)` tras `item-add`: predije que no cambiaría nada con la ficha ya en el
+  tablero. Observado: `#10 en «En curso»`, con salida 0. Solo se nota cuando el auto-add gana la
+  carrera a `item-add`, y eso aquí no se puede provocar.
+
+**Medidas.** N3: en verde en 0:08 (pre-commit 0:07, pytest 0:01, gitleaks-historia 0:00, con 10
+commits y ~331 KB). Las fichas tardan unos 10 s en entrar en Backlog y en pasar a Hecho.
+
+**Revisión** (`/code-review medium`). 10 hallazgos:
+- Corregidos:
+  - El paso «En curso» decía «§1», pero el plan se aprueba tras §2.
+  - Con `is:issue`, *PR merged* nunca actúa: lo que lleva a Hecho es el cierre del issue.
+  - Este anexo no nombraba su propio commit.
+- Explicados:
+  - El permiso de `tablero.sh mover` escribe en el tablero sin preguntar: lo piden el issue y el
+    módulo, y se limita a mover fichas.
+  - La fusión reformatea `SessionStart`: es una decisión del plan.
+- Al método: cinco hallazgos de `tablero.sh`. Aquí no se parchean, porque un script que se aparte de la
+  plantilla haría fallar un `instalar.py` posterior:
+  - `item-list` omite las fichas archivadas, así que un issue reabierto daría un falso éxito.
+  - `gh project list` sin `--limit` (30 por defecto).
+  - `$COL` y `$TABLERO` sin escapar en los filtros de jq.
+  - `git` y `repo_slug` salen con 1, no con 3.
+  - `ficha` + `item-add` son redundantes.
+
+**Pendiente.**
+- Llevar al método EDsim los cinco hallazgos de `tablero.sh` y los scripts de las plantillas en
+  644. Destino: la plantilla del módulo.
+- Los Projects vacíos #2 y #3 también están enlazados a `jimic` (ya lo estaban). Destino: Pedro.
+- «PR fusionado → Hecho», en `/sincronizar` tras la fusión.
