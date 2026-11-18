@@ -30,9 +30,10 @@ hooks y los niveles de tests.
 **Qué se entregó.** El núcleo del método EDsim v2
 (ADR [0001](../decisiones/0001-adoptamos-el-metodo-edsim.md)) con sus tres desviaciones
 ([0002](../decisiones/0002-repositorio-publico.md), [0003](../decisiones/0003-pyright.md) y
-[0004](../decisiones/0004-gitleaks.md)), y `jimic doctor` como primera tarea de punta a punta. Las fases 0 y 1, en el chat (17 y 18-nov-2026); de la 2 a la
-6b, el 18-nov-2026, del primer commit (102abff, 11:26) a la fusión de la 6b (40685fe, 14:05):
-**2 h 39 min**. El detalle de cada fase está en [arranque.md](../proceso/arranque.md).
+[0004](../decisiones/0004-gitleaks.md)), y `jimic doctor` como primera tarea de punta a punta.
+Las fases 0 y 1, en el chat (17 y 18-nov-2026); de la 2 a la 6b, el 18-nov-2026, del primer
+commit (102abff, 11:26) a la fusión de la 6b (40685fe, 14:05): **2 h 39 min**. El detalle de
+cada fase está en [arranque.md](../proceso/arranque.md).
 
 | Fase | Qué quedó | Dónde | PR (*squash*) | Commits de rama | Desde la fusión anterior | Abierto → fusión |
 | --- | --- | --- | --- | --- | --- | --- |
