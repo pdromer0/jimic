@@ -13,16 +13,14 @@ class Diagnosis:
     env_file_exists: bool
 
 
-def diagnose(directory: Path | None = None) -> Diagnosis:
-    """Return the Python version in use and whether `.env` is a file in `directory`.
+def diagnose() -> Diagnosis:
+    """Return the Python version in use and whether `.env` is a file in the current directory.
 
     `.env` is only checked with `stat` (`Path.is_file`); it is never opened or read.
-    `directory` defaults to the current working directory.
     """
-    directory = Path.cwd() if directory is None else directory
     return Diagnosis(
         python_version=platform.python_version(),
-        env_file_exists=(directory / ENV_FILE).is_file(),
+        env_file_exists=(Path.cwd() / ENV_FILE).is_file(),
     )
 
 
