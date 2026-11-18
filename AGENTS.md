@@ -30,9 +30,9 @@ objetivos y le ayuda a cumplirlos con datos reales: a diferencia de un chatbot, 
 uv sync --offline --frozen   # entorno, sin red (uv.lock)
 uv run pytest                # todo, incluidos los slow (como el CI)
 uv run pytest -m "not slow"  # rápidos
-uv run pre-commit run --all-files   # ruff, formato y comprobaciones de ficheros
+uv run pre-commit run --all-files   # ruff, pyright, gitleaks (lo preparado) y ficheros
 uv run jimic --version   # CLI
-scripts/n3.sh                # antes del push
+scripts/n3.sh                # antes del push: pre-commit, gitleaks de la historia y pytest
 scripts/gh.sh …              # GitHub por REST (issues, PR, checks)
 ```
 

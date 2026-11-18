@@ -12,10 +12,11 @@ empezar: cada uno añade los pasos de un módulo activo y dice en qué punto del
 - **GitHub, solo con `scripts/gh.sh`** (REST, igual en local y en la nube): `issue`,
   `comentarios`, `bloqueado-por`, `pr`, `checks`, `revisiones`, `abrir-pr` y `editar-pr`. Si
   hace falta algo que no hace, se pide permiso y se dice por qué.
-- **Niveles de tests.** N1: antes de cada commit, `uv run pre-commit run --files <tocados>` y los
-  ficheros de test del área tocada. N2: el hook `Stop`, al final de cada turno. N3:
-  `scripts/n3.sh`, **una sola vez antes de cada push**, después de la revisión propia y de sus
-  correcciones (§4).
+- **Niveles de tests.** N1: antes de cada commit, `uv run pre-commit run --files <tocados>`
+  (ruff, pyright, gitleaks sobre lo preparado y los hooks básicos) y los ficheros de test del
+  área tocada. N2: el hook `Stop`, al final de cada turno. N3: `scripts/n3.sh` (pre-commit en
+  todo, gitleaks sobre toda la historia y la suite completa), **una sola vez antes de cada
+  push**, después de la revisión propia y de sus correcciones (§4). El CI repite la N3.
 - **Git.** La rama es la del issue, con prefijo `feat/`, `fix/`, `docs/`, `refactor/`, `test/`,
   `chore/` o `ci/`. Nunca `main`, nunca push forzado, nunca fusionar.
 - Si un paso necesita algo que no puedes hacer, para y dilo; no lo rodees.

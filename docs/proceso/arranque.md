@@ -248,3 +248,12 @@ Leídos con `gh api` (solo lectura), salvo la aprobación de los PR de fuera, qu
   contributors» (decisión 52). Solución: `gh api -X PUT
   repos/pdromer0/jimic/actions/permissions/fork-pr-contributor-approval -f
   approval_policy=all_external_contributors`, con el permiso de Pedro, y lectura de comprobación.
+- **Fase 4. gitleaks no revisaba nada en la N3 ni en el CI.** El hook oficial es `gitleaks git
+  --pre-commit --staged`: solo mira lo preparado. En la N3 y el CI (`pre-commit run --all-files`)
+  no hay nada preparado y salía «Passed» tras revisar «0 commits, ~0 bytes» (comprobado en local;
+  en el CI de la fase 3, el mismo «Passed»). Solución: un segundo hook del mismo repositorio y
+  `rev`, `gitleaks-historia` (`gitleaks git --redact --verbose`, `stages: [manual]`), que revisa
+  toda la historia: en la N3, con `scripts/n3.d/gitleaks.parte.sh`; en el CI, como paso propio con
+  `--verbose` y `fetch-depth: 0`. Se corrigieron con ello las secciones 12.2 y 13 y la decisión 49
+  de `diseno.md`. **Candidata para `lecciones.md` en el cierre:** un hook en verde no dice qué
+  revisó; en la N3 y el CI se mira cuánto revisó, no solo el «Passed».
