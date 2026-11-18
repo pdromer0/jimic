@@ -635,3 +635,91 @@ llevan: el balance debe contarlos como «sin datos», no como cero.
   del módulo.
 - Cambia una línea de las instrucciones de los agentes (`AGENTS.md`, «Hito en curso»): cuenta para
   el disparador del módulo `diagnostico`. Destino: el cierre del hito.
+
+### Tarea P3: módulo `revisor-plan`
+
+**Qué se hizo.** Issue #14, rama `chore/p3-revisor-plan`, PR #35. Commits: `chore(revisor-plan)`
+(5c7fc90), que instala `.claude/agents/revisor-plan.md` y `docs/proceso/pasos/revisor-plan.md` con
+`instalar.py`, y `docs(modulos)` (d3d9b0d), que lo deja en `piloto`. Este anexo es el tercero,
+`docs(hito-1)`.
+
+**Decisiones del diff.**
+- `instalar.py --simular` solo añadía esos dos ficheros, sin MANIFIESTO. Lo instalado es igual,
+  byte a byte, a una instalación sobre una carpeta limpia. No queda ningún marcador: `<PROYECTO>`,
+  `<persona>`, `<tarea>` y también `<paquete>` (`import jimic`) quedan sustituidos, y el paso dice
+  «§2», que es el plan en `tarea.md`.
+- El agente queda tal como lo instala el método. Los hallazgos de la prueba y de la revisión van a
+  «Pendiente».
+- `python3 -` no entra en el `allow` de `.claude/settings.json`: permitirlo sin preguntar sería
+  permitir cualquier código y rompería la garantía de «solo lectura». Pedro aprueba cada cálculo.
+- El informe va al principio del plan, antes de la línea de rama y nivel de `/code-review` de
+  `/tarea-jimic`, porque así lo dice el paso.
+- Sin tests de pytest: no hay código del paquete. Se verificó con comandos y con la prueba de humo.
+
+**Prueba de humo** (sesión nueva, en la misma rama). Dos planes de juguete sobre el #15, inventados
+y fuera del repositorio, con los ocho apartados de §2. El primero lleva «60 latidos de 7:00 a
+23:00» (con un `range` que acaba en 21:45) y una interpretación sin declarar en sus casos límite:
+«un hábito sin `moment` se rechaza». El segundo es el mismo con 64.
+- `/agents` ya no existe en Claude Code. La comprobación de que el subagente carga se hizo
+  preguntando a la sesión nueva por sus subagentes: `revisor-plan` estaba, con su descripción.
+- Antes y después, `git status` limpio, sin commits ni *stash* nuevos, y los planes de juguete sin
+  tocar: el subagente fue de solo lectura.
+- Informe del plan con 60: las tres tablas y el veredicto **«dudas (8)»**. «Valores que no cuadran»
+  marca el 60 frente al 64 (65 si se cuenta también las 23:00). «Diferencias con las notas»:
+  «Ninguno», pero como fila de la tabla en vez de texto.
+- El `moment` sale como «razonable, no declarada», no como «sospechosa». **No es un fallo del
+  revisor, sino una predicción fallida del chat**: la especificación no dice nada de hábitos sin
+  `moment`, así que la valoración sigue su propia regla. Lo que importa es que lo detectó como no
+  declarado.
+- Además, el revisor encontró puntos reales para la 1.3 que no se habían sembrado: con YAML 1.2,
+  `7:00` sin comillas se lee igual que entre comillas; el `input_value=` de los errores de Pydantic
+  imprime el contenido; no se dice por qué campo se enlaza una `key_task`; y hay que decidir cuáles
+  son «los cinco ficheros» de 7.2.
+- El veredicto del segundo informe se perdió al pegar desde el terminal.
+
+**Valores a mano** (ejecutados con `python3`, independientes de lo instalado):
+- Latidos en [7:00, 23:00) cada 15 minutos: 64; con las 23:00, 65; en 24 horas, 96. El `range` del
+  plan de juguete da 60.
+- En `modulos.md` cambia 1 de 31 líneas, la de `revisor-plan`.
+
+**Versiones incorrectas** (predicción frente a observado):
+- A, el revisor con el plan corregido (64): predije «Valores que no cuadran» = «Ninguno», con la
+  fila del `moment` y el veredicto «dudas». Observado: **falla la predicción**. La tabla lista tres
+  valores que sí cuadran (64 = 64, el tope de 5 y uno «sin recalcular» sobre `ruamel`), aunque el
+  texto dice «el 64 cuadra». Es un defecto del subagente: el paso 6 manda recalcular cada valor y la
+  tabla no separa lo que no cuadra.
+- B, la fila de `modulos.md` en `piloto` sin fecha ni PR: predije que fallaría la comparación de la
+  fila completa y que `disparadores.sh --github` dejaría de proponer `revisor-plan` en los dos
+  casos. Observado: así (0 menciones). Aplicada y deshecha.
+
+**Medidas.** N3: en verde en 0:04 (pre-commit 0:03, pytest 0:01, gitleaks-historia 0:00, con 11
+commits y ~347 KB), tras la revisión propia. Este anexo se escribió mientras corría y solo es
+documentación. Tiempo de pared del plan aprobado (20:36) a la apertura del PR: en la sección de
+métricas del PR. Incluye la espera de la sesión nueva.
+
+**Revisión** (`/code-review medium`). 10 hallazgos, ninguno corregido en el diff:
+- Explicados:
+  - `python3 -` pide permiso en modo plan: es una decisión del plan, ver arriba.
+  - Leer el plan de `~/.claude/plans/` pide permiso: es lectura, y la prueba también leyó fuera
+    del proyecto.
+  - El informe y la línea de rama compiten por el principio del plan: va primero el informe.
+  - El #35 se escribió antes de abrir el PR: se comprueba al abrirlo.
+  - «No hay prueba de humo»: se hizo en una sesión nueva y está en este anexo.
+- Al método (plantilla del agente):
+  - «Solo lectura» depende solo del prompt, y el agente hereda el `allow` del proyecto
+    (`git commit`, `scripts/gh.sh editar-pr`, `tablero.sh mover`).
+  - No cubre el issue sin «Enlace a la especificación», que `tarea.md` §1 sí cubre.
+  - `model: opus` sin esfuerzo, cuando las tareas ★ van con esfuerzo alto.
+  - Copia las reglas de precedencia de las notas en vez de remitir a `tarea.md` §1.
+  - «dudas (k)» no dice qué cuenta k. En la prueba, el 8 no cuadra con un recuento evidente.
+
+**Pendiente.**
+- «Valores que no cuadran» debe llevar solo lo que no cuadra, o «Ninguno». Destino: la plantilla
+  del módulo en el método, junto con los hallazgos de la P1.
+- Los cinco hallazgos de la revisión propia marcados «al método», el formato de «Ninguno» en las
+  tablas y que el módulo nombre `/agents`, que ya no existe. Destino: la plantilla del módulo.
+- Decidir el criterio de los parches locales a las plantillas del método: en la P1 sí se cambió
+  `pasos/tablero.md` (§1 → §2), y aquí no se parchea el agente. Que sea igual para todos los
+  módulos. Destino: el método.
+- Los puntos del revisor sobre la 1.3 (YAML 1.2, `input_value`, el enlace de `key_task`, los cinco
+  ficheros). Destino: el plan de la 1.3.
