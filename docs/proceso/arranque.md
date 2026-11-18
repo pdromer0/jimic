@@ -166,6 +166,23 @@ leerlo) y qué versión de Python se usa.
 | Cursor en *WSL: Ubuntu* y la extensión de Claude Code en modo plan | ✅ *WSL: Ubuntu*, sin entorno activado; `claudeCode.initialPermissionMode = "plan"` comprobado en el panel (18-nov-2026) |
 | `~/proyectos/jimic` no existe | ✅ |
 
+## Fase 3: ajustes comprobados por la API (18-nov-2026)
+
+Leídos con `gh api` (solo lectura), salvo la aprobación de los PR de fuera, que estaba en
+`first_time_contributors` y el agente cambió por la API con el permiso de Pedro.
+
+| Ajuste | Lectura | Resultado |
+| --- | --- | --- |
+| Ruleset «Proteger main» | `rulesets/27541863` | ✅ `active`, sin excepciones, `~DEFAULT_BRANCH`; cinco reglas: `deletion`, `non_fast_forward`, `pull_request` (0 aprobaciones, solo `squash`), `required_status_checks` (`tests`) y `code_scanning` (CodeQL, `high_or_higher`, alertas `none`) |
+| Fusión | `repos/pdromer0/jimic` | ✅ solo *squash*; `delete_branch_on_merge` |
+| CodeQL | `code-scanning/default-setup` | ✅ `configured`, `actions` y `python`, semanal; primer análisis en `main` con 0 resultados |
+| Secret scanning y push protection | `security_and_analysis` | ✅ `enabled` los dos |
+| Dependabot | `vulnerability-alerts`, `automated-security-fixes` | ✅ avisos activados (204); *security updates* desactivados (`enabled: false`) |
+| Informe privado de vulnerabilidades | `private-vulnerability-reporting` | ✅ `enabled: true` |
+| Aprobación del CI para PR de fuera | `actions/permissions/fork-pr-contributor-approval` | ✅ `all_external_contributors` (estaba en `first_time_contributors`; cambiado por la API) |
+| Token del CI | `actions/permissions/workflow` | ✅ `read`, sin aprobar PR |
+| SBOM de GitHub | `dependency-graph/sbom` | ✅ lee `uv.lock`: sus 22 paquetes, con las dependencias indirectas (`cfgv`, `distlib`, `nodeenv`…), y las 3 acciones del CI |
+
 ## Fases
 
 | Fase | Estado | PR o nota |
@@ -173,7 +190,7 @@ leerlo) y qué versión de Python se usa.
 | 0 Preguntas | Hecha (17-nov-2026) | Decisiones 41 a 54 del diseño |
 | 1 Máquina | Comprobada (17 y 18-nov-2026) | Tabla anterior |
 | 2 Repositorio y calidad | Hecha (18-nov-2026) | Commit inicial en `main`; pyright 1.1.414 y gitleaks v8.30.1 en pre-commit |
-| 3 CI y ruleset | CI hecho (18-nov-2026); faltan el ruleset y los ajustes de Pedro | PR #1; checkout v7.0.1, setup-uv v10.3.3 y cache v6.1.0, por SHA |
+| 3 CI y ruleset | Hecha (18-nov-2026) | PR #1; checkout v7.0.1, setup-uv v10.3.3 y cache v6.1.0, por SHA; ajustes en la tabla «Fase 3» |
 | 4 Agentes | | |
 | 5 GitHub | | |
 | 6 Primera tarea | | |
@@ -224,3 +241,8 @@ leerlo) y qué versión de Python se usa.
   `uv run pytest` con `FAILED …test_fallo_deliberado_de_la_fase_3 - AssertionError: fallo
   deliberado de la fase 3`, con pre-commit en verde. Pedro lo leyó con `gh run view --log-failed`;
   se quitó en el commit siguiente y el CI volvió a verde.
+- **Fase 3. Aprobación de los PR de fuera.** Al cerrar la fase, la API daba
+  `first_time_contributors` (el valor por defecto) en lugar de «Require approval for all external
+  contributors» (decisión 52). Solución: `gh api -X PUT
+  repos/pdromer0/jimic/actions/permissions/fork-pr-contributor-approval -f
+  approval_policy=all_external_contributors`, con el permiso de Pedro, y lectura de comprobación.
