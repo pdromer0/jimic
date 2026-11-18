@@ -22,7 +22,7 @@ señal de que sobra, viene con el método (`modulos/README.md`).
 | app-workspace | aparece un segundo paquete (app/) | inactivo | — | — |
 | xdist | la N3 pasa de 2 min (entonces se mide el criterio del 60 %) | inactivo | — | — |
 | adr-y-releases | primera decisión difícil de revertir | inactivo | — | — |
-| metricas-pr | empieza el hito 1 | inactivo | — | — |
+| metricas-pr | empieza el hito 1 | piloto | 2026-11-18 | #34 |
 | guardia | hace falta autorizar escrituras en GitHub sin preguntar | inactivo | — | — |
 | datos-de-referencia | aparece config/ calibrada o tests/data/ | inactivo | — | — |
 | dobles-con-tope | primer doble de prueba que el código llama en bucle | inactivo | — | — |
