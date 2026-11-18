@@ -1186,7 +1186,8 @@ disparador.
 ### 12.4 Módulos previstos
 
 Ningún módulo entró en el hito 0; su cierre propone los de esta tabla (balance de
-[specs/hito-0.md](specs/hito-0.md#balance-del-hito)). Lo que se espera, según los disparadores del catálogo:
+[specs/hito-0.md](specs/hito-0.md#balance-del-hito)). Lo que se espera, según los disparadores
+del catálogo:
 
 | Módulo | Disparador | Cuándo se espera en JimiC |
 | --- | --- | --- |
