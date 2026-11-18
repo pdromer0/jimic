@@ -29,3 +29,6 @@
 - Antes de adoptar una herramienta de PyPI, se mira qué descarga en la primera ejecución:
   `pyright` bajaba Node.js fuera de `uv.lock`, y `pyright[nodejs]` lo deja fijado e igual en el CI
   (JimiC, fase 2).
+- Lo que se ajusta en la web de GitHub se comprueba por la API, no se da por puesto: la aprobación
+  de los PR de fuera no se había guardado y el informe privado salió `false` a la primera (JimiC,
+  fases 3 y 4).
