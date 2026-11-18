@@ -7,6 +7,7 @@ import platform
 
 import pytest
 
+import jimic.cli
 from jimic.doctor import diagnose
 
 PYTHON_FIJADA = "3.14.0"
@@ -19,6 +20,20 @@ def carpeta(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(platform, "python_version", lambda: PYTHON_FIJADA)
     return tmp_path
+
+
+def test_doctor_con_env_dice_que_existe(carpeta, capsys):
+    """Con `.env` en la carpeta actual: sale con 0 e imprime la versión fijada y «existe»."""
+    (carpeta / ".env").touch()
+
+    assert jimic.cli.main(["doctor"]) == 0
+    assert capsys.readouterr().out == "Python: 3.14.0\n.env: existe en la carpeta actual\n"
+
+
+def test_doctor_sin_env_dice_que_no_existe(carpeta, capsys):
+    """Sin `.env` en la carpeta actual: sale con 0 e imprime la versión fijada y «no existe»."""
+    assert jimic.cli.main(["doctor"]) == 0
+    assert capsys.readouterr().out == "Python: 3.14.0\n.env: no existe en la carpeta actual\n"
 
 
 def test_el_diagnostico_ve_env_sin_abrirlo(carpeta, monkeypatch):
