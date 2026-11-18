@@ -176,3 +176,62 @@ seco reducida, no lleva rama. Está en la fase 6 de [arranque.md](../proceso/arr
 
 **Pendiente.** Decidir si `jimic` sin subcomando imprime la ayuda, cuando la CLI tenga una
 segunda orden. Destino: el backlog, si Pedro lo quiere.
+
+### Tarea 7: cierre del hito 0
+
+**Qué se hizo.** Issue #6, rama `docs/h0-cierre`, PR #8. Commits, uno por bloque: `docs(decisiones)`
+(9df1f2e), `docs(hito-0)` (4597ab1), `docs(diseno)` (95bf287), `docs(diario)` (194a347),
+`docs(lecciones)` (5000e90) y `docs(portada)` (14ad1e1). Los de la revisión: `docs(diseno)`
+(d1d371e), `docs` (a5a6358), `docs(hito-0)` (e9863e1 y f6ee89b), `docs(diario)` (2bb8e1a) y
+`docs(portada)` (d197ce5). El mensaje de e9863e1 dice que corta la última línea larga del balance;
+la cortó f6ee89b.
+
+**Decisiones del diff.**
+- Los ADR 0002 a 0004 se numeran en orden, como dicen el issue, `arranque.md` y el diseño (respuesta
+  de Pedro); el README de `decisiones/` aclara que el número es el de la columna ADR del registro.
+- Los ADR llevan la fecha de la decisión (17-nov-2026), no la del cierre.
+- El registro no gana filas: las decisiones del hito son la 41 a la 54, de la fase 0. La prueba en
+  seco reducida es una decisión de proceso y queda en `arranque.md` y en el ADR 0001.
+- `tablero` entra en las propuestas como P1 del H1, por decisión de Pedro al revisar el plan.
+- Dos pruebas de la lista de aceptación sin registro escrito (el formato parado en la fase 2 y el
+  GH013 de la fase 3) se anotan en `arranque.md` con las notas de Pedro.
+- «Pedro sabe explicar» queda sin marcar: lo confirma Pedro en la revisión del PR.
+- `README.md`, vacío desde `uv init`, gana una portada mínima con la línea de la licencia.
+
+**Valores a mano** (un script del scratchpad sobre `git log` y la API de GitHub, con lectura por
+`gh api` fuera de `gh.sh`, que no da las horas de apertura; permiso de Pedro en el plan):
+- Fusiones en `main`: 102abff 11:26, 4948329 11:50, 04066d4 13:22, fc29a79 13:37 y 40685fe 14:05;
+  del primer commit a la fusión de la 6b, 2:39:28.
+- PR: #1 (4 commits, 9 min abierto), #2 (5, 9 min), #3 (4, 4 min) y #7 (7, 4 min); solo el #1 tiene
+  commits posteriores a su apertura (3).
+- `AGENTS.md`, 69 líneas; `CLAUDE.md`, 16. `uv run jimic --version` da `jimic 0.1.0`; `pytest`,
+  `5 passed`.
+- `uv run --frozen pyright` tarda 4,75 s (para el ADR 0003).
+
+**Medidas.** N3: en verde en 0:05 (pre-commit 0:04, pytest 0:01 con `5 passed`,
+gitleaks-historia 0:00 con 17 commits y ~278 KB, sin fugas), antes de este commit del anexo.
+`disparadores.sh --github` tardó más de 2 minutos la segunda vez (la primera, segundos): las
+llamadas a la API iban lentas; la salida fue idéntica.
+
+**Versiones incorrectas** (no hay código; se prueban las comprobaciones):
+- Script de enlaces relativos (fichero y ancla) sobre todos los `.md` de git: predije 0 rotos;
+  observado, 0. Con un fichero y un ancla rotos a propósito en `README.md`: predije 2; observado,
+  `rotos: 2`; deshecho, 0.
+- `session-start.sh` con el `AGENTS.md` nuevo: predije la línea nueva del hito; observado, la
+  línea, no «no encontrado».
+
+**Revisión** (`/code-review medium`). 7 hallazgos:
+- Corregidos:
+  - Las decisiones 50, 52 y 53 no enlazaban el ADR 0002 en el registro.
+  - La etiqueta y los disparadores compartían un punto de la lista.
+  - El diario fechaba las fases 0 y 1 solo el 17-nov.
+  - Líneas nuevas de más de 100 columnas.
+  - El enlace del hito en curso, sin el ancla de 11.1.
+- Explicados:
+  - La cabecera y el README dan la etiqueta por hecha: la cabecera `cerrado (v0.N-hitoN)` es el
+    formato de `/cerrar-hito`, y el punto sin marcar de la lista vigila que Pedro la cree.
+  - El formato y el GH013, anotados a posteriori: es el testimonio de Pedro, con sus notas, que
+    pidió registrarlo; no sale de la memoria del agente.
+
+**Pendiente.** La etiqueta `v0.0-hito0` y «Pedro sabe explicar», de Pedro. Las propuestas del
+balance, como tareas de proceso al planificar el H1.
