@@ -14,7 +14,7 @@ señal de que sobra, viene con el método (`modulos/README.md`).
 | mutante | más de 2 versiones incorrectas por tarea, o el árbol se ensucia | inactivo | — | — |
 | revisor-plan | primera tarea con la etiqueta critica | inactivo | — | — |
 | revision-reforzada | llega a main un bug que una revisión externa habría visto | inactivo | — | — |
-| tablero | más de 10 issues abiertos, o dos PR abiertos a la vez | inactivo | — | — |
+| tablero | más de 10 issues abiertos, o dos PR abiertos a la vez | piloto | 2026-11-18 | #33 |
 | nube | la N3 local pasa de 10 min, o hace falta el portátil libre | inactivo | — | — |
 | claude-en-pr | más de 3 ajustes triviales por hito que obligan a abrir sesión | inactivo | — | — |
 | servicios-docker | aparece compose.yaml o un servicio | inactivo | — | — |

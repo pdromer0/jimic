@@ -27,7 +27,8 @@
       "Bash(scripts/gh.sh *)",
       "Bash(scripts/n3.sh)",
       "Bash(scripts/sincronizar.sh *)",
-      "Bash(scripts/disparadores.sh*)"
+      "Bash(scripts/disparadores.sh*)",
+      "Bash(scripts/tablero.sh mover *)"
     ],
     "deny": [
       "Bash(gh pr merge *)",
@@ -51,7 +52,14 @@
   },
   "hooks": {
     "SessionStart": [
-      { "hooks": [ { "type": "command", "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/session-start.sh" } ] }
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/session-start.sh"
+          }
+        ]
+      }
     ],
     "PostToolUse": [
       {
