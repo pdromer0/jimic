@@ -556,3 +556,63 @@ commits y ~331 KB). Las fichas tardan unos 10 s en entrar en Backlog y en pasar 
   644. Destino: la plantilla del módulo.
 - Los Projects vacíos #2 y #3 también están enlazados a `jimic` (ya lo estaban). Destino: Pedro.
 - «PR fusionado → Hecho», en `/sincronizar` tras la fusión.
+
+### Tarea P2: módulo `metricas-pr`
+
+**Qué se hizo.** Issue #11, rama `chore/p2-metricas-pr`, PR #34. Commits: `chore(metricas-pr)`
+(e808408), que instala el módulo con `instalar.py` y añade la sección a la plantilla del PR, y
+`docs(modulos)` (2d0f069), que lo deja en `piloto`. Este anexo es el tercero, `docs(hito-1)`.
+
+**Decisiones del diff.**
+- `instalar.py` solo añade `docs/proceso/pasos/metricas-pr.md`; el módulo no tiene MANIFIESTO ni
+  nada que fusionar. La simulación (`--simular`) lo confirmó antes de instalar.
+- El fragmento `pr-metricas.md` se aplica a mano, porque el instalador ignora lo que empieza por
+  `_`. `<persona>` pasa a `Pedro` (valor de `persona` en `vars.toml`).
+- La sección va al final de la plantilla, tras «Ajustes de la revisión», separada por una línea en
+  blanco: así lo pide el criterio de aceptación.
+- La fila de `modulos.md` lleva `piloto`, `2026-11-18` y `#34`. El #34 estaba libre
+  (`gh.sh pr 34` daba 404).
+- Sin tests de pytest: no hay código del paquete. Se verificó con comandos, como en P1.
+
+**Valores a mano** (ejecutados con `python3 -I`, independientes de lo instalado):
+- La plantilla pasa de 8 a 9 encabezados `##` y el último es «Métricas de la tarea». El plan decía
+  11 a 12; estaba mal y se corrigió al medir.
+- El fragmento tiene 4 viñetas.
+- La plantilla final es igual, byte a byte, a la anterior + una línea en blanco + el fragmento con
+  `Pedro`. No queda ningún `<persona>`, y el comentario de la cabecera sigue intacto.
+- En `modulos.md` cambia exactamente 1 de 31 líneas, y es la de `metricas-pr`.
+- `disparadores.sh` mencionaba `metricas-pr` 1 vez antes y 0 ahora.
+
+**Versiones incorrectas** (predicción frente a observado; aplicadas y deshechas):
+- A, dejar `<persona>` sin sustituir: predije que fallaría «sin `<persona>`» y «igual a antes +
+  fragmento», y que seguirían pasando las 4 viñetas y el último encabezado. Observado: así
+  (1 `<persona>` restante).
+- B, la sección al principio de la plantilla: predije que fallaría que la plantilla acaba con la
+  sección y que pasarían las 4 viñetas y el no quedar `<persona>`. Observado: así, y además falló
+  el comentario de la cabecera, que no había predicho.
+- C, `piloto` sin fecha ni PR: predije que fallaría la fila completa y que `disparadores.sh`
+  seguiría sin proponer el módulo. Observado: así (0 menciones).
+- Un `git restore -p` interactivo que metí por error dejó la A aplicada y colgó el comando; lo paré
+  y deshice A con la herramienta de edición. No quedó nada en el árbol.
+
+**Medidas.** N3: en verde en 0:05 (pre-commit 0:04, pytest 0:00, gitleaks-historia 0:01, con 10
+commits y ~336 KB). Tiempo de pared del plan aprobado (20:09) a la apertura del PR: en la
+sección de métricas del PR.
+
+**Revisión** (`/code-review medium`). 6 hallazgos, ninguno corregido en el diff:
+- Explicados:
+  - «Nadie registra la hora de aprobación»: `/tarea-jimic` ya manda anotar `date` con el plan
+    aprobado.
+  - «Falta la señal de que sobra»: está en el catálogo del método (`modulos/metricas-pr.md`).
+  - «La sección va tras Ajustes de la revisión»: es lo que pide el criterio de aceptación.
+- Al método: no se parchea aquí un texto que `instalar.py` volvería a pisar.
+  - Las métricas son texto libre, sin formato ni unidad, y un script no puede sacar medianas.
+  - «El resto lo completa el chat» no está definido en §7 ni en §8, y nada comprueba que se
+    rellene.
+- A `/cerrar-hito`: el script del balance que promete el paso del módulo no existe todavía.
+
+**Pendiente.**
+- Escribir el script del balance (medianas por tarea) antes de cerrar el H1. Destino: la tarea de
+  cierre del hito.
+- Llevar al método los dos hallazgos del texto libre y del actor «el chat». Destino: la plantilla
+  del módulo.
