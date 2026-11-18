@@ -120,9 +120,11 @@ CodeQL; la pestaña *Security* lista CodeQL y el escaneo de secretos.
 3. `SECURITY.md` corto, en español: cómo avisar por el informe privado de vulnerabilidades y qué
    interesa (saltarse la guardia, fugas de datos personales, inyección de instrucciones).
 4. Las plantillas de issues y de PR llevan el aviso «Nada personal: si hace falta un ejemplo,
-   invéntalo».
+   invéntalo». **Se aplica en la fase 5**, al instalar esas plantillas.
 5. Cuando el H1 fije la carpeta de los ficheros personales, se añade su `deny` de lectura a
    `.claude/settings.json`, como el de `.env`.
+6. **Añadido de JimiC:** `Bash(uv run pyright*)` en el `allow` de `.claude/settings.json`, junto
+   al de ruff: pyright es parte de la N1 (decisión 46).
 
 ### Fase 5: GitHub como gestor del trabajo
 
@@ -166,6 +168,23 @@ leerlo) y qué versión de Python se usa.
 | Cursor en *WSL: Ubuntu* y la extensión de Claude Code en modo plan | ✅ *WSL: Ubuntu*, sin entorno activado; `claudeCode.initialPermissionMode = "plan"` comprobado en el panel (18-nov-2026) |
 | `~/proyectos/jimic` no existe | ✅ |
 
+## Fase 3: ajustes comprobados por la API (18-nov-2026)
+
+Leídos con `gh api` (solo lectura), salvo la aprobación de los PR de fuera, que estaba en
+`first_time_contributors` y el agente cambió por la API con el permiso de Pedro.
+
+| Ajuste | Lectura | Resultado |
+| --- | --- | --- |
+| Ruleset «Proteger main» | `rulesets/27541863` | ✅ `active`, sin excepciones, `~DEFAULT_BRANCH`; cinco reglas: `deletion`, `non_fast_forward`, `pull_request` (0 aprobaciones, solo `squash`), `required_status_checks` (`tests`) y `code_scanning` (CodeQL, `high_or_higher`, alertas `none`) |
+| Fusión | `repos/pdromer0/jimic` | ✅ solo *squash*; `delete_branch_on_merge` |
+| CodeQL | `code-scanning/default-setup` | ✅ `configured`, `actions` y `python`, semanal; primer análisis en `main` con 0 resultados |
+| Secret scanning y push protection | `security_and_analysis` | ✅ `enabled` los dos |
+| Dependabot | `vulnerability-alerts`, `automated-security-fixes` | ✅ avisos activados (204); *security updates* desactivados (`enabled: false`) |
+| Informe privado de vulnerabilidades | `private-vulnerability-reporting` | ✅ `enabled: true` |
+| Aprobación del CI para PR de fuera | `actions/permissions/fork-pr-contributor-approval` | ✅ `all_external_contributors` (estaba en `first_time_contributors`; cambiado por la API) |
+| Token del CI | `actions/permissions/workflow` | ✅ `read`, sin aprobar PR |
+| SBOM de GitHub | `dependency-graph/sbom` | ✅ lee `uv.lock`: sus 22 paquetes, con las dependencias indirectas (`cfgv`, `distlib`, `nodeenv`…), y las 3 acciones del CI |
+
 ## Fases
 
 | Fase | Estado | PR o nota |
@@ -173,8 +192,8 @@ leerlo) y qué versión de Python se usa.
 | 0 Preguntas | Hecha (17-nov-2026) | Decisiones 41 a 54 del diseño |
 | 1 Máquina | Comprobada (17 y 18-nov-2026) | Tabla anterior |
 | 2 Repositorio y calidad | Hecha (18-nov-2026) | Commit inicial en `main`; pyright 1.1.414 y gitleaks v8.30.1 en pre-commit |
-| 3 CI y ruleset | CI hecho (18-nov-2026); faltan el ruleset y los ajustes de Pedro | PR #1; checkout v7.0.1, setup-uv v10.3.3 y cache v6.1.0, por SHA |
-| 4 Agentes | | |
+| 3 CI y ruleset | Hecha (18-nov-2026) | PR #1; checkout v7.0.1, setup-uv v10.3.3 y cache v6.1.0, por SHA; ajustes en la tabla «Fase 3» |
+| 4 Agentes | Hecha (18-nov-2026); falta la comprobación de Pedro en una sesión nueva tras fusionar | PR #2; núcleo instalado, `diseno.md` publicable, reglas de JimiC en `tarea.md`, `SECURITY.md` y `gitleaks-historia` en N3 y CI |
 | 5 GitHub | | |
 | 6 Primera tarea | | |
 | 7 Cierre del hito 0 | | |
@@ -224,3 +243,17 @@ leerlo) y qué versión de Python se usa.
   `uv run pytest` con `FAILED …test_fallo_deliberado_de_la_fase_3 - AssertionError: fallo
   deliberado de la fase 3`, con pre-commit en verde. Pedro lo leyó con `gh run view --log-failed`;
   se quitó en el commit siguiente y el CI volvió a verde.
+- **Fase 3. Aprobación de los PR de fuera.** Al cerrar la fase, la API daba
+  `first_time_contributors` (el valor por defecto) en lugar de «Require approval for all external
+  contributors» (decisión 52). Solución: `gh api -X PUT
+  repos/pdromer0/jimic/actions/permissions/fork-pr-contributor-approval -f
+  approval_policy=all_external_contributors`, con el permiso de Pedro, y lectura de comprobación.
+- **Fase 4. gitleaks no revisaba nada en la N3 ni en el CI.** El hook oficial es `gitleaks git
+  --pre-commit --staged`: solo mira lo preparado. En la N3 y el CI (`pre-commit run --all-files`)
+  no hay nada preparado y salía «Passed» tras revisar «0 commits, ~0 bytes» (comprobado en local;
+  en el CI de la fase 3, el mismo «Passed»). Solución: un segundo hook del mismo repositorio y
+  `rev`, `gitleaks-historia` (`gitleaks git --redact --verbose`, `stages: [manual]`), que revisa
+  toda la historia: en la N3, con `scripts/n3.d/gitleaks.parte.sh`; en el CI, como paso propio con
+  `--verbose` y `fetch-depth: 0`. Se corrigieron con ello las secciones 12.2 y 13 y la decisión 49
+  de `diseno.md`. **Candidata para `lecciones.md` en el cierre:** un hook en verde no dice qué
+  revisó; en la N3 y el CI se mira cuánto revisó, no solo el «Passed».

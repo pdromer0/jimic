@@ -1,0 +1,79 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "outputStyle": "Explanatory",
+  "permissions": {
+    "defaultMode": "plan",
+    "allow": [
+      "Bash(uv sync --offline --frozen)",
+      "Bash(uv run pytest *)",
+      "Bash(uv run ruff *)",
+      "Bash(uv run pyright*)",
+      "Bash(uv run pre-commit *)",
+      "Bash(git status)",
+      "Bash(git diff *)",
+      "Bash(git log *)",
+      "Bash(git switch *)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(git pull --ff-only)",
+      "Bash(git push -u origin feat/*)",
+      "Bash(git push -u origin fix/*)",
+      "Bash(git push -u origin docs/*)",
+      "Bash(git push -u origin refactor/*)",
+      "Bash(git push -u origin test/*)",
+      "Bash(git push -u origin chore/*)",
+      "Bash(git push -u origin ci/*)",
+      "Bash(git push)",
+      "Bash(scripts/gh.sh *)",
+      "Bash(scripts/n3.sh)",
+      "Bash(scripts/sincronizar.sh *)",
+      "Bash(scripts/disparadores.sh*)"
+    ],
+    "deny": [
+      "Bash(gh pr merge *)",
+      "Bash(gh api *pulls/*/merge)",
+      "Bash(gh api *pulls/*/merge *)",
+      "Bash(gh api */merges*)",
+      "Bash(gh api *-X DELETE*)",
+      "Bash(gh api *-XDELETE*)",
+      "Bash(gh api *--method DELETE*)",
+      "Bash(gh api *--method=DELETE*)",
+      "Bash(git push *--force*)",
+      "Bash(git push -f*)",
+      "Bash(git push * -f)",
+      "Bash(git push * -f *)",
+      "Bash(git push *+*)",
+      "Bash(git push * main)",
+      "Bash(git push * main *)",
+      "Bash(git push * *:main*)",
+      "Read(./.env)"
+    ]
+  },
+  "hooks": {
+    "SessionStart": [
+      { "hooks": [ { "type": "command", "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/session-start.sh" } ] }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "command -v jq >/dev/null 2>&1 || { echo 'ruff format (PostToolUse): jq no está instalado; no se formatea el fichero.' >&2; exit 1; }; jq -r '.tool_input.file_path' | grep '\\.py$' | xargs -r uv run --frozen ruff format"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/stop.sh",
+            "statusMessage": "N2: tests rápidos (uv run pytest -x -m \"not slow\")"
+          }
+        ]
+      }
+    ]
+  }
+}
