@@ -4,8 +4,8 @@ Agente personal proactivo que acompaña a Pedro durante el día por el móvil, c
 objetivos y le ayuda a cumplirlos con datos reales: a diferencia de un chatbot, escribe primero.
 
 - Diseño: [docs/diseno.md](docs/diseno.md)
-- Hito en curso: [docs/specs/hito-0.md](docs/specs/hito-0.md) (entorno)
-- Último hito cerrado: ninguno
+- Hito en curso: ninguno hasta la sesión conceptual del H1 ([diseño, 11.1](docs/diseno.md#111-hitos))
+- Último hito cerrado: [docs/specs/hito-0.md](docs/specs/hito-0.md) (entorno, `v0.0-hito0`)
 - Ciclo de cada tarea y sus reglas: [docs/proceso/tarea.md](docs/proceso/tarea.md)
 - Módulos del método activos: [docs/proceso/modulos.md](docs/proceso/modulos.md)
 
