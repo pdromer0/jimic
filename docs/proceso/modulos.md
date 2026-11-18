@@ -12,7 +12,7 @@ señal de que sobra, viene con el método (`modulos/README.md`).
 | sello-n2 | la rápida pasa de 60 s (mediana) | inactivo | — | — |
 | ci-salto-docs | PR de solo documentación × duración del CI ≥ 30 min por ventana de 20 PR | inactivo | — | — |
 | mutante | más de 2 versiones incorrectas por tarea, o el árbol se ensucia | inactivo | — | — |
-| revisor-plan | primera tarea con la etiqueta critica | inactivo | — | — |
+| revisor-plan | primera tarea con la etiqueta critica | piloto | 2026-11-18 | #35 |
 | revision-reforzada | llega a main un bug que una revisión externa habría visto | inactivo | — | — |
 | tablero | más de 10 issues abiertos, o dos PR abiertos a la vez | piloto | 2026-11-18 | #33 |
 | nube | la N3 local pasa de 10 min, o hace falta el portátil libre | inactivo | — | — |
