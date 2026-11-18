@@ -16,7 +16,7 @@ método; aquí queda lo que pasó.
 | 3 | CI y ruleset | #1 |
 | 4 | Agentes: instrucciones, Claude Code y documentación | #2 |
 | 5 | GitHub: etiquetas, milestones y plantillas | #3 |
-| 6 | Primera tarea de punta a punta | |
+| 6 | Primera tarea de punta a punta: 6a, prueba en seco reducida (#4); 6b, `jimic doctor` (#5) | #7 |
 | 7 | Cierre del hito 0 | |
 
 ## Criterios de aceptación

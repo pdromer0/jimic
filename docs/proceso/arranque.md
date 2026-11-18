@@ -147,6 +147,20 @@ plantilla del PR se comprueba al abrir el primer PR después de la fusión. Para
 pequeña de la CLI con tipos y dos o tres tests con valores a mano y una versión incorrecta; por
 ejemplo, `jimic doctor`, que dice si existe `.env` (sin leerlo) y qué versión de Python se usa.
 
+**Hecha (18-nov-2026)**, con dos tareas:
+
+1. **6a (#4), prueba en seco reducida.** Decisión de Pedro: de la prueba en seco del núcleo
+   solo se hace `/tarea-jimic` sobre la 6b con la 6a abierta, en una sesión nueva en modo
+   plan. Resultado: se paró tras `scripts/gh.sh bloqueado-por 5` y nombró la #4 como
+   dependencia abierta, sin plan, rama ni commits. **Omitidas:** la prueba con el número de un
+   PR, `/sincronizar` con un PR abierto y la del formulario web de las plantillas. La lista de
+   aceptación del cierre la marca como reducida. La 6a no lleva rama: el resultado queda en
+   su comentario y aquí.
+2. **6b (#5), `jimic doctor`.** La lógica vive en `src/jimic/doctor.py` (`diagnose` y
+   `render`) y la CLI solo imprime. `.env` se comprueba con `Path.is_file`, que usa `stat` y
+   nunca lo abre. Hay tres tests con la versión fijada y dos versiones incorrectas. El
+   detalle está en el anexo de [hito-0.md](../specs/hito-0.md), en el PR #7.
+
 ### Fase 7: cierre del hito 0
 
 - **ADR 0001** «Adoptamos el método EDsim v2», con el objetivo doble y el criterio de empresa
@@ -206,7 +220,7 @@ Leídos con `gh api` (solo lectura), salvo la aprobación de los PR de fuera, qu
 | 3 CI y ruleset | Hecha (18-nov-2026) | PR #1; checkout v7.0.1, setup-uv v10.3.3 y cache v6.1.0, por SHA; ajustes en la tabla «Fase 3» |
 | 4 Agentes | Hecha y comprobada (18-nov-2026) | PR #2; núcleo instalado, `diseno.md` publicable, reglas de JimiC en `tarea.md`, `SECURITY.md` y `gitleaks-historia` en N3 y CI. Pedro comprobó en una sesión nueva el modo plan, `SessionStart`, los tres hooks (`/hooks`), el estilo `Explanatory` y `gh pr merge` en *deny* (`/permissions`); `/sincronizar 2` salió con 0; `gitleaks-historia` en el CI revisó 7 commits (~228 KB) |
 | 5 GitHub | Hecha (18-nov-2026); falta el [COMPROBAR], en la fase 6 | PR #3; plantillas del núcleo con el aviso «Nada personal» y `config.yml` de JimiC; `scripts/github-inicial.sh` creó las etiquetas `tipo:tarea`, `tipo:bug`, `tipo:idea` y `critica` y los milestones «Hito 0 — Entorno» (#1) y «Backlog» (#2); repetido, sale con 0 y «ya existe». Quedan las 10 etiquetas por defecto de GitHub |
-| 6 Primera tarea | | |
+| 6 Primera tarea | Hecha (18-nov-2026) | 6a (#4): prueba en seco reducida, sin PR; 6b (#5): `jimic doctor`, PR #7 |
 | 7 Cierre del hito 0 | | |
 | Piloto | | |
 
