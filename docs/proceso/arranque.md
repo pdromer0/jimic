@@ -143,9 +143,9 @@ Como en el núcleo, más:
 Como en el núcleo, empezando por **el [COMPROBAR] de la fase 5**, que necesita las plantillas en
 `main`: Pedro crea la 6a desde la web con la plantilla «Tarea» y comprueba que lleva `tipo:tarea`
 y el aviso, que no hay opción de issue en blanco y que aparece el enlace del informe privado; la
-plantilla del PR se comprueba al abrir el primer PR después de la fusión. Para la 6b, una orden pequeña de la CLI con tipos y dos o tres tests con valores
-a mano y una versión incorrecta; por ejemplo, `jimic doctor`, que dice si existe `.env` (sin
-leerlo) y qué versión de Python se usa.
+plantilla del PR se comprueba al abrir el primer PR después de la fusión. Para la 6b, una orden
+pequeña de la CLI con tipos y dos o tres tests con valores a mano y una versión incorrecta; por
+ejemplo, `jimic doctor`, que dice si existe `.env` (sin leerlo) y qué versión de Python se usa.
 
 ### Fase 7: cierre del hito 0
 
@@ -268,6 +268,6 @@ Leídos con `gh api` (solo lectura), salvo la aprobación de los PR de fuera, qu
   `--verbose` y `fetch-depth: 0`. Se corrigieron con ello las secciones 12.2 y 13 y la decisión 49
   de `diseno.md`. **Candidata para `lecciones.md` en el cierre:** un hook en verde no dice qué
   revisó; en la N3 y el CI se mira cuánto revisó, no solo el «Passed».
-- **Fase 5. `github-inicial.sh` no dice nada de las etiquetas.** Fuera de un terminal (un agente,
-  el CI), `gh label create` no imprime nada: la salida solo muestra los milestones. Que existen
-  se comprobó leyendo `repos/pdromer0/jimic/labels` por la API.
+- **Fase 5. `github-inicial.sh` no dice nada de las etiquetas.** Fuera de un terminal (lanzado por
+  un agente), `gh label create` no imprime nada: la salida solo muestra los milestones. Que
+  existen se comprobó leyendo `repos/pdromer0/jimic/labels` por la API.
