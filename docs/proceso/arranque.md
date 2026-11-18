@@ -120,7 +120,7 @@ CodeQL; la pestaña *Security* lista CodeQL y el escaneo de secretos.
 3. `SECURITY.md` corto, en español: cómo avisar por el informe privado de vulnerabilidades y qué
    interesa (saltarse la guardia, fugas de datos personales, inyección de instrucciones).
 4. Las plantillas de issues y de PR llevan el aviso «Nada personal: si hace falta un ejemplo,
-   invéntalo». **Se aplica en la fase 5**, al instalar esas plantillas.
+   invéntalo». **Aplicado en la fase 5**, al instalar esas plantillas.
 5. Cuando el H1 fije la carpeta de los ficheros personales, se añade su `deny` de lectura a
    `.claude/settings.json`, como el de `.env`.
 6. **Añadido de JimiC:** `Bash(uv run pyright*)` en el `allow` de `.claude/settings.json`, junto
@@ -128,11 +128,22 @@ CodeQL; la pestaña *Security* lista CodeQL y el escaneo de secretos.
 
 ### Fase 5: GitHub como gestor del trabajo
 
-Como en el núcleo.
+Como en el núcleo, más:
+
+1. Las plantillas «Tarea», «Bug» e «Idea» y la del PR llevan el aviso «Nada personal: si hace
+   falta un ejemplo, invéntalo» (punto 4 de la fase 4). En la del PR va como comentario: se ve al
+   escribirlo y no queda en el PR publicado.
+2. **Añadido de JimiC:** en `.github/ISSUE_TEMPLATE/config.yml`, `blank_issues_enabled: false` y
+   un `contact_links` al informe privado de vulnerabilidades
+   (`https://github.com/pdromer0/jimic/security/advisories/new`), para que un aviso de seguridad
+   no acabe en un issue público. Solo afecta a la web: los issues por la API se siguen creando.
 
 ### Fase 6: prueba en seco y primera tarea
 
-Como en el núcleo. Para la 6b, una orden pequeña de la CLI con tipos y dos o tres tests con valores
+Como en el núcleo, empezando por **el [COMPROBAR] de la fase 5**, que necesita las plantillas en
+`main`: Pedro crea la 6a desde la web con la plantilla «Tarea» y comprueba que lleva `tipo:tarea`
+y el aviso, que no hay opción de issue en blanco y que aparece el enlace del informe privado; la
+plantilla del PR se comprueba al abrir el primer PR después de la fusión. Para la 6b, una orden pequeña de la CLI con tipos y dos o tres tests con valores
 a mano y una versión incorrecta; por ejemplo, `jimic doctor`, que dice si existe `.env` (sin
 leerlo) y qué versión de Python se usa.
 
@@ -193,8 +204,8 @@ Leídos con `gh api` (solo lectura), salvo la aprobación de los PR de fuera, qu
 | 1 Máquina | Comprobada (17 y 18-nov-2026) | Tabla anterior |
 | 2 Repositorio y calidad | Hecha (18-nov-2026) | Commit inicial en `main`; pyright 1.1.414 y gitleaks v8.30.1 en pre-commit |
 | 3 CI y ruleset | Hecha (18-nov-2026) | PR #1; checkout v7.0.1, setup-uv v10.3.3 y cache v6.1.0, por SHA; ajustes en la tabla «Fase 3» |
-| 4 Agentes | Hecha (18-nov-2026); falta la comprobación de Pedro en una sesión nueva tras fusionar | PR #2; núcleo instalado, `diseno.md` publicable, reglas de JimiC en `tarea.md`, `SECURITY.md` y `gitleaks-historia` en N3 y CI |
-| 5 GitHub | | |
+| 4 Agentes | Hecha y comprobada (18-nov-2026) | PR #2; núcleo instalado, `diseno.md` publicable, reglas de JimiC en `tarea.md`, `SECURITY.md` y `gitleaks-historia` en N3 y CI. Pedro comprobó en una sesión nueva el modo plan, `SessionStart`, los tres hooks (`/hooks`), el estilo `Explanatory` y `gh pr merge` en *deny* (`/permissions`); `/sincronizar 2` salió con 0; `gitleaks-historia` en el CI revisó 7 commits (~228 KB) |
+| 5 GitHub | Hecha (18-nov-2026); falta el [COMPROBAR], en la fase 6 | PR #3; plantillas del núcleo con el aviso «Nada personal» y `config.yml` de JimiC; `scripts/github-inicial.sh` creó las etiquetas `tipo:tarea`, `tipo:bug`, `tipo:idea` y `critica` y los milestones «Hito 0 — Entorno» (#1) y «Backlog» (#2); repetido, sale con 0 y «ya existe». Quedan las 10 etiquetas por defecto de GitHub |
 | 6 Primera tarea | | |
 | 7 Cierre del hito 0 | | |
 | Piloto | | |
@@ -257,3 +268,6 @@ Leídos con `gh api` (solo lectura), salvo la aprobación de los PR de fuera, qu
   `--verbose` y `fetch-depth: 0`. Se corrigieron con ello las secciones 12.2 y 13 y la decisión 49
   de `diseno.md`. **Candidata para `lecciones.md` en el cierre:** un hook en verde no dice qué
   revisó; en la N3 y el CI se mira cuánto revisó, no solo el «Passed».
+- **Fase 5. `github-inicial.sh` no dice nada de las etiquetas.** Fuera de un terminal (un agente,
+  el CI), `gh label create` no imprime nada: la salida solo muestra los milestones. Que existen
+  se comprobó leyendo `repos/pdromer0/jimic/labels` por la API.
