@@ -33,3 +33,12 @@ Closes #
 <!-- Lo que queda, con su destino. -->
 
 ## Ajustes de la revisión
+
+## Métricas de la tarea
+
+<!-- Para el script del balance: tras los dos puntos, un entero, o H:MM (HH:MM → HH:MM) en el tiempo de pared. Idas y vueltas: mensajes que Pedro lleva del chat al agente o al revés. Qué encontró cada revisor: una línea por revisor, «nombre: N hallazgos (C corregidos, E explicados, P pendientes)». El agente rellena el tiempo de pared en §6; el chat da el resto en su revisión y el agente lo escribe con scripts/gh.sh editar-pr en §7. -->
+
+- Idas y vueltas de Pedro entre el chat y el agente:
+- Tiempo de pared de la aprobación del plan a la apertura del PR:
+- Rondas de revisión:
+- Qué encontró cada revisor:
