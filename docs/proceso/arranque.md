@@ -1,6 +1,6 @@
 # Arranque de JimiC
 
-> **Estado:** documento vivo hasta cerrar el hito 0. Lo escribió el chat el 17-nov-2026 (fases 0
+> **Estado:** cerrado con el hito 0 (18-nov-2026). Lo escribió el chat el 17-nov-2026 (fases 0
 > y 1); el agente lo lee al empezar la fase 2 y marca aquí cada fase. Es público: no lleva nada
 > personal (decisión 43 de [diseno.md](../diseno.md)).
 
@@ -203,7 +203,8 @@ El [COMPROBAR] de la fase 5 queda así:
 ## Fase 3: ajustes comprobados por la API (18-nov-2026)
 
 Leídos con `gh api` (solo lectura), salvo la aprobación de los PR de fuera, que estaba en
-`first_time_contributors` y el agente cambió por la API con el permiso de Pedro.
+`first_time_contributors` y el agente cambió por la API con el permiso de Pedro, y el push directo
+a `main`, que probó Pedro.
 
 | Ajuste | Lectura | Resultado |
 | --- | --- | --- |
@@ -215,6 +216,7 @@ Leídos con `gh api` (solo lectura), salvo la aprobación de los PR de fuera, qu
 | Informe privado de vulnerabilidades | `private-vulnerability-reporting` | ✅ `enabled: true` |
 | Aprobación del CI para PR de fuera | `actions/permissions/fork-pr-contributor-approval` | ✅ `all_external_contributors` (estaba en `first_time_contributors`; cambiado por la API) |
 | Token del CI | `actions/permissions/workflow` | ✅ `read`, sin aprobar PR |
+| Push directo a `main` | Pedro, con un commit vacío (18-nov-2026) | ✅ rechazado con `GH013` y dos reglas («Changes must be made through a pull request» y «Required status check "tests" is expected»); deshecho con `git reset --hard origin/main` |
 | SBOM de GitHub | `dependency-graph/sbom` | ✅ lee `uv.lock`: sus 22 paquetes, con las dependencias indirectas (`cfgv`, `distlib`, `nodeenv`…), y las 3 acciones del CI |
 
 ## Fases
@@ -228,8 +230,8 @@ Leídos con `gh api` (solo lectura), salvo la aprobación de los PR de fuera, qu
 | 4 Agentes | Hecha y comprobada (18-nov-2026) | PR #2; núcleo instalado, `diseno.md` publicable, reglas de JimiC en `tarea.md`, `SECURITY.md` y `gitleaks-historia` en N3 y CI. Pedro comprobó en una sesión nueva el modo plan, `SessionStart`, los tres hooks (`/hooks`), el estilo `Explanatory` y `gh pr merge` en *deny* (`/permissions`); `/sincronizar 2` salió con 0; `gitleaks-historia` en el CI revisó 7 commits (~228 KB) |
 | 5 GitHub | Hecha (18-nov-2026); el [COMPROBAR] del formulario web, omitido (#4; ver fase 6) | PR #3; plantillas del núcleo con el aviso «Nada personal» y `config.yml` de JimiC; `scripts/github-inicial.sh` creó las etiquetas `tipo:tarea`, `tipo:bug`, `tipo:idea` y `critica` y los milestones «Hito 0 — Entorno» (#1) y «Backlog» (#2); repetido, sale con 0 y «ya existe». Quedan las 10 etiquetas por defecto de GitHub |
 | 6 Primera tarea | Hecha (18-nov-2026) | 6a (#4): prueba en seco reducida, sin PR; 6b (#5): `jimic doctor`, PR #7 |
-| 7 Cierre del hito 0 | | |
-| Piloto | | |
+| 7 Cierre del hito 0 | Hecha (18-nov-2026) | #6, PR #8: ADR 0001 a 0004, balance, diario, lecciones y portada; la etiqueta `v0.0-hito0`, de Pedro tras la fusión |
+| Piloto | Hecho antes de la fase 7 (confirmado por Pedro el 18-nov-2026) | Conclusiones en `JimiC/piloto/` de Drive; nada de eso entra en el repositorio |
 
 ## Incidencias
 
@@ -260,6 +262,9 @@ Leídos con `gh api` (solo lectura), salvo la aprobación de los PR de fuera, qu
 - **Fase 2. Un verde que no prueba nada.** `scripts/n3.sh` antes del primer `git add`:
   `pre-commit run --all-files` solo ve los ficheros de git, se salta todos los hooks y sale en
   verde. Con el árbol preparado, los ocho hooks se ejecutan.
+- **Fase 2. Comprobación deliberada del formato.** El agente preparó un commit mal formateado
+  (18-nov-2026) y se paró solo en `ruff format`. La vieron Pedro y el chat en el resumen de la fase;
+  no quedó registro en el repositorio hasta el cierre del hito.
 - **Fase 3. gitleaks en el CI: caché de pre-commit.** Sin caché, el CI instala los entornos de
   pre-commit en cada ejecución; gitleaks se compila en unos 24 s (no los 7 minutos de local:
   el log no dice qué Go usa, pero por el tamaño de la caché, 26 MiB, sería el `go` que trae la
