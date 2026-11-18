@@ -1,0 +1,23 @@
+name: Idea
+description: Una propuesta sin decidir.
+labels: ["tipo:idea"]
+body:
+  - type: markdown
+    attributes:
+      value: "Nada personal: si hace falta un ejemplo, invéntalo."
+  - type: textarea
+    id: que
+    attributes:
+      label: Qué
+    validations:
+      required: true
+  - type: textarea
+    id: por-que
+    attributes:
+      label: Por qué
+    validations:
+      required: true
+  - type: textarea
+    id: cuando
+    attributes:
+      label: Cuándo tendría sentido

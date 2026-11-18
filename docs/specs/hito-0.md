@@ -15,7 +15,7 @@ método; aquí queda lo que pasó.
 | 2 | Repositorio, paquete y calidad local | Commit inicial en `main` (102abff) |
 | 3 | CI y ruleset | #1 |
 | 4 | Agentes: instrucciones, Claude Code y documentación | #2 |
-| 5 | GitHub: etiquetas, milestones y plantillas | |
+| 5 | GitHub: etiquetas, milestones y plantillas | #3 |
 | 6 | Primera tarea de punta a punta | |
 | 7 | Cierre del hito 0 | |
 
