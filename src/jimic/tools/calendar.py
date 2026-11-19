@@ -20,11 +20,13 @@ from typing import Any, Protocol
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import httplib2
-from google.auth.exceptions import RefreshError
+from google.auth.exceptions import RefreshError, TransportError
 from googleapiclient.errors import HttpError
 from pydantic import BaseModel, ConfigDict, Field
 
+from jimic.paths import Paths
 from jimic.tools.failures import MAX_PAGES, ToolFailure, WarnOnce
+from jimic.tools.google_auth import CalendarConnection
 
 logger = logging.getLogger(__name__)
 
@@ -192,7 +194,7 @@ def failure_code(error: Exception) -> str:
         return "invalid_format"
     if isinstance(error, _TooManyPages):
         return "too_many_pages"
-    if isinstance(error, OSError | httplib2.HttpLib2Error):
+    if isinstance(error, OSError | httplib2.HttpLib2Error | TransportError):
         return "network"
     return f"unexpected:{type(error).__name__}"
 
@@ -267,3 +269,8 @@ class GoogleCalendarReader:
 def _with_token(arguments: dict[str, Any], token: str | None) -> dict[str, Any]:
     """The arguments of a list request, with `pageToken` only from the second page on."""
     return arguments if token is None else {**arguments, "pageToken": token}
+
+
+def build_calendar(paths: Paths, timezone: ZoneInfo) -> GoogleCalendarReader:
+    """The calendar reader of this copy: its permission is the `google_token.json` of `paths`."""
+    return GoogleCalendarReader(CalendarConnection(paths), timezone)

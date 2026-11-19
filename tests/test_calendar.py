@@ -21,7 +21,7 @@ from calendar_data import (
     paged,
     timed_event,
 )
-from google.auth.exceptions import RefreshError
+from google.auth.exceptions import RefreshError, TransportError
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from googleapiclient.http import HttpMockSequence
@@ -413,6 +413,7 @@ def test_el_doble_lanza_un_error_claro_si_se_le_llama_en_bucle():
         (ToolFailure("auth"), "auth"),
         (TimeoutError("timed out"), "timeout"),
         (ConnectionError("sin red"), "network"),
+        (TransportError("sin red"), "network"),
         (httplib2.ServerNotFoundError("sin dns"), "network"),
         (RuntimeError(SECRET_TITLE), "unexpected:RuntimeError"),
     ],
