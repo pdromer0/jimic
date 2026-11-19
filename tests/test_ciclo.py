@@ -269,9 +269,9 @@ def test_ni_los_logs_ni_el_repr_llevan_titulos_textos_ni_nombres_de_calendarios(
     )
     with caplog.at_level(logging.DEBUG, logger="jimic"):
         result = cycle(conn, "2030-01-07T10:30", srcs, SpyDecide(outgoing("insistir_gimnasio")))
-        silent = cycle(conn, "2030-01-07T12:30", srcs, SpyDecide())
+        silent = cycle(conn, "2030-01-07T23:30", srcs, SpyDecide())
     assert result.state is not None and SECRET_TITLE in result.state.to_json()
-    assert silent.stopped == "in_event"
+    assert silent.stopped == "quiet_hours"
     for secret in (SECRET_TITLE, SECRET_TEXT, secret_calendar, "Todoist"):
         assert secret not in caplog.text
         assert secret not in repr(result)
