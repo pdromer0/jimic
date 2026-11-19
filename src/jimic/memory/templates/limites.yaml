@@ -2,7 +2,7 @@
 # JimiC solo puede hacerlo más discreto. Lo genera `jimic config init` con los valores del
 # diseño; compruébalo con `jimic config check`. Las horas, entre comillas ("07:00").
 max_messages_per_day: 8                     # tope de mensajes proactivos al día
-quiet_hours: {from: "23:00", to: "07:00"}   # horas de silencio; pueden cruzar la medianoche
+quiet_hours: {from: "23:00", to: "07:00"}   # silencio; cruza la medianoche si hace falta; from = to: todo el día
 silent_during_events: true                  # nada proactivo durante eventos del calendario
 group_window: 30m                           # agrupa los avisos a menos de este margen (m u h)
 max_insist_per_task: 3                      # avisos por tarea clave y día

@@ -59,8 +59,11 @@ class Verdict:
 
 
 def in_window(moment: time, window: Window) -> bool:
-    """`[start, end)`, crossing midnight when `start > end`; empty when they are equal."""
-    if window.start <= window.end:
+    """`[start, end)`, crossing midnight when `start > end`. When they are equal the window is
+    the whole day (decision 80): for quiet hours, the discreet reading of an edit gone wrong."""
+    if window.start == window.end:
+        return True
+    if window.start < window.end:
         return window.start <= moment < window.end
     return moment >= window.start or moment < window.end
 

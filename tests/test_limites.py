@@ -97,8 +97,9 @@ def test_una_ventana_que_no_cruza_la_medianoche(hour, silent):
     assert in_window(time.fromisoformat(hour), window("13:00", "15:00")) is silent
 
 
-def test_una_ventana_con_el_mismo_principio_y_fin_esta_vacia():
-    assert not any(in_window(time(h), window("07:00", "07:00")) for h in range(24))
+def test_una_ventana_con_el_mismo_principio_y_fin_es_todo_el_dia():
+    """Pilla leer `from == to` como «sin silencio»: lo discreto es callar (decisión 80)."""
+    assert all(in_window(time(h, m), window("07:00", "07:00")) for h in range(24) for m in (0, 59))
 
 
 # --- Evento en curso --------------------------------------------------------------------------

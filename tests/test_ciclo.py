@@ -66,6 +66,14 @@ def reads(srcs) -> tuple[int, int, int]:
 # --- La primera pasada corta el ciclo sin modelo ----------------------------------------------
 
 
+def test_con_el_silencio_de_todo_el_dia_nunca_se_llama_a_decide(conn):
+    spy = SpyDecide()
+    lim = limits(quiet_hours={"from": "07:00", "to": "07:00"})
+    for moment in heartbeats(date(2030, 1, 7)):
+        assert cycle(conn, moment, spy=spy, lim=lim).stopped == "quiet_hours"
+    assert spy.calls == 0
+
+
 def test_a_las_23_30_el_ciclo_acaba_sin_llamar_a_decide(conn):
     """Pilla un silencio que se mira después del modelo, o que lee las fuentes antes de parar."""
     spy, srcs = SpyDecide(), sources()
@@ -227,8 +235,9 @@ def test_lo_que_espera_se_descarta_al_entrar_en_silencio(conn, caplog):
     assert SECRET_TEXT not in caplog.text
 
 
-def test_sin_horas_de_silencio_lo_de_ayer_se_descarta_al_cambiar_de_dia(conn):
-    lim = limits(quiet_hours={"from": "07:00", "to": "07:00"})
+def test_sin_silencio_que_separe_los_dias_lo_de_ayer_se_descarta(conn):
+    """Con un silencio que no cubre la medianoche, la cola no se vacía por la noche."""
+    lim = limits(quiet_hours={"from": "03:00", "to": "03:01"})
     queue = WaitingNotices()
     queue.add(outgoing("basura"), date(2030, 1, 7))
     result = cycle(conn, "2030-01-08T00:15", lim=lim, queue=queue)
