@@ -29,7 +29,11 @@ async def serve(
     paths.data_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
     with logging_to(paths.logs_dir):
         logger.info("started at %s (%s)", clock.now().isoformat(), paths.environment)
-        conn = open_database(paths.database)
+        try:
+            conn = open_database(paths.database)
+        except Exception as error:
+            logger.error("startup failed (%s)", type(error).__name__)
+            raise
         try:
             if ready is not None:
                 ready.set()

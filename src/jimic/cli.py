@@ -2,6 +2,7 @@
 
 import argparse
 import os
+import sqlite3
 import sys
 from importlib.metadata import version
 
@@ -12,7 +13,9 @@ from jimic.memory.database import MigrationError
 from jimic.paths import PathsError
 
 SETUP_ERROR = 2
-"""Exit status when the service cannot start because of its folders, `.env` or database."""
+"""Exit status when the service cannot start because of its folders, `.env` or database.
+
+The messages of these errors name keys, paths and SQLite failures, never values."""
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -31,7 +34,7 @@ def main(argv: list[str] | None = None) -> int:
     elif args.command == "run":
         try:
             service.run(os.environ)
-        except (PathsError, ConfigError, MigrationError) as error:
+        except (PathsError, ConfigError, MigrationError, sqlite3.Error, OSError) as error:
             print(f"jimic: {error}", file=sys.stderr)
             return SETUP_ERROR
     return 0

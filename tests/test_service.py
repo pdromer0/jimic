@@ -163,3 +163,15 @@ def test_jimic_run_arranca_y_para_con_sigterm(guard_signals, capsys):
     assert "started at" in log
     assert "stopped at" in log
     assert VALID_ENV["TOKEN_TELEGRAM"] not in log + capsys.readouterr().err
+
+
+def test_una_base_rota_sale_con_2_y_queda_en_el_log(capsys):
+    """Pilla un traceback con salida 1 y un log que no dice por qué no arrancó."""
+    write_env(VALID_ENV)
+    paths = resolve_paths(os.environ)
+    paths.data_dir.mkdir(parents=True)
+    paths.database.write_bytes(b"esto no es una base de datos SQLite, es texto inventado" * 20)
+    assert jimic.cli.main(["run"]) == 2
+    assert capsys.readouterr().err.endswith("jimic: file is not a database\n")
+    log = (paths.logs_dir / LOG_FILE).read_text()
+    assert "startup failed (DatabaseError)" in log
