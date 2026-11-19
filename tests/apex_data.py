@@ -10,6 +10,8 @@ from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+from jimic.tools.apex_schema import ApexData, ApexSnapshot, build_snapshot
+
 MADRID = ZoneInfo("Europe/Madrid")
 
 INVENTED_APEX: dict = {
@@ -93,3 +95,18 @@ def madrid(moment: str) -> datetime:
 def write_apex(path: Path, data: dict) -> Path:
     path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
     return path
+
+
+def invented_snapshot(now: str = "2030-01-07 09:00") -> ApexSnapshot:
+    """The snapshot of the invented file at `now`, for the tests of what reads APEX."""
+    return build_snapshot(ApexData.model_validate(INVENTED_APEX), madrid(now), MADRID)
+
+
+class FixedApexReader:
+    """The third implementation of the reader: it returns a snapshot given at the start."""
+
+    def __init__(self, snapshot: ApexSnapshot | None = None) -> None:
+        self._snapshot = snapshot if snapshot is not None else invented_snapshot()
+
+    def read_today(self) -> ApexSnapshot:
+        return self._snapshot
