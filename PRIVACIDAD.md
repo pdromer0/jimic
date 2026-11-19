@@ -12,7 +12,7 @@ No es un servicio público: no hay cuentas de otros usuarios ni datos de tercero
 Solo el calendario, en **solo lectura** (permiso `calendar.readonly`). De cada evento lee el título,
 las horas, si dura todo el día, si el usuario es el organizador y si el usuario rechazó el evento:
 Google envía la respuesta de cada invitado, sin su nombre ni su correo, y JimiC solo usa la del
-usuario. **No lee la descripción**, la ubicación ni los correos de los asistentes. JimiC no puede crear, cambiar ni borrar nada en el calendario.
+usuario. **No lee la descripción**, la ubicación ni los correos de los asistentes. De la lista de calendarios lee también **el nombre de cada calendario visible, solo para reconocer y saltar el que crea Todoist**; no lo guarda. JimiC no puede crear, cambiar ni borrar nada en el calendario.
 
 ## Dónde se procesan los datos
 
