@@ -10,9 +10,9 @@ No es un servicio público: no hay cuentas de otros usuarios ni datos de tercero
 ## Qué datos de Google lee
 
 Solo el calendario, en **solo lectura** (permiso `calendar.readonly`). De cada evento lee el título,
-las horas, si dura todo el día, si el usuario es el organizador y si el usuario rechazó el evento
-(solo su propia respuesta). **No lee la descripción**, la ubicación ni los correos de los
-asistentes. JimiC no puede crear, cambiar ni borrar nada en el calendario.
+las horas, si dura todo el día, si el usuario es el organizador y si el usuario rechazó el evento:
+Google envía la respuesta de cada invitado, sin su nombre ni su correo, y JimiC solo usa la del
+usuario. **No lee la descripción**, la ubicación ni los correos de los asistentes. JimiC no puede crear, cambiar ni borrar nada en el calendario.
 
 ## Dónde se procesan los datos
 

@@ -1320,3 +1320,9 @@ Pendiente.
   hay que combinarlas (hallazgo 8).
 - **Módulo `dobles-con-tope`:** su disparador está cumplido (ver arriba); decidir con Pedro una tarea P.
 - **Producción:** Pedro autorizó solo la copia `dev`; la de `prod` espera a su `jimic google autorizar`.
+
+**Ajustes de la revisión del chat (PR #40).** Uno, solo de documentación (sin N3 nueva):
+- `PRIVACIDAD.md`, «Qué datos de Google lee»: la frase sobre el evento rechazado decía «(solo su propia
+  respuesta)», pero la máscara pide `attendees(self,responseStatus)` y Google envía la respuesta de cada
+  invitado, sin su nombre ni su correo. Ahora lo dice así: JimiC solo usa la del usuario. El fichero no
+  se mueve ni se renombra.
