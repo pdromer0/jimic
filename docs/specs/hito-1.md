@@ -180,7 +180,7 @@ pasadas cada uno, con un informe de porcentajes. Nunca en el CI.
 
 | Ruta | Qué guarda |
 | --- | --- |
-| `~/.config/jimic/` | Los ficheros personales (7.2 del diseño), el `.env` y `google_cliente.json` (el cliente OAuth de Google, permisos 600; el token de usuario lo decide la 1.5) |
+| `~/.config/jimic/` | Los ficheros personales (7.2 del diseño), el `.env` y `google_cliente.json` (el cliente OAuth de Google, permisos 600) y `google_token.json` (el permiso de usuario de Google, `calendar.readonly`; permisos 600, escrito de forma atómica por `jimic google autorizar` y reescrito igual al renovarse) |
 | `~/.local/share/jimic/` | SQLite, los logs (`logs/`), las copias y las transcripciones del agente (`CLAUDE_CONFIG_DIR`) |
 | `~/.config/jimic-dev/` y `~/.local/share/jimic-dev/` | Lo mismo para la copia de pruebas |
 
@@ -244,7 +244,7 @@ función de purga con cortes absolutos en UTC (`jimic.memory.retention.purge`); 
 
 | Herramienta del agente | Qué hace | Nivel |
 | --- | --- | --- |
-| `read_calendar` | Eventos de un día: título, horas y si Pedro organiza; sin descripción | Libre; contamina |
+| `read_calendar` | Eventos de un día de los calendarios visibles: título, horas, `all_day`, si Pedro organiza y `declined` (si lo rechazó); sin descripción | Libre; contamina |
 | `read_tasks` | Tareas de hoy, vencidas y por proyecto | Libre; contamina (los títulos pueden venir de terceros) |
 | `read_apex_today` | Entreno previsto y hecho; objetivos de APEX; resumen de biométricos | Libre |
 | `propose_plan` | Propone crear, mover y borrar tareas, con su motivo | Libre (solo propone) |
@@ -1180,3 +1180,143 @@ dos `.env` y `google_cliente.json` en `~/.config/jimic*/`, con permisos 600.
 - **2.2:** añadir `drive.file` al mismo proyecto de Google, comprobar si un permiso nuevo exige
   volver a publicar y **actualizar `PRIVACIDAD.md`** (hoy solo habla de Calendar).
 - **H2:** clave nueva para el VPS (y valorar una cuenta de servicio) y desactivar `jimic-pc`.
+
+### Tarea 1.5: Todoist y Calendar
+
+**Qué se hizo.** Issue #18, rama `feat/h1-todoist-calendar`, aprobada a las 18:32 del 19-nov-2026.
+Commits: `chore(deps)` (ae6e0d5), `feat(paths)` (cd88bb4), `feat(calendar)` (99db8de),
+`refactor(files)` (12736ee, sin tocar tests), `feat(google)` (cc58ab4), `feat(todoist)` del lector
+y el escritor (d031519) y de la guardia (5d37870), `test(contrato)` (caad46a), `fix(todoist)` y su
+contrato (0ebd5e8, 42b19fc) tras el primer contrato, `docs(diseno)` (eb265d7), `docs(privacidad)`
+(3d84e7e) y, de la revisión propia, cinco `fix` (7cc326c, 259eb69, 34d564a, ab4a8f1, b29e131). Este
+anexo es el último, `docs(hito-1)`.
+
+**Decisiones de la tarea** (del chat, con Pedro; las notas del issue):
+- **1.5-a · Calendarios:** todos los visibles (`selected`). Google no manda `selected` en los que no
+  lo son, así que **ausente es no visible** (con test); los eventos de todo el día llegan con
+  `all_day` y los rechazados con `declined`.
+- **1.5-b · Guardia del entorno de pruebas** (decisión 75): con `ENTORNO=dev`, el JimiC solo ve y
+  toca `PROYECTO_PRUEBAS_TODOIST`.
+- **1.5-c · Los contratos los ejecuta también el agente** (decisión 76), con mitigaciones.
+- **1.5-d · `jimic google autorizar`:** el permiso lo da Pedro una vez por copia; el token va en
+  `google_token.json` (600, atómico).
+- **Del chat al aprobar el plan:** el contrato de Calendar comprueba con un recuento que hay al
+  menos un calendario visible, y el de Todoist deja el proyecto de pruebas como estaba (también la
+  recurrente completada y el padre con sus subtareas).
+- **Del chat tras el primer contrato** (el agente paró, como pedían las notas): la duración,
+  **en la descripción** (`Duración: 75 min`), y mover una recurrente, **conservando la recurrencia**.
+
+**Decisiones del diff** (lo que el plan interpretaba; todo se aprobó tal cual, salvo lo señalado):
+- `tools/calendar.py`, `tools/google_auth.py`, `tools/todoist.py` y `tools/failures.py`
+  (`ToolFailure`, `TooManyPages`, `WarnOnce`, tope de 10 páginas). `jimic/files.py` (`write_private`)
+  sale de `save_yaml_file` en un commit de refactor aparte, sin tocar sus tests.
+- **Interfaces asíncronas.** La 4.0.1 de `todoist-api-python` trae `TodoistAPIAsync` (httpx, API v1),
+  así que Todoist no necesita `to_thread` (el plan lo daba por hecho); Google sí, con un cerrojo
+  porque `httplib2` no es seguro entre hilos. La biblioteca de Todoist fija su *timeout* dentro de
+  cada petición (10 s para conectar, 60 s para leer): el límite de 20 s por llamada es nuestro
+  (`asyncio.timeout`).
+- **Los lectores no lanzan** (`CalendarDay`, `TaskList` con `unavailable_reason`) y avisan una vez;
+  **los escritores y `get_task` sí** (`ToolFailure(code)`: quien ejecuta debe saberlo). Códigos:
+  `auth`, `timeout`, `http_<n>`, `network`, `invalid_format`, `too_many_pages`, `unexpected:<Tipo>`
+  y, en la guardia, `outside_test_project` y `task_not_found`. El aviso de `auth` del calendario
+  dice `jimic google autorizar`.
+- **Si falla un calendario, falla el día entero:** un día con eventos que faltan parecería libre.
+- **Hoy y vencidas** = día local en la zona de la configuración ≤ hoy (con el reloj inyectado); sin
+  fecha, fuera. La hora «flotante» de Todoist es la de Pedro y la UTC se convierte. Se selecciona en
+  el código, no con el filtro del servidor.
+- **La guardia acota la lectura en origen** (el `project_id` va a la API: las tareas reales de otros
+  proyectos ni se descargan) y añade una segunda barrera que descarta lo que no sea del proyecto.
+  Mover, completar y borrar leen la tarea fresca; crear fuerza el proyecto. `build_todoist` la aplica
+  solo en `dev`, para que el servicio no pueda olvidarla.
+- **`CalendarDay.calendar_count`** (no estaba en el plan): el recuento de calendarios visibles, que
+  el contrato necesita y los logs pueden usar sin nombres ni IDs.
+- **El permiso se guarda como `creds.to_json()`** (incluye el *client secret*, con 600). Un token de
+  otro alcance, sin `refresh_token` o roto no se usa y el error dice qué comando lanzar.
+- **Hecho en la revisión:** `prompt="consent"` al autorizar, un fallo pasajero al renovar no es
+  `auth`, y lo que renueva la biblioteca tras un 401 también se guarda.
+- **`dobles-con-tope`:** el disparador del módulo («primer doble que el código llama en bucle») se
+  cumple con `FakeGoogleService` y `FakeTodoistApi` (paginados, con tope que lanza `RunawayDouble`,
+  una `BaseException` para que los lectores, que capturan `Exception`, no lo disimulen).
+
+**Valores a mano** (código independiente, antes de implementar): el día 2030-01-07 en Madrid va de
+`00:00+01:00` a `00:00+01:00` del 8 (24 h); el 2030-03-31, de `+01:00` a `2030-04-01T00:00+02:00`
+(**23 h**) y el 2030-10-27, de `+02:00` a `2030-10-28T00:00+01:00` (**25 h**). `09:00Z` es `10:00+01:00`;
+`23:30Z` del 7-ene ya es el 8 en Madrid. Con hoy = 2030-01-07, entran las fechas del 6 y el 7 y la
+hora flotante 23:30, no el 8 ni `23:30Z` del 7 (es el 8 local); sí `23:30Z` del 6 (es el 7). Las
+máscaras exactas están en los tests, escritas a mano. `0o600` = 384.
+
+**Contrato de Todoist** (19-nov-2026, proyecto de pruebas, con `todoist-api-python` 4.0.1):
+- **Primera ejecución: el agente paró**, como piden las notas. La duración no se conserva en el plan
+  gratuito (ni la respuesta de crear la trae) y mover una recurrente con solo la fecha la convierte
+  en una normal. El resto se confirmó: la hora, mover, completar una normal, completar una recurrente
+  (pasa a la siguiente fecha), el aviso de subtareas, el borrado, y el proyecto quedó con las mismas
+  0 tareas.
+- **Experimentos** (tareas inventadas en el proyecto de pruebas, desechados): con `due_string` igual
+  al texto de la recurrencia más la nueva fecha u hora, sigue siendo recurrente; la hora pedida manda
+  sobre la del texto para esa ocurrencia; con solo la fecha, esa ocurrencia queda sin hora; solo
+  `due_date` o solo `due_datetime` la pierden.
+- **Segunda ejecución (con las decisiones de Pedro): todo confirmado**, incluida una recurrente escrita
+  en español. Borrar el padre **borra las subtareas** (anexo B de `diseno.md`).
+- **`due_lang`:** sin él, el contrato real también pasa, así que no se ha podido demostrar que haga
+  falta; se manda por ser lo que documenta la API.
+
+**Contrato de Calendar** (19-nov-2026, tras `jimic google autorizar`, que lanzó Pedro): 2 calendarios
+visibles, 15 eventos en 8 días, 39 elementos revisados en 24 respuestas, ninguna clave fuera de la
+máscara; 6 s. El flujo llegó desde el navegador de Windows a WSL2 sin problema.
+
+**Medidas.** La suite tiene 492 tests (los dos de contrato se saltan sin `JIMIC_CONTRATO=1`); los de
+esta tarea son unos 190: Calendar 57, autorización 28, CLI 8, Todoist 70, guardia 23, ayudas del
+contrato 5 y rutas 1. **N3**, tras las correcciones de la revisión: en verde en 0:12 (pre-commit 0:07, pytest 0:04 con 492
+tests, gitleaks de la historia 0:01); este anexo se escribió mientras corría y solo es documentación.
+
+**Versiones incorrectas** (aplicadas y deshechas con un script; ninguna se dejó en el árbol).
+Predicción antes, observado después:
+
+| # | Versión | Predicción | Observado |
+| --- | --- | --- | --- |
+| A | La máscara pide `description` | Rojos la máscara exacta y el cliente real | Igual (2) |
+| D | Un evento de todo el día llega con horas | Rojos el de todo el día y el de formato (mezcla fecha/hora) | Igual (2) |
+| E | El rechazado no se marca | Rojo solo `declined` | Igual (1) |
+| G | El cancelado no se descarta | Rojo solo el de cancelados | Igual, pero a la primera salió el resultado de E: la caché de bytecode (misma talla, mismo segundo); el script ahora desactiva los `.pyc` |
+| H | El log lleva el título (Calendar) | Rojos el de logs y el de «sin avisos» | **1**: el segundo lee un calendario vacío (error mío) |
+| I | `selected` ausente cuenta como visible | Rojos el de «sin el campo» y el de «sin calendarios visibles» | Igual (2) |
+| J | Sin tope de páginas | Rojos los dos de «once páginas» | Igual (2) |
+| F / F2 | Token con 644 al autorizar / al renovar | Rojos los de 600 (2 y 1) | Igual |
+| K | Autorizar sin comprobar el alcance | Rojos el del paquete y el de la CLI | Igual (2) |
+| L | Cargar sin mirar el alcance | Rojos los tres casos con alcance mal o vacío | Igual (3) |
+| M | Escritura no atómica | Rojo solo el de «token viejo entero» | **5**: también los tres de permisos 600 (el 0600 lo da `mkstemp`; la escritura directa usa el `umask`) y el de `fsync` de `test_personal`; olvidé lo del `mkstemp` |
+| B | La guardia no se aplica al mover | Rojos los tres de `move` | Igual |
+| C | En `dev` la lectura no se acota | Rojos 3 | **2**: mi mutación dejaba el chequeo previo de «otro proyecto» |
+| C2 | `build_todoist` no envuelve en `dev` | Todos los de la fixture `dev` (>15) | 16 rojos; verdes `prod`, sin proyecto, sin API y la segunda barrera |
+| D2 / E2 | `create` respeta el proyecto pasado / `get_task` no lanza para uno ajeno | Rojos 1 / 4 | Igual |
+| H2 | El log lleva el título (Todoist) | Rojos 2 | Igual |
+| P | `<` en vez de `<=` en «hoy» | Rojos 5 | **8**: también `ningun_titulo…`, `en_dev_la_lectura…` y `en_prod_build…`, que usan una tarea de hoy sin ser su tema |
+| Q | Sin *timeout* | Rojos los dos de límite de tiempo | Igual (con `--timeout=5`) |
+| R1–R4 | Crear sin descripción / mover sin `due_string` / `due_string` también en las normales / regex de la duración permisiva | Rojos 2 / 2 / 1 / 3 | Igual |
+| — | `retryable` ignorado, sin cerrojo, sin guardar el token renovado por dentro, sin `due_lang`, sin `prompt` ni comprobar `refresh_token` | Cada test nuevo falla sin su arreglo | Comprobado (el de `retryable`, después del commit por un patrón mal escrito) |
+
+**Revisión** (`/code-review medium`). 10 hallazgos: 5 corregidos, 5 explicados y 2 de ellos, con
+Pendiente.
+- Corregidos: (1) `prompt="consent"` y no guardar un permiso sin `refresh_token` (7cc326c); (2) un
+  `RefreshError` reintentable es `network` y no pide autorizar (259eb69); (3) un cerrojo contra lecturas
+  simultáneas (34d564a); (4) el token que renueva la biblioteca tras un 401 también se guarda
+  (ab4a8f1); (7) el texto de la recurrencia viaja con su `due_lang` (b29e131).
+- Explicados: (5) cualquier excepción pasa a `unexpected:<Tipo>` sin traza, como en APEX: un mensaje
+  puede citar contenido; (6) un `dateTime` sin zona rompe el formato del día: contrato estricto (Google
+  exige desfase o `timeZone`), con test; (9) 403 es `auth` (el contrato no vio un 403 por límites del
+  plan: la duración se ignoró sin error) y `ValueError`/`TypeError` son lo que lanza la biblioteca al
+  leer; (8) y (10), con Pendiente.
+
+**Pendiente.**
+- **1.7:** cablear `build_todoist` y `build_calendar` en el servicio y cerrar las conexiones al parar
+  (`tools.close`). Una lectura sin filtrar admite hasta 2000 tareas (10 páginas de 200): si Pedro
+  tiene más, sale `too_many_pages`; medirlo con el uso real.
+- **1.8:** el aviso por Telegram de «calendario no disponible» con el comando que lanzar (hoy solo
+  el log).
+- **1.11:** `get_task` hace dos peticiones y un `move` guardado, tres o cuatro (hallazgo 10); si molesta,
+  un `get_task` sin el recuento de subtareas, pero las reglas de borrado sí lo necesitan. La guardia lee
+  y después escribe: con un solo usuario no se contempla una carrera con otro cliente de Todoist.
+- **1.14:** `create` escribe `Duración: N min` como descripción; si el plan quiere otras descripciones
+  hay que combinarlas (hallazgo 8).
+- **Módulo `dobles-con-tope`:** su disparador está cumplido (ver arriba); decidir con Pedro una tarea P.
+- **Producción:** Pedro autorizó solo la copia `dev`; la de `prod` espera a su `jimic google autorizar`.
