@@ -277,6 +277,30 @@ def test_cambiar_un_valor_de_una_plantilla_solo_cambia_su_linea(config_dir, name
     assert mode(path) == 0o600
 
 
+def test_guardar_sincroniza_el_fichero_antes_de_sustituirlo_y_la_carpeta_despues(
+    config_dir, monkeypatch
+):
+    """Pilla un guardado sin `fsync`: tras un corte, `limites.yaml` podría quedar vacío."""
+    init(config_dir)
+    path = config_dir / "limites.yaml"
+    doc = parse_yaml(path.read_text(encoding="utf-8"))
+    events: list[str] = []
+    real_fsync, real_replace = os.fsync, os.replace
+
+    def fsync(fd):
+        events.append("fsync carpeta" if stat.S_ISDIR(os.fstat(fd).st_mode) else "fsync fichero")
+        real_fsync(fd)
+
+    def replace(source, target):
+        events.append("replace")
+        real_replace(source, target)
+
+    monkeypatch.setattr("jimic.memory.personal.os.fsync", fsync)
+    monkeypatch.setattr("jimic.memory.personal.os.replace", replace)
+    save_yaml_file(path, doc)
+    assert events == ["fsync fichero", "replace", "fsync carpeta"]
+
+
 def test_guardar_un_documento_invalido_no_escribe_nada(config_dir):
     init(config_dir)
     path = config_dir / "limites.yaml"

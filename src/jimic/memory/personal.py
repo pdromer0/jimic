@@ -230,7 +230,14 @@ def save_yaml_file(path: Path, doc: object) -> None:
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as file:
             file.write(text)
+            file.flush()
+            os.fsync(file.fileno())  # the data is on disk before the name points at it
         os.replace(temporary, path)
     except BaseException:
         Path(temporary).unlink(missing_ok=True)
         raise
+    directory = os.open(path.parent, os.O_RDONLY)
+    try:
+        os.fsync(directory)  # and so is the new name: a crash leaves the old file or the new one
+    finally:
+        os.close(directory)
