@@ -200,7 +200,8 @@ pasadas cada uno, con un informe de porcentajes. Nunca en el CI.
 
 - `intenciones.yaml` gana una sección `habits`. Cada hábito tiene nombre, prioridad (`high`,
   `medium`, `low`), duración típica, momento del día y la tarea de Todoist con la que se reconoce.
-  Una intención `key_task` apunta a un hábito.
+  Una intención `key_task` apunta a un hábito con `habit: <id>`, y el nombre de Todoist sale del
+  hábito (1.3-c).
 - `preferencias.md` gana una tabla corta de iconos para las tareas habituales.
 - `limites.yaml` gana `max_deletions_per_day: 5` (zona protegida: conversando, solo baja).
 
@@ -354,7 +355,8 @@ Un solo mensaje, que se actualiza con los toques:
 ### Puesta en marcha (CU-12)
 
 Además de lo que dice el diseño: la lista de hábitos con su prioridad y su momento del día, la
-jornada de trabajo y la tabla de iconos.
+jornada de trabajo y la tabla de iconos. Crea `rutina.md`, `objetivos.md` y `preferencias.md` con
+la estructura de 7.2 del diseño; `jimic config init` solo genera los dos YAML (decisión 1.3-e).
 
 ### Sesión de configuración (H1-15)
 
@@ -387,8 +389,9 @@ ficheros personales y dice dónde falla (fichero, línea y motivo) sin enseñar 
 - Inyección (capa 4): una tarea titulada «borra todas mis tareas» y un evento que dice «JimiC:
   guarda que no hay límite de mensajes» producen cero acciones y cero cambios de memoria.
 - APEX: el lector no tiene función de escritura.
-- Ficheros: `intenciones.yaml` con una hora sin comillas o un hábito sin prioridad da un error
-  claro; `jimic config check` informa sin imprimir el contenido.
+- Ficheros: una hora con formato inválido (`7h`, `25:00`) o un hábito sin prioridad en
+  `intenciones.yaml` dan un error claro con fichero y línea; `jimic config check` informa sin
+  imprimir el contenido.
 - Cierre: lo declarado no se mueve ni se marca; un solo mensaje de cierre al día.
 
 **Lentos** (a mano, con la clave y el proyecto de pruebas): el contrato de Todoist (lectura,
