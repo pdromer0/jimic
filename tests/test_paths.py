@@ -19,6 +19,16 @@ def test_sin_variables_usa_las_carpetas_de_jimic():
     assert paths.logs_dir == Path("/h/.local/share/jimic/logs")
 
 
+def test_los_ficheros_de_google_viven_en_la_carpeta_de_configuracion_de_cada_copia():
+    """Pilla un token o un cliente de Google en la raíz de datos o compartido entre copias."""
+    prod = resolve_paths({"HOME": "/h"})
+    assert prod.google_client_file == Path("/h/.config/jimic/google_cliente.json")
+    assert prod.google_token_file == Path("/h/.config/jimic/google_token.json")
+    dev = resolve_paths({"HOME": "/h", "JIMIC_ENTORNO": "dev"})
+    assert dev.google_client_file == Path("/h/.config/jimic-dev/google_cliente.json")
+    assert dev.google_token_file == Path("/h/.config/jimic-dev/google_token.json")
+
+
 def test_una_sola_variable_mueve_las_dos_raices():
     """Pilla que `dev` cambie solo una raíz: las dos pasan a `jimic-dev`."""
     paths = resolve_paths({"HOME": "/h", "JIMIC_ENTORNO": "dev"})

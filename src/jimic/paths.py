@@ -27,6 +27,16 @@ class Paths:
         return self.config_dir / ".env"
 
     @property
+    def google_client_file(self) -> Path:
+        """The OAuth client of the copy (a desktop client), put there by hand."""
+        return self.config_dir / "google_cliente.json"
+
+    @property
+    def google_token_file(self) -> Path:
+        """The user's permission for Google, written by `jimic google autorizar` (0600)."""
+        return self.config_dir / "google_token.json"
+
+    @property
     def database(self) -> Path:
         return self.data_dir / "jimic.sqlite3"
 
