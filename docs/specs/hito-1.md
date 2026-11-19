@@ -18,7 +18,8 @@ del registro de `docs/diseno.md` (H1-k es la decisión 54 + k).
   de iconos de `preferencias.md` (H1-5, H1-12), y una sesión de configuración aparte para
   editarlos con Claude Code sin poder publicar nada (H1-15).
 - Telegram con botones por elemento y mensajes que se actualizan (H1-4).
-- Lectura de Todoist, Calendar y APEX; APEX, solo lectura (H1-10).
+- Lectura de Todoist, Calendar y APEX; APEX, solo lectura (H1-10): el entreno previsto y hecho,
+  los objetivos de entrenamiento (H1-20) y un resumen de los biométricos (H1-19).
 - El latido con los límites en dos pasadas y la decisión de Haiku (decisiones 9, 11 y 14).
 - El agente con el Agent SDK, que **solo propone**; el código ejecuta tras el botón o el mensaje
   de Pedro (H1-1), con las reglas del borrado (H1-2).
@@ -245,7 +246,7 @@ función de purga con cortes absolutos en UTC (`jimic.memory.retention.purge`); 
 | --- | --- | --- |
 | `read_calendar` | Eventos de un día: título, horas y si Pedro organiza; sin descripción | Libre; contamina |
 | `read_tasks` | Tareas de hoy, vencidas y por proyecto | Libre; contamina (los títulos pueden venir de terceros) |
-| `read_apex_today` | Entreno previsto y hecho; objetivos de APEX | Libre |
+| `read_apex_today` | Entreno previsto y hecho; objetivos de APEX; resumen de biométricos | Libre |
 | `propose_plan` | Propone crear, mover y borrar tareas, con su motivo | Libre (solo propone) |
 | `propose_change` | Propone un cambio de memoria | Libre (solo propone) |
 | `log_idea` | Anota en `ideas.md` | Libre |
@@ -436,6 +437,8 @@ informe de `revisor-plan` (desde la P3); en las tareas de Telegram, una captura 
 | H1-16 | Configuración en un `.env` validado; SQLite con `plan_items` y `deleted_tasks` además de las seis tablas; acceso y migraciones, en el plan de la 1.2 | Criterio del chat, aceptado por Pedro |
 | H1-17 | Pasan al repositorio, con los datos inventados, 8 de los 9 escenarios del piloto; el de correo, al H4 | Decisiones 33 y 54 |
 | H1-18 | Módulos: P1 `tablero`, P2 `metricas-pr`, P3 `revisor-plan` y P4 `adr-y-releases`, cada uno justo antes de hacer falta | Una novedad del método por tarea. Descartado: `adr-y-releases` en el cierre |
+| H1-19 | Biométricos de APEX: se leen y se resumen; llegan al modelo y JimiC puede mencionarlos, con cifras, por su cuenta; nunca a los logs ni a SQLite; sin consejo médico. Excepción a 8.2 | Decisión de Pedro del 19-nov-2026. Descartados: no leerlos y mencionarlos solo sin cifras |
+| H1-20 | Los objetivos de APEX en curso son los de entrenamiento, por su `prioridad`; se leen solos y `objetivos.md` no los repite; `[enlazado]` queda para otras apps | Una sola fuente de verdad. Descartado: enlazarlos a mano en `objetivos.md` |
 
 ## Tareas y orden
 
@@ -462,7 +465,7 @@ GitHub; la primera tarea es la P1.
 | P4 | **Módulo `adr-y-releases`**: ADR completos y Release por hito | `chore/p4-adr-y-releases` | P3 |
 | 1.11 ★ | **Guardia, aprobaciones y ejecución**: *hook* `PreToolUse` que deniega todo lo de fuera de la tabla; contaminación al pie de la letra; aprobaciones con caducidad; ejecución por el código tras el botón o el mensaje de Pedro (H1-1); las reglas del borrado y `deleted_tasks` (H1-2); el ADR de la guardia | `feat/h1-guardia` | 1.4, 1.10, P4 |
 | 1.12 ★ | **Memoria adaptativa**: `propose_change` validado, [Guardar], `changes`, `/memoria`, `/deshacer` (también los borrados), `ideas.md` | `feat/h1-memoria` | 1.3, 1.11 |
-| 1.13 | **Puesta en marcha**: rutina, nueve áreas, preferencias, hábitos, jornada e iconos; por partes y reanudable; enlaza los objetivos de APEX | `feat/h1-puesta-en-marcha` | 1.6, 1.12 |
+| 1.13 | **Puesta en marcha**: rutina, nueve áreas, preferencias, hábitos, jornada e iconos; por partes y reanudable; los objetivos de APEX los lee solo el lector (H1-20) | `feat/h1-puesta-en-marcha` | 1.6, 1.12 |
 | 1.14 | **Plan del día**: el formato y las reglas de esta especificación; el prompt destilado del piloto; plan mínimo si falla la API; 10 escenarios (6 del piloto) | `feat/h1-plan` | 1.9, 1.11, 1.13 |
 | 1.15 | **Tareas clave**: gimnasio y la prioridad diaria; tono que escala; [Ya entrené]; para al completar | `feat/h1-tareas-clave` | 1.8, 1.11 |
 | 1.16 | **Cierre del día**: un solo mensaje que se actualiza, `plan_items`, «plan cumplido» a la mañana siguiente, adelanto de mañana y valoración que no insiste; escenario e08 | `feat/h1-cierre-dia` | 1.14 |

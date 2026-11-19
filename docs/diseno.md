@@ -160,7 +160,10 @@ Dos niveles (decisión 7):
 | --- | --- | --- | --- |
 | **Medible** | Métrica, valor objetivo, plazo y fuente | 3 entrenos por semana, según APEX | JimiC, con los datos de la fuente |
 | **Declarado** | Texto, sin métrica todavía | «Quedar más con amigos» | Nadie mide; JimiC lo tiene en cuenta y pregunta en la revisión |
-| **Enlazado** | Vive en otra app, con su propia evolución | Los objetivos de fuerza de APEX | La app especialista; JimiC lee su estado y **no lo copia** |
+| **Enlazado** | Vive en otra app, con su propia evolución | Los de Nutri (H3) | La app especialista; JimiC lee su estado y **no lo copia** |
+
+Los objetivos de entrenamiento de APEX no se enlazan a mano: JimiC los lee solos en cada foto del
+día (los que están «en curso», por su `prioridad`) y `objetivos.md` no los repite (decisión 74).
 
 Se prefiere medible; si no hay métrica, declarado. El horizonte (semana, trimestre…) es un dato de
 cada objetivo, no un nivel de la jerarquía. Los objetivos se fijan en la **puesta en marcha**
@@ -449,8 +452,9 @@ prioridad diaria (por ejemplo, «revisar ofertas») entra también desde el H1: 
      [Guardar] [Cambiar].
   3. **Objetivos:** empieza por las áreas medidas (tiempo y entrenamiento) y sigue con el resto. En
      cada una pregunta la meta y su prioridad (alta, media, baja o «ahora no») y propone objetivos
-     específicos, medibles si se puede. Si la app especialista ya tiene objetivos (APEX), propone
-     enlazarlos en lugar de copiarlos. Cada área se guarda con [Guardar] [Cambiar].
+     específicos, medibles si se puede. Si la app especialista ya tiene objetivos, los enlaza en
+     lugar de copiarlos; los de entrenamiento de APEX no hace falta enlazarlos, JimiC los lee solo
+     (decisión 74). Cada área se guarda con [Guardar] [Cambiar].
   4. **Preferencias básicas:** tono, horas de silencio, cuánto insistir. [Guardar] [Cambiar].
   5. Al final, resume las metas por prioridad.
 - **Datos:** escribe `rutina.md`, `objetivos.md` y `preferencias.md`; lee APEX.
@@ -459,7 +463,7 @@ prioridad diaria (por ejemplo, «revisar ofertas») entra también desde el H1: 
 - **Si se deja a medias:** al día siguiente lo recuerda una vez; después, solo si Pedro lo pide.
 - **Aceptación:** rutina guardada; las nueve áreas con meta o «ahora no»; al menos un objetivo
   medible en tiempo y otro en entrenamiento; nada se guarda sin botón; se puede retomar sin perder
-  lo guardado; los objetivos de APEX quedan enlazados, no copiados.
+  lo guardado; los objetivos de APEX no se copian a `objetivos.md`: JimiC los lee de APEX.
 
 ### CU-13 · Ajustar objetivos, preferencias o comportamientos conversando
 
@@ -685,7 +689,7 @@ Herramientas del agente (decisión 55):
 | --- | --- | --- | --- |
 | `read_calendar` | Eventos de un día: título, horas y si Pedro es el organizador; sin descripción (decisión 34) | Libre; contamina | API de Google Calendar, solo lectura |
 | `read_tasks` | Tareas de hoy, vencidas y por proyecto | Libre; contamina (los títulos pueden venir de terceros) | API de Todoist |
-| `read_apex_today` | Entreno previsto y hecho; objetivos de APEX | Libre | El lector de APEX (decisiones 17, 18 y 29) |
+| `read_apex_today` | Entreno previsto y hecho; objetivos de APEX; resumen de los biométricos (decisión 73) | Libre | El lector de APEX (decisiones 17, 18 y 29) |
 | `propose_plan` | Propone crear, mover y borrar tareas, cada una con su motivo | Libre (solo propone) | — |
 | `propose_change` | Propone un cambio de memoria; lo escribe el código tras [Guardar] | Libre (solo propone) | Ficheros de memoria |
 | `log_idea` | Anota en `ideas.md` | Libre | Fichero propio |
@@ -762,9 +766,31 @@ las dos: el fichero dice cómo están las cosas ahora; `changes`, cómo se lleg�
 - **Un lector con dos implementaciones** detrás de la misma interfaz: el fichero local
   sincronizado, en desarrollo, y la API de Drive con el permiso `drive.file`, en el VPS (decisión
   29, sección 9.3). Los tests usan una tercera implementación con datos fijos.
-- **Contrato:** el lector valida solo los campos que usa (entreno previsto, entreno hecho,
-  objetivos), que se documentan aquí al implementarlo. Si el formato no cuadra, no se rompe: el
-  estado del día dice «APEX no disponible», JimiC sigue sin ese dato y avisa una vez.
+- **Contrato** (tarea 1.6): el lector valida solo los campos que usa y el resto del fichero se
+  ignora. Un campo usado con otro tipo, o ausente si es obligatorio, rompe el contrato; uno que
+  JimiC no lee puede cambiar sin romper nada. En desarrollo se lee por la ruta local `RUTA_APEX`.
+
+  | Dato | Dónde está en `apex_db.json` |
+  | --- | --- |
+  | Entreno previsto hoy | `plan.estructura_semanal["0"…"6"]`, donde `"0"` es el lunes (`date.weekday()`), dentro de `plan.inicio`–`plan.fin` (ambos incluidos); fuera del bloque, o sin la clave del día, «sin plan». `plan` es obligatorio |
+  | Entrenos | `entrenamientos[]`: `fecha` (`AAAA-MM-DD`), `tipo`, `nombre`, `duracion_min` (número) |
+  | Objetivos | `objetivos[]`: `id`, `desc`, `meta`, `prioridad` (entero), `estado`, `progreso_pct` (opcional). Cuentan los de `estado` «en curso» |
+  | Biométricos | `biometricos.<serie>[]`: `fecha`, `valor` (número); opcional, y las series no tienen por qué estar al día |
+  | Frescura | `meta.ultima_actualizacion`: `AAAA-MM-DD HH:MM:SS` sin zona, que se lee en la zona de la configuración |
+
+  `actividad_diaria` (pasos…) queda fuera; se decide en la 1.14.
+- **La foto del día.** El fichero (~220 KB y creciendo) se lee entero solo cuando cambian su fecha
+  de modificación o su tamaño; al modelo llega una foto pequeña (unos 600 bytes con los datos
+  fijos de los tests): el entreno previsto hoy; el de hoy en tres estados (`trained`,
+  `not_recorded` y `unknown`, este último si la última sincronización es anterior al inicio del
+  día); los entrenos de los últimos 7 días (hoy y los 6 anteriores); los objetivos en curso por
+  `prioridad` (1 es la más alta); de cada serie biométrica, el último valor con su fecha y la
+  media de las lecturas de los últimos 7 días; y la hora de la última sincronización.
+- **Si falla** (fichero ausente o ilegible, de más de 10 MiB, JSON roto o un campo usado con otro
+  tipo): la foto dice «APEX no disponible» con un código (`file_missing`, `file_unreadable`,
+  `file_too_large`, `invalid_json`, `invalid_format:<sección>`), solo el tipo y nunca el contenido;
+  JimiC sigue sin ese dato y lo avisa **una vez** en el log, y otra si se recupera y vuelve a
+  fallar. El aviso por Telegram llega con las tareas 1.7 y 1.8.
 - **Frescura:** `apex_db.json` solo cambia cuando Pedro sincroniza APEX (el 16-nov-2026, a las
   8:17). Por eso el entreno hecho se detecta por Todoist, el botón [Ya entrené] y, con las claves
   rotadas, la API de Hevy (decisión 17).
@@ -800,7 +826,8 @@ Estructura que comprueba `jimic config check` en los Markdown, sin juzgar el con
   con ese nivel y esas mayúsculas, una vez cada una; las demás secciones son libres.
 - `objetivos.md`: cada elemento de lista de primer nivel (`-`, `*`, `+` o `1.`) empieza por
   `[medible]`, `[declarado]` o `[enlazado]`. La meta y la prioridad de cada área van como líneas
-  (`Meta: …`, `Prioridad: …`), no como elementos; los subelementos son libres.
+  (`Meta: …`, `Prioridad: …`), no como elementos; los subelementos son libres. Los objetivos de
+  entrenamiento de APEX no se repiten aquí (decisión 74); `[enlazado]` queda para otras apps.
 - `preferencias.md`: una sección `## Iconos` con una tabla cuyas filas empiezan por `|` y tienen
   dos celdas no vacías (`| Tarea | Icono |`); la fila separadora no cuenta.
 
@@ -921,7 +948,7 @@ con botón).
 | Finanzas | Bancos, nóminas, Hacienda, inversiones | Consentimiento por uso |
 | Legal y administración | Abogados, juzgados, notarías, multas | Consentimiento por uso |
 | Credenciales e identidad | Códigos de verificación, contraseñas, DNI o pasaporte escaneados | Nunca: solo «Tienes un correo con un código» |
-| Datos propios de APEX, Nutri y Apple Health | Entrenos, peso, sueño | Libre, con mínimo dato: al modelo cuando la intención lo necesita; nunca con cifras en la notificación |
+| Datos propios de APEX, Nutri y Apple Health | Entrenos, peso, sueño | Libre, con mínimo dato: al modelo cuando la intención lo necesita; nunca con cifras en la notificación. **Excepción, los biométricos de APEX** (decisión 73): el modelo los recibe resumidos y JimiC puede mencionarlos con cifras por su cuenta; nunca a los logs ni a SQLite, y sin consejo médico |
 | Valoración del 1 al 5 | Cómo ha ido el día | Libre, solo para la revisión semanal |
 
 Los remitentes y las palabras clave de cada categoría viven en `limites.yaml` (zona protegida).
@@ -1343,7 +1370,7 @@ cuando haya casos reales de sobra y si Pedro lo considera necesario; exige evalu
 | 19 | Memoria (B-7): ficheros personales locales fuera del repositorio, con copia diaria cifrada; SQLite con `decisions`, `notices`, `approvals`, `changes`, `day_plans` y `day_ratings`, con su retención; la conversación, en las sesiones del SDK | Ficha frente a bitácora: lo que Pedro edita, en ficheros; lo que pasa, en SQLite. Descartado: ficheros en Drive (exigiría permiso de escritura) | — |
 | 20 | Claves de los ficheros personales en inglés, con comentarios y textos en español (P-21) | El esquema vive en el código; los comentarios guían a Pedro | — |
 | 21 | El cerebro de JimiC funciona siempre bajo condiciones comerciales (clave de API), sea cual sea la facturación que se elija en el paso 3 | Bajo condiciones comerciales, Anthropic no entrena con los datos; con un plan de consumo dependería de un ajuste (anexo B) | — |
-| 22 | Categorías sensibles (P-14): salud, finanzas y legal, con consentimiento por uso; credenciales e identidad, nunca; datos propios de APEX, Nutri y Apple Health, libres con mínimo dato y sin cifras en las notificaciones | Proteger lo delicado sin perder la utilidad diaria | — |
+| 22 | Categorías sensibles (P-14): salud, finanzas y legal, con consentimiento por uso; credenciales e identidad, nunca; datos propios de APEX, Nutri y Apple Health, libres con mínimo dato y sin cifras en las notificaciones (salvo los biométricos de APEX: decisión 73) | Proteger lo delicado sin perder la utilidad diaria | — |
 | 23 | Medidas de privacidad (B-9), sección 8.3; entre ellas, transcripciones locales del SDK a 7 días, tráfico no esencial desactivado, disco y copias cifrados, borrado de los resúmenes sensibles en Telegram y rotación de las claves de Hevy antes de leerlo | Telegram no cifra de extremo a extremo los chats con bots; el motor del SDK guarda transcripciones en texto plano | — |
 | 24 | Se confirman B-2 (servicio propio en Python con el Claude Agent SDK) y B-3 (Claude como único modelo) | Proactividad real con su propio reloj; menos piezas. Descartados en la referencia: Cowork solo, Routines y Channels, OpenClaw, un segundo modelo | — |
 | 25 | Modelos: Haiku 5.5 para la decisión del latido y los mensajes sencillos; Sonnet 5.5 para el agente; sin Opus. Los identificadores, en la configuración | Concreta la B-5. Coste y capacidad a la medida de cada pieza; cambiar de modelo no exige tocar código | — |
@@ -1394,6 +1421,8 @@ cuando haya casos reales de sobra y si Pedro lo considera necesario; exige evalu
 | 70 | Configuración del servicio en un `.env` validado al arrancar; SQLite con `plan_items` y `deleted_tasks` además de las seis tablas de la 19; acceso y migraciones, en el plan de la tarea 1.2 (ADR si se apartan del estándar) (H1-16) | Criterio del chat, aceptado por Pedro | — |
 | 71 | Pasan al repositorio, con los datos inventados, 8 de los 9 escenarios del piloto (e05, de correo, al H4) (H1-17) | Concreta la 54: lo bruto no entra; lo destilado, sí | — |
 | 72 | Módulos del método, uno por tarea de proceso: P1 `tablero`, P2 `metricas-pr`, P3 `revisor-plan` y P4 `adr-y-releases`, cada uno justo antes de hacer falta (H1-18) | Una novedad del método por tarea. Descartado: `adr-y-releases` en el cierre (los ADR, de memoria al final) | — |
+| 73 | Biométricos de APEX (sueño, peso…): se leen y se resumen (último valor con su fecha y media de 7 días); llegan al modelo y JimiC puede mencionarlos por su cuenta, con cifras; **nunca** se escriben en los logs ni en SQLite; JimiC no da consejo médico. Excepción a la 22 (H1-19) | Decisión de Pedro del 19-nov-2026: el dato ya es suyo y sirve para el plan y para las charlas. Descartados: no leerlos (se pierde contexto útil) y mencionarlos solo sin cifras (más tosco, y la 8.2 ya cubre el mínimo dato) | — |
+| 74 | Objetivos de entrenamiento: los de APEX en curso son los del área de entrenamientos, en el orden de su `prioridad` (1 es la más alta); se leen solos y `objetivos.md` no los repite; `[enlazado]` queda para otras apps (Nutri, H3). Ajusta la 7 (H1-20) | Una sola fuente de verdad sin pasar por la puesta en marcha. Descartado: enlazarlos a mano en `objetivos.md` (se desfasan al cambiar APEX) | — |
 
 ### Correspondencia con las decisiones candidatas de la referencia
 
