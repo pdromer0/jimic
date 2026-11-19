@@ -1,4 +1,5 @@
 import os
+from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -8,6 +9,18 @@ SLOW_TIMEOUT = 600
 
 REAL_HOME = Path(os.path.expanduser("~"))
 """El home real, leído al importar, antes de que ningún fixture lo cambie."""
+
+
+class FixedClock:
+    """A clock that always says `moment`; tests move it by assigning `moment`."""
+
+    def __init__(self, moment: datetime) -> None:
+        if moment.utcoffset() is None:
+            raise ValueError("FixedClock needs a timezone-aware datetime")
+        self.moment = moment
+
+    def now(self) -> datetime:
+        return self.moment
 
 
 def pytest_collection_modifyitems(items):
