@@ -19,7 +19,8 @@ ROUTINE_SECTIONS = ("Horario base", "Comidas", "Jornada", "Fines de semana")
 OBJECTIVE_TAGS = ("[medible]", "[declarado]", "[enlazado]")
 ICONS_SECTION = "Iconos"
 
-HEADING = re.compile(r" {0,3}(#{1,6})[ \t]+(.*?)[ \t]*")
+# The closing sequence (`## Comidas ##`) is not part of the title; `## C#` keeps its `#`.
+HEADING = re.compile(r" {0,3}(#{1,6})(?:[ \t]+(.*?))??(?:[ \t]+#+)?[ \t]*")
 # A backtick fence cannot have backticks after it (that is inline code); a tilde fence can.
 FENCE = re.compile(r" {0,3}(`{3,}(?=[^`]*$)|~{3,})(.*)")
 THEMATIC_BREAK = re.compile(r" {0,3}([-*_])(?:[ \t]*\1){2,}[ \t]*")
@@ -56,7 +57,7 @@ def _sections(text: str) -> list[tuple[int, str]]:
     for number, line in _lines(text):
         match = HEADING.fullmatch(line)
         if match and len(match[1]) == 2:
-            sections.append((number, match[2]))
+            sections.append((number, match[2] or ""))
     return sections
 
 

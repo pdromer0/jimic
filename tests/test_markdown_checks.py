@@ -71,6 +71,13 @@ def test_una_rutina_sin_una_seccion_o_con_una_repetida_se_senala():
     ]
 
 
+def test_un_titulo_con_almohadillas_de_cierre_cuenta():
+    """Pilla «## Comidas ##», Markdown válido, tomado por otra sección; «C#» no se recorta."""
+    text = ROUTINE.replace("## Comidas", "## Comidas ##").replace("## Jornada", "## Jornada #")
+    assert check_routine(text + "## C#\n##\n") == []
+    assert check_preferences(PREFERENCES.replace("## Iconos", "## Iconos ##")) == []
+
+
 def test_un_titulo_dentro_de_un_bloque_de_codigo_no_cuenta():
     text = ROUTINE.replace("## Comidas", "```\n## Comidas\n```")
     assert check_routine(text) == [Problem(None, "falta la sección «Comidas»")]
