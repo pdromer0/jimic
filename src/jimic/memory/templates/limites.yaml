@@ -1,0 +1,22 @@
+# limites.yaml: ZONA PROTEGIDA. Todo este fichero lo es: solo se relaja a mano y, conversando,
+# JimiC solo puede hacerlo más discreto. Lo genera `jimic config init` con los valores del
+# diseño; compruébalo con `jimic config check`. Las horas, entre comillas ("07:00").
+max_messages_per_day: 8                     # tope de mensajes proactivos al día
+quiet_hours: {from: "23:00", to: "07:00"}   # horas de silencio; pueden cruzar la medianoche
+silent_during_events: true                  # nada proactivo durante eventos del calendario
+group_window: 30m                           # agrupa los avisos a menos de este margen (m u h)
+max_insist_per_task: 3                      # avisos por tarea clave y día
+max_deletions_per_day: 5                    # borrados de tareas al día (decisión 56)
+budget:                                     # presupuesto en dólares (sección 10.3 del diseño)
+  monthly_target_usd: 30                    # objetivo del mes
+  warn_at: 0.8                              # fracción del objetivo que dispara el aviso (0 a 1)
+  daily_cap_usd: 3                          # si se pasa, sin Sonnet hasta mañana
+  max_session_usd: 0.50                     # tope de cada sesión del agente
+tool_levels:                                # guardia: free o blocked; la que falta, bloqueada
+  read_calendar: free                       # eventos de un día, sin descripción
+  read_tasks: free                          # tareas de hoy, vencidas y por proyecto
+  read_apex_today: free                     # entreno previsto y hecho; objetivos de APEX
+  propose_plan: free                        # solo propone: ejecuta el código tras tu botón
+  propose_change: free                      # propone un cambio de memoria
+  log_idea: free                            # anota en ideas.md
+sensitive_categories: {}                    # categorías sensibles (8.2): llegan en el hito 4

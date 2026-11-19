@@ -1,0 +1,35 @@
+# intenciones.yaml: lo que JimiC intenta hacer por ti y tus hábitos. Lo editas a mano o
+# conversando con él. Lo genera `jimic config init`; compruébalo con `jimic config check`.
+# Las horas, entre comillas ("08:00"). Los ids de intenciones y de hábitos, con a-z, 0-9 y _.
+intentions:
+  - id: plan_del_dia                        # identificador, único entre las intenciones
+    type: daily_plan                        # plantilla: daily_plan, day_close, key_task o notice
+    purpose: "Proponer el plan del día si aún no hay uno"   # para qué sirve
+    window: {from: "07:30", to: "09:30"}    # pista, no horario
+    default_time: "08:00"                   # la hora si falla la decisión del modelo
+    priority: high                          # high, medium o low
+
+  - id: cierre_del_dia                      # identificador, único entre las intenciones
+    type: day_close                         # cierre del día; su ventana sale de la rutina
+    purpose: "Cerrar el día: lo hecho, lo pendiente y cómo ha ido"   # para qué sirve
+    default_time: "22:00"                   # la hora si falla la decisión del modelo
+    priority: high                          # high, medium o low
+
+habits: []                                  # tus hábitos; los rellena la puesta en marcha
+# Ejemplo inventado de hábito. Para usarlo, cambia `habits: []` por `habits:` y quita los «# »:
+#   - id: lectura                           # identificador, único entre los hábitos
+#     name: "Lectura"                       # cómo lo llamas
+#     priority: medium                      # high, medium o low
+#     duration: 20m                         # duración típica (m u h)
+#     moment: evening                       # morning, midday, afternoon o evening (pista)
+#     todoist_task: "Leer"                  # la tarea de Todoist con la que se reconoce
+#
+# Ejemplo inventado de tarea clave, un hábito que además insiste. Va en `intentions`:
+#   - id: insistir_lectura                  # identificador, único entre las intenciones
+#     type: key_task
+#     purpose: "Que no se me pase la lectura"
+#     habit: lectura                        # id del hábito; su tarea de Todoist es la suya
+#     grace: 45m                            # margen tras la hora prevista
+#     max_per_day: 3                        # avisos al día
+#     default_time: "21:00"                 # la hora si falla la decisión del modelo
+#     priority: medium                      # high, medium o low
