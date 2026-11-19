@@ -245,6 +245,20 @@ def test_sin_silencio_que_separe_los_dias_lo_de_ayer_se_descarta(conn):
     assert queue.items == ()
 
 
+def test_lo_de_ayer_se_registra_como_de_otro_dia_aunque_el_ciclo_pare_por_otra_cosa(conn, caplog):
+    """Pilla registrar el descarte con el motivo de la parada (aquí, un evento en curso)."""
+    lim = limits(quiet_hours={"from": "03:00", "to": "03:01"})
+    queue = WaitingNotices()
+    queue.add(outgoing("basura"), date(2030, 1, 6))
+    with caplog.at_level(logging.INFO, logger="jimic"):
+        result = cycle(
+            conn, "2030-01-07T10:30", sources(calendar_with(MEETING)), lim=lim, queue=queue
+        )
+    assert (result.stopped, result.dropped) == ("in_event", 1)
+    assert "dropped 1 waiting notices (other_day)" in caplog.text
+    assert "waiting notices (in_event)" not in caplog.text
+
+
 def test_sin_propuesta_la_segunda_pasada_suelta_la_cola(conn):
     add_notice(conn, "plan_del_dia", madrid("2030-01-07T10:00"), 1)
     queue = WaitingNotices()

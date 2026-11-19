@@ -56,19 +56,19 @@ async def run_cycle(
     now = clock.now().astimezone(timezone)
     day = now.date()
     dropped = queue.drop_other_days(day)
+    if dropped:
+        logger.info("dropped %d waiting notices (other_day)", dropped)
     sent = sent_between(conn, *local_day_bounds(day, timezone))
     first = await first_pass(
         now, limits, Quota.of(limits, intentions, sent), lambda: sources.calendar.read_day(day)
     )
     if first.stop is not None:
-        if first.stop == "quiet_hours":
-            dropped += len(queue.take_all())
-        if dropped:
-            logger.info("dropped %d waiting notices (%s)", dropped, first.stop)
+        if first.stop == "quiet_hours" and queue.items:
+            silenced = len(queue.take_all())
+            logger.info("dropped %d waiting notices (quiet_hours)", silenced)
+            dropped += silenced
         logger.info("first pass: stop (%s)", first.stop)
         return CycleResult(first.stop, dropped)
-    if dropped:
-        logger.info("dropped %d waiting notices (other_day)", dropped)
     assert first.calendar is not None  # the first pass reads it whenever it goes on
     state = build_day_state(
         now,
