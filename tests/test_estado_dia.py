@@ -142,6 +142,17 @@ def test_lo_que_espera_va_solo_con_su_id(conn):
     assert SECRET_TEXT not in day.to_json()
 
 
+def test_lo_que_espera_ya_no_le_queda_y_ocupa_un_mensaje(conn):
+    """Pilla un estado que invita al modelo a proponer otra vez lo que ya espera."""
+    queue = WaitingNotices()
+    queue.add(outgoing("regar"), date(2030, 1, 7))
+    queue.add(outgoing("basura"), date(2030, 1, 7))
+    document = json.loads(state(conn, queue=queue).to_json())
+    left = {i["id"]: i["left_today"] for i in document["intentions"]}
+    assert (left["regar"], left["basura"]) == (0, 0)
+    assert document["messages_left"] == 6  # 7 para lo que no es cierre, menos el del grupo
+
+
 def test_el_repr_no_lleva_titulos_ni_propositos(conn):
     """Pilla un título de tarea o de evento, o el propósito de una intención, en el `repr`."""
     its = intentions(PLAN, CLOSE, {**PLANTS, "purpose": HIDDEN_PURPOSE})

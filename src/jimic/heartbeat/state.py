@@ -60,7 +60,7 @@ class DayState(BaseModel):
     apex: ApexSnapshot
     sent_today: list[SentEntry]
     messages_left: int
-    """Messages left today for anything but the day close."""
+    """Messages left today for anything but the day close, the one of what waits taken."""
     close_slot_kept: bool
     """The last message is kept for the day close (decision 1.7-a)."""
     intentions: list[ActiveIntention]
@@ -125,6 +125,7 @@ def build_day_state(
     """The state of the day of `now`, in `timezone`."""
     now = now.astimezone(timezone)
     quota = Quota.of(limits, intentions, sent)
+    waiting = [item.intent for item in queue.items]
     active = []
     for intention in intentions.intentions:
         if not applies_on(intention, now.date()):
@@ -141,7 +142,12 @@ def build_day_state(
                 if window is None
                 else {"from": _hour(window.start), "to": _hour(window.end)},
                 habit=intention.habit if isinstance(intention, KeyTask) else None,
-                left_today=max(0, cap_per_day(intention, limits) - sent.count(intention.id)),
+                left_today=max(
+                    0,
+                    cap_per_day(intention, limits)
+                    - sent.count(intention.id)
+                    - waiting.count(intention.id),
+                ),
             )
         )
     return DayState(
@@ -153,8 +159,9 @@ def build_day_state(
             SentEntry(intent=notice.intent, at=_hour(notice.sent_at.astimezone(timezone)))
             for notice in sent.notices
         ],
-        messages_left=quota.left_for_others,
+        # What waits goes out as one message, so it already holds one of them.
+        messages_left=max(0, quota.left_for_others - (1 if waiting else 0)),
         close_slot_kept=quota.close_slot_kept,
         intentions=active,
-        waiting=[item.intent for item in queue.items],
+        waiting=waiting,
     )
