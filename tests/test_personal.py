@@ -316,3 +316,11 @@ def test_guardar_un_documento_invalido_no_escribe_nada(config_dir):
     assert path.read_text(encoding="utf-8") == template("limites.yaml")
     assert sorted(p.name for p in config_dir.iterdir()) == sorted(YAML_FILES)
     assert dump_yaml(doc) != template("limites.yaml")
+
+
+def test_guardar_con_un_nombre_que_no_es_de_los_dos_yaml_da_un_error_claro(config_dir):
+    """Pilla un `KeyError` sin explicar si la 1.12 pasa otro nombre (`limites.yml`)."""
+    config_dir.mkdir()
+    with pytest.raises(ValueError, match=r"^limites\.yml no es un fichero YAML personal$"):
+        save_yaml_file(config_dir / "limites.yml", parse_yaml(template("limites.yaml")))
+    assert list(config_dir.iterdir()) == []

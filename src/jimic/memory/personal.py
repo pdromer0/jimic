@@ -102,7 +102,12 @@ def _problem(doc: object, loc: Sequence[str | int], error_type: str) -> Problem:
 
 
 def validate_yaml(name: str, doc: object) -> list[Problem]:
-    """Return the problems of a loaded document against the schema of file `name`."""
+    """Return the problems of a loaded document against the schema of file `name`.
+
+    Raises `ValueError` if `name` is not one of the two YAML personal files.
+    """
+    if name not in YAML_SCHEMAS:
+        raise ValueError(f"{name} no es un fichero YAML personal")
     if doc is None:
         return [Problem(None, "el fichero está vacío")]
     try:
@@ -220,7 +225,8 @@ def render_init(config_dir: Path, results: Sequence[tuple[str, bool]]) -> str:
 def save_yaml_file(path: Path, doc: object) -> None:
     """Validate `doc` against the schema of `path` and replace the file atomically (0600).
 
-    Raises `PersonalFileError` without writing anything if the document does not fit.
+    Raises `PersonalFileError` without writing anything if the document does not fit, and
+    `ValueError` if `path` is not named like one of the two YAML personal files.
     """
     problems = validate_yaml(path.name, doc)
     if problems:
