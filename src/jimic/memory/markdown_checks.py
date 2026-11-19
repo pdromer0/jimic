@@ -20,7 +20,8 @@ OBJECTIVE_TAGS = ("[medible]", "[declarado]", "[enlazado]")
 ICONS_SECTION = "Iconos"
 
 HEADING = re.compile(r" {0,3}(#{1,6})[ \t]+(.*?)[ \t]*")
-FENCE = re.compile(r" {0,3}(```|~~~)")
+# A backtick fence cannot have backticks after it (that is inline code); a tilde fence can.
+FENCE = re.compile(r" {0,3}(`{3,}(?=[^`]*$)|~{3,})(.*)")
 THEMATIC_BREAK = re.compile(r" {0,3}([-*_])(?:[ \t]*\1){2,}[ \t]*")
 TOP_LEVEL_ITEM = re.compile(r"(?:[-*+]|[0-9]{1,9}[.)])(?:[ \t]+(.*))?")
 TABLE_ROW = re.compile(r" {0,3}\|.*")
@@ -32,11 +33,20 @@ def _lines(text: str) -> Iterator[tuple[int, str]]:
     """Yield `(line number, line)` outside fenced code blocks."""
     fence: str | None = None
     for number, line in enumerate(text.splitlines(), start=1):
-        match = FENCE.match(line)
-        if match:
-            fence = None if fence == match[1] else fence or match[1]
-            continue
-        if fence is None:
+        match = FENCE.fullmatch(line)
+        if fence is None and match:
+            fence = match[1]
+        elif fence is not None:
+            # Only a fence of the same character, at least as long and with nothing after it,
+            # closes the block.
+            if (
+                match
+                and match[1][0] == fence[0]
+                and len(match[1]) >= len(fence)
+                and not match[2].strip()
+            ):
+                fence = None
+        else:
             yield number, line
 
 

@@ -76,6 +76,22 @@ def test_un_titulo_dentro_de_un_bloque_de_codigo_no_cuenta():
     assert check_routine(text) == [Problem(None, "falta la sección «Comidas»")]
 
 
+def test_un_bloque_de_codigo_solo_lo_cierra_una_valla_igual_o_mas_larga():
+    """Pilla cerrar un bloque de cuatro comillas con una de tres: lo de después se perdería."""
+    text = "````\n```\n## Comidas\n```\n````\n" + ROUTINE.replace("## Comidas\n", "")
+    assert check_routine(text) == [Problem(None, "falta la sección «Comidas»")]
+    text = ROUTINE.replace("## Comidas", "~~~ texto\n## Comidas\n```\n~~~")
+    assert check_routine(text) == [Problem(None, "falta la sección «Comidas»")]
+
+
+def test_codigo_en_linea_al_principio_no_abre_un_bloque():
+    """Pilla tomar «```x``` texto» por una valla: el resto del fichero no se miraría."""
+    assert check_routine("```x``` texto\n" + ROUTINE) == []
+    assert check_objectives("```x``` texto\n- sin etiqueta\n") == [
+        Problem(2, "objetivo sin [medible], [declarado] ni [enlazado]")
+    ]
+
+
 def test_unos_objetivos_con_sus_etiquetas_son_validos():
     """Subelementos, `Meta:`, `Prioridad:` y separadores no son objetivos."""
     assert check_objectives(OBJECTIVES) == []
