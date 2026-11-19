@@ -31,7 +31,7 @@ DAYS = 8
 # Las claves que la máscara deja pasar, a mano (no importadas: si la máscara cambia, el
 # contrato lo nota).
 LIST_KEYS = {"items", "nextPageToken"}
-CALENDAR_KEYS = {"id", "selected"}
+CALENDAR_KEYS = {"id", "selected", "summary"}
 EVENT_KEYS = {"summary", "start", "end", "status", "organizer", "attendees"}
 MOMENT_KEYS = {"date", "dateTime", "timeZone"}
 ORGANIZER_KEYS = {"self"}
@@ -115,7 +115,17 @@ def test_contrato_de_calendar(contract_env, monkeypatch):
     assert looked_at >= 1
     assert not extra, f"Google envió claves fuera de la máscara: {sorted(extra)}"
 
+    # El nombre de cada calendario llega con la máscara (1.5-e): sin él, el de Todoist no se
+    # reconocería. Solo se mira que la clave esté, nunca su valor.
+    calendars = [
+        item for uri, body in responses if "/calendarList" in uri for item in body["items"]
+    ]
+    assert calendars, "la lista de calendarios llegó vacía"
+    assert all("summary" in item for item in calendars), "un calendario llegó sin `summary`"
+
     print(
-        f"\nrecuentos: calendarios visibles={min(counts)}, eventos en {DAYS} días={len(events)}, "
+        f"\nrecuentos: calendarios visibles={min(counts)}, "
+        f"de Todoist saltados={max(d.excluded_calendar_count for d in days)}, "
+        f"eventos en {DAYS} días={len(events)}, "
         f"elementos revisados={looked_at}, respuestas={len(responses)}"
     )

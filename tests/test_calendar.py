@@ -42,7 +42,7 @@ MONDAY = date(2030, 1, 7)
 EVENT_MASK = (
     "nextPageToken,items(summary,start,end,status,organizer/self,attendees(self,responseStatus))"
 )
-CALENDAR_MASK = "nextPageToken,items(id,selected)"
+CALENDAR_MASK = "nextPageToken,items(id,selected,summary)"
 
 
 def make_reader(service: Any) -> GoogleCalendarReader:
@@ -102,8 +102,9 @@ def test_la_mascara_de_los_eventos_es_exacta_y_no_pide_descripcion():
         assert forbidden not in arguments["fields"]
 
 
-def test_la_mascara_de_los_calendarios_no_pide_ni_los_nombres():
-    """Pilla que se descargue el nombre de un calendario: solo `id` y `selected`."""
+def test_la_mascara_de_los_calendarios_pide_solo_id_visible_y_nombre():
+    """Pilla un campo de más en la lista de calendarios: el nombre, solo para saltar el de
+    Todoist (1.5-e)."""
     service = one_calendar()
     read(service)
     (arguments,) = service.requests_of("calendarList")
@@ -203,6 +204,86 @@ def test_los_calendarios_en_varias_paginas_se_recorren_todos():
     day = read(service)
     assert day.calendar_count == 2
     assert service.requests_of("calendarList")[1]["pageToken"] == "token-1"
+
+
+# --- El calendario «Todoist» (1.5-e) ---------------------------------------------------------
+
+TODOIST_NAME = "Todoist"
+
+
+def with_todoist_calendar(**todoist: Any) -> FakeGoogleService:
+    """A visible calendar of Pedro's and a visible «Todoist» one, each with one event."""
+    return FakeGoogleService(
+        paged([calendar_item("propio", name="Personal"), calendar_item("de-todoist", **todoist)]),
+        {
+            "propio": paged(
+                [timed_event("Reunión", "2030-01-07T10:00:00+01:00", "2030-01-07T11:00:00+01:00")]
+            ),
+            "de-todoist": paged(
+                [timed_event("Gimnasio", "2030-01-07T12:00:00+01:00", "2030-01-07T13:00:00+01:00")]
+            ),
+        },
+    )
+
+
+def test_el_calendario_todoist_no_aporta_eventos_y_se_cuenta_aparte():
+    """Pilla leer el calendario que llena la integración de Todoist: sus tareas saldrían dos
+    veces, y como eventos."""
+    service = with_todoist_calendar(name=TODOIST_NAME)
+    day = read(service)
+    assert [a["calendarId"] for a in service.requests_of("events")] == ["propio"]
+    assert [event.title for event in day.events] == ["Reunión"]
+    assert day.calendar_count == 1
+    assert day.excluded_calendar_count == 1
+
+
+@pytest.mark.parametrize("name", ["todoist", "Todoist ", "Todoist (trabajo)", "Mi Todoist"])
+def test_solo_el_nombre_exacto_es_el_de_todoist(name):
+    """Pilla comparar sin distinguir mayúsculas o por contener: otro calendario se perdería."""
+    day = read(with_todoist_calendar(name=name))
+    assert day.calendar_count == 2
+    assert day.excluded_calendar_count == 0
+
+
+def test_un_calendario_todoist_no_visible_ni_se_lee_ni_se_cuenta():
+    day = read(with_todoist_calendar(name=TODOIST_NAME, selected=None))
+    assert day.calendar_count == 1
+    assert day.excluded_calendar_count == 0
+
+
+def test_un_nombre_de_calendario_que_no_es_texto_es_formato_invalido():
+    day = read(with_todoist_calendar(name=5))
+    assert day.unavailable_reason == "invalid_format"
+
+
+def test_el_nombre_raro_de_un_calendario_oculto_no_tumba_el_dia():
+    """Pilla mirar el nombre antes que `selected`: un calendario que no se lee no puede romper."""
+    day = read(with_todoist_calendar(name=5, selected=None))
+    assert day.available
+    assert day.calendar_count == 1
+
+
+def test_el_nombre_de_los_calendarios_no_sale_del_lector(caplog):
+    """Pilla un nombre de calendario en el `repr`, el JSON o los logs: solo se compara."""
+    secret = "Calendario-de-Pedro-secreto-4410"
+    service = FakeGoogleService(
+        paged([calendar_item("propio", name=secret), calendar_item("t", name=TODOIST_NAME)]),
+        {"propio": paged([])},
+    )
+    failing = FakeGoogleService(
+        paged([calendar_item("propio", name=secret), calendar_item("t", name=TODOIST_NAME)]),
+        {"propio": paged([])},
+        error=http_error(500),
+    )
+    with caplog.at_level(logging.DEBUG, logger=LOGGER):
+        day = read(service)
+        broken = read(failing)
+    assert day.excluded_calendar_count == 1
+    for name in (secret, TODOIST_NAME):
+        assert name not in repr(day)
+        assert name not in day.to_json()
+        assert name not in repr(broken)
+        assert name not in caplog.text
 
 
 # --- Los eventos ------------------------------------------------------------------------------
@@ -579,6 +660,7 @@ def test_el_dia_dice_su_forma_en_json_sin_campos_vacios():
         "available": False,
         "unavailable_reason": "auth",
         "calendar_count": 0,
+        "excluded_calendar_count": 0,
         "events": [],
     }
 

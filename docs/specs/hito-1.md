@@ -59,7 +59,7 @@ clave: el gimnasio y una prioridad diaria (revisar ofertas).
 | 7:50 | Pedro acepta dos propuestas, cambia una y confirma el borrado de una atrasada duplicada; el código crea y borra | El código, tras los botones |
 | 10:00–11:00 | Reunión en curso: el ciclo se corta antes de llamar al modelo | Código, primera pasada |
 | 12:45 | Gimnasio previsto a las 12:00 sin hacer: primer aviso, tono amable | Haiku |
-| 13:00 | Sin respuesta: no se repite el aviso | Código, segunda pasada |
+| 13:00 | Sin respuesta: no se repite el aviso | Haiku; el código solo garantiza el tope de 3 (tarea 1.7) |
 | 13:30 | Segundo aviso, más directo; [Más tarde] mueve la tarea sin modelo | Haiku, después el código |
 | 17:20 | La prioridad diaria se completa a tiempo: no habla | Haiku |
 | 20:15 | Gimnasio completado: una felicitación de una línea; se acaba la insistencia | Haiku |
@@ -1326,3 +1326,110 @@ Pendiente.
   respuesta)», pero la máscara pide `attendees(self,responseStatus)` y Google envía la respuesta de cada
   invitado, sin su nombre ni su correo. Ahora lo dice así: JimiC solo usa la del usuario. El fichero no
   se mueve ni se renombra.
+
+### Tarea 1.7: estado del día y límites en dos pasadas
+
+**Qué se hizo.** Issue #20 (★), rama `feat/h1-limites`, aprobada a las 20:34 del 19-nov-2026.
+Commits: `feat(calendar)` del calendario «Todoist» (ca858b1), `feat(memory)` de `notices`
+(db78c0b), `feat(heartbeat)` de los límites (8fdc8ec), del estado (4535b2b), de las fuentes
+(f75bf56) y del ciclo (b46dea9), `refactor(calendar)` (53a6643, sin tocar tests), `test(heartbeat)`
+(938544f), `docs(diseno)` (83cd3da), `docs(privacidad)` (4227c16), `test(contrato)` (fc818ae) y, de
+la revisión propia, cinco `fix` (173a031, e8c4f00, 77aff6d, 36d6d69, 6d938fc). Este anexo es el
+último, `docs(hito-1)`.
+
+**Decisiones de la tarea** (del chat, con Pedro; las notas del issue, y las de esta sesión):
+- **1.5-e · Calendario «Todoist»** (decisión 77): se salta por su nombre exacto; `summary` solo
+  para comparar, nunca sale del lector; los saltados, en `excluded_calendar_count`.
+- **1.7-a · Hueco del cierre** (decisión 78): en la sesión, Pedro precisó que se guarda solo
+  mientras haya un `day_close` activo sin enviar hoy, y que un mensaje agrupado se cuenta por su
+  `telegram_message_id` (sin migración; una fila sin id cuenta sola).
+- **1.7-b · Agrupar = guardar y juntar** (decisión 79), con la cola en memoria.
+- **1.7-c · Una fuente caída**: el estado la marca con su código y no inventa listas vacías; sin
+  calendario, la primera pasada no para por evento.
+- **«No repetir»** (en la sesión): las notas al pie, «agotó su tope hoy». El aviso de las 13:00 del
+  día de ejemplo pasa a Haiku: el código solo garantiza el tope (fila corregida arriba).
+- **Decisión 80** (en la revisión propia): `from == to` en el silencio es todo el día.
+
+**Decisiones del diff** (lo que el plan interpretaba; se aprobó tal cual, con el informe de
+`revisor-plan`, veredicto «dudas (4)», delante):
+- Paquete `src/jimic/heartbeat/`: `limits.py` (las dos pasadas, `Quota`, `Outgoing`, `Verdict`,
+  `WaitingNotices`), `state.py` (`DayState`), `sources.py` (`open_sources`) y `cycle.py`
+  (`run_cycle`). `jimic.memory.notices.sent_between` lee `notices` y `jimic.clock.local_day_bounds`
+  da los cortes del día local.
+- Proactivos de hoy = filas de `notices`: solo las escribe el latido (1.8); las respuestas y las
+  confirmaciones que pide Pedro no van ahí. Es una regla para la 1.8, la 1.10, la 1.14 y la 1.16.
+- Orden de la primera pasada, de lo barato a lo caro: silencio (reloj), cupo (SQLite), evento (red).
+  Tareas y APEX solo se leen si sigue.
+- Un urgente que sale pasa a ser el último proactivo: la cola espera otra ventana y agrupar nunca
+  manda dos mensajes en un latido. `revisor-plan` lo marcó como sospechoso (retrasa la cola) y
+  Pedro aprobó el plan tal cual.
+- Motivos en código: `ok`, `released`, `group_window`, `repeated`, `insist_cap`,
+  `already_waiting`, `not_today`, `disabled`, `unknown_intent`, `daily_cap` y `close_slot` (este
+  también para un lote parado solo por el hueco del cierre). Lo que se descarta se registra solo
+  con cuántos y por qué (`quiet_hours`, `other_day`).
+- `decide` devuelve `Outgoing | None`; la segunda pasada corre siempre, para soltar la cola.
+- Intenciones activas en el estado: las `enabled` y los `notice` en sus días, con `left_today`
+  (descontando lo que espera) y `purpose` oculto en el `repr`. Lo que espera va al JSON solo con su
+  id. Los «ignorados esta semana» de CU-02 no están: son de la 1.15.
+- `max_per_day` frente a `max_insist_per_task` (pendiente de la 1.3): manda el menor.
+
+**Valores a mano** (código independiente, antes de implementar; los recalculó `revisor-plan`):
+96 latidos en 24 h y 64 de 7:00 a 23:00; 22:59 sigue, 23:00 para, 06:59 para, 07:00 sigue; en
+`[13:00, 15:00)`, 12:59 y 15:00 siguen; con tope 8, enviados 7: otro no, cierre sí; 8: nada; la
+ventana de 30 min desde las 10:00: 10:29:59 espera, 10:30 sale; 2030-03-31 (domingo) dura 23 h, 92
+latidos, 64 despiertos, día en UTC `[03-30T23:00, 03-31T22:00)`; 2030-10-27, 25 h, 100 latidos, 64
+despiertos, `[10-26T22:00, 10-27T23:00)`. Todos, comprobados por los tests.
+
+**Contrato de Calendar** (19-nov-2026, `JIMIC_CONTRATO=1`, copia `dev`): `calendarList` devuelve
+`summary` con la máscara (el contrato ahora lo exige, solo la clave); 1 calendario visible leído y 1
+de Todoist saltado. Solo recuentos.
+
+**Medidas.** `DayState.to_json` con datos inventados (6 eventos, 10 tareas, la foto de
+`tests/apex_data.py`, 5 avisos, 5 intenciones): 4366 bytes, 635 de ellos la foto de APEX; con la
+real (unos 2,5 KB) serán unos 6,2 KB. Para la 1.8 y la 1.10.
+La N3 (tras la revisión): 587 tests (2 de contrato saltados), 0:11 en total (pre-commit 0:06,
+pytest 0:05, gitleaks de la historia 0:00); este anexo se escribió mientras corría y solo es
+documentación.
+
+**Versiones incorrectas** (aplicadas y deshechas; ninguna se dejó en el árbol). Predicción antes,
+observado después:
+
+| # | Versión | Predicción | Observado |
+| --- | --- | --- | --- |
+| 1 | La primera pasada no mira los eventos | Rojo solo el del evento en curso (3 casos) | **4**: también el de privacidad del ciclo, que de paso paraba por un evento. Se separó (938544f) y entonces, **solo los 3** |
+| 2 | Sin hueco para el cierre | Rojo el del octavo que no es cierre | **3**: también el de «con 7 solo cabe el cierre» del ciclo y el de la cola que reaplica el cupo; la misma regla desde otro sitio (escritos después del plan) |
+| 3 | Silencio con `<=` en el final (las dos ramas) | Borde de las 7:00 y los 64 latidos | **6**: además los dos días del cambio de hora (63, como corrigió `revisor-plan`), el borde de las 15:00 y la ventana `from == to` |
+| 4 | El evento de todo el día cuenta | Rojo solo el de todo el día | Igual (1) |
+| 5 | Una `key_task` espera en la ventana | Rojo el de «no espera nunca» | **3**: también dos de la cola que usan una `key_task` como el urgente |
+| 6 | El nombre del calendario «Todoist» llega al `repr` | Rojo el de privacidad del lector | **3**: también la forma exacta del JSON y la privacidad del ciclo |
+
+Además, cada corrección de la revisión se comprobó deshaciendo el código: su test nuevo falla sin
+ella. Un fallo mío: tras cambiar la máscara solo ejecuté los tests de Calendar; la N2 cazó el de las
+ayudas del contrato, que usaba `summary` como clave de más (fc818ae).
+
+**Revisión** (`/code-review medium`). 10 hallazgos: 5 corregidos y 5 explicados (2 de ellos, con
+Pendiente).
+- Corregidos: (1) `from == to` era una ventana vacía; ahora todo el día (decisión 80, de Pedro;
+  173a031); (2) lo descartado por ser de otro día se registraba con el motivo de la parada
+  (e8c4f00); (3) el estado no descontaba lo que espera y el modelo lo volvería a proponer
+  (77aff6d); (5) el nombre de un calendario oculto podía tumbar el día (36d6d69); (6) APEX se leía
+  en el bucle de eventos; ahora en un hilo y a la vez que Todoist (6d938fc).
+- Explicados: (7) el formato de `sent_at` ya lo impone el `CHECK … GLOB` de la migración 0001;
+  (8) `Quota.of` se calcula en tres funciones puras desde las mismas entradas: es barato y cada una
+  se puede usar sola; (10) `build_day_state` recibe la zona para pasar `sent_at` a hora local; (4) y
+  (9), con Pendiente.
+
+**Pendiente.**
+- **1.8** (decisión de Pedro en la revisión propia): cablear `open_sources` y `run_cycle` en el
+  servicio y cerrar las fuentes al parar (pendiente de la 1.5); que `jimic run` cargue y valide los
+  ficheros personales (pendiente de la 1.3); escribir `notices` con una fila por intención y el
+  `telegram_message_id` del mensaje, y nada que no sea proactivo; no guardar la foto de APEX en
+  `decisions` (pendiente de la 1.6).
+- **1.8 o 2.2:** degradar la foto de APEX por series en lugar de tirarla entera (pendiente de la 1.6).
+- **1.9:** un escenario del latido para el aviso de las 13:00 del día de ejemplo (no repetir una
+  tarea clave al cuarto de hora sin novedad): ahora es de Haiku.
+- **1.12:** `from == to` en la `window` de las intenciones (solo pistas; los límites ya usan la
+  decisión 80).
+- **1.16:** el hueco del cierre sigue guardado aunque su hora haya pasado sin salir (hallazgo 9);
+  se revisa con la ventana del cierre que sale de la rutina.
+- **Límite conocido** (decisión 79): un reinicio pierde la cola de agrupar.

@@ -41,8 +41,9 @@ def test_detecta_una_clave_de_mas_en_el_evento_en_su_organizador_y_en_sus_asiste
 
 
 def test_detecta_una_clave_de_mas_en_los_calendarios_y_en_la_respuesta_entera():
-    extra, _ = unexpected_keys([(CALENDARS, {"items": [{"id": "a", "summary": "nombre"}]})])
-    assert extra == {"summary"}
+    item = {"id": "a", "summary": "nombre", "description": "d", "backgroundColor": "#000"}
+    extra, _ = unexpected_keys([(CALENDARS, {"items": [item]})])
+    assert extra == {"description", "backgroundColor"}  # `summary` sí se pide (1.5-e)
     extra, _ = unexpected_keys([(EVENTS, {"items": [], "timeZone": "Europe/Madrid", "kind": "k"})])
     assert extra == {"timeZone", "kind"}
 

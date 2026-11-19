@@ -107,9 +107,17 @@ class FakeGoogleService:
         return [arguments for name, arguments in self.requests if name == kind]
 
 
-def calendar_item(calendar_id: str, selected: bool | None = True) -> dict[str, Any]:
-    """An entry of `calendarList`; Google leaves `selected` out of the ones that are not."""
-    return {"id": calendar_id} if selected is None else {"id": calendar_id, "selected": selected}
+def calendar_item(
+    calendar_id: str, selected: bool | None = True, name: object = None
+) -> dict[str, Any]:
+    """An entry of `calendarList`; Google leaves `selected` out of the ones that are not. `name`
+    is its `summary`, left out when `None`."""
+    item: dict[str, Any] = {"id": calendar_id}
+    if selected is not None:
+        item["selected"] = selected
+    if name is not None:
+        item["summary"] = name
+    return item
 
 
 def timed_event(title: str | None, start: str, end: str, **extra: Any) -> dict[str, Any]:
