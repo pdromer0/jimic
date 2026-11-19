@@ -25,6 +25,8 @@ async def serve(
     paths: Paths, clock: Clock, stop: asyncio.Event, ready: asyncio.Event | None = None
 ) -> None:
     """Open the logs and the database, set `ready`, and wait for `stop`; then close both."""
+    # Created here, private: `mkdir(mode=...)` only applies the mode to the last folder it makes.
+    paths.data_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
     with logging_to(paths.logs_dir):
         logger.info("started at %s (%s)", clock.now().isoformat(), paths.environment)
         conn = open_database(paths.database)

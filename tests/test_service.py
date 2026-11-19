@@ -85,6 +85,20 @@ def test_arranca_y_para_con_el_evento(opened):
     conn.close()
 
 
+def test_la_raiz_de_datos_es_privada(opened):
+    """Pilla la raíz de datos creada con la umask (0755) al crear `logs/` debajo con `parents`."""
+    paths = resolve_paths(os.environ)
+
+    async def scenario():
+        stop = asyncio.Event()
+        stop.set()
+        await jimic.service.serve(paths, FixedClock(NOW), stop)
+
+    asyncio.run(scenario())
+    assert paths.data_dir.stat().st_mode & 0o777 == 0o700
+    assert paths.logs_dir.stat().st_mode & 0o777 == 0o700
+
+
 def test_el_evento_puesto_antes_de_arrancar_para_enseguida(opened):
     """El caso límite: la parada llega antes que el arranque y aun así cierra todo."""
     paths = resolve_paths(os.environ)
