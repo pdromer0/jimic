@@ -9,13 +9,17 @@ from importlib.metadata import version
 from jimic import service
 from jimic.config import ConfigError
 from jimic.doctor import diagnose, render
+from jimic.memory import personal
 from jimic.memory.database import MigrationError
-from jimic.paths import PathsError
+from jimic.paths import PathsError, resolve_paths
 
 SETUP_ERROR = 2
 """Exit status when the service cannot start because of its folders, `.env` or database.
 
 The messages of these errors name keys, paths and SQLite failures, never values."""
+
+CHECK_FAILED = 1
+"""Exit status of `jimic config check` when a personal file is invalid or a YAML one is missing."""
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -24,13 +28,39 @@ def build_parser() -> argparse.ArgumentParser:
     commands = parser.add_subparsers(dest="command")
     commands.add_parser("doctor", help="comprueba si el entorno está listo")
     commands.add_parser("run", help="arranca el servicio hasta SIGINT o SIGTERM")
+    config = commands.add_parser("config", help="ficheros personales")
+    config_commands = config.add_subparsers(dest="config_command", required=True)
+    config_commands.add_parser("check", help="dice dónde falla cada fichero, sin enseñarlo")
+    config_commands.add_parser("init", help="crea los YAML que faltan; nunca sobrescribe")
     return parser
+
+
+def config_command(command: str) -> int:
+    """Run `jimic config check` or `jimic config init` in the config root of the environment."""
+    try:
+        config_dir = resolve_paths(os.environ).config_dir
+    except PathsError as error:
+        print(f"jimic: {error}", file=sys.stderr)
+        return SETUP_ERROR
+    if command == "check":
+        reports = personal.check(config_dir)
+        print(personal.render_check(config_dir, reports))
+        return CHECK_FAILED if personal.has_errors(reports) else 0
+    try:
+        results = personal.init(config_dir)
+    except OSError as error:
+        print(f"jimic: no se pueden crear los ficheros ({type(error).__name__})", file=sys.stderr)
+        return SETUP_ERROR
+    print(personal.render_init(config_dir, results))
+    return 0
 
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if args.command == "doctor":
         print(render(diagnose()))
+    elif args.command == "config":
+        return config_command(args.config_command)
     elif args.command == "run":
         try:
             service.run(os.environ)
