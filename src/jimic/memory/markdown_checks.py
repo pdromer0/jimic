@@ -6,7 +6,8 @@
 - `preferencias.md`: a `## Iconos` section with a table whose rows start with `|` and have
   exactly two non-empty cells; the separator row (`| --- | --- |`) is not a row.
 
-Headings match exactly (level 2, same case); lines inside fenced code blocks are skipped.
+Headings match exactly (level 2, same case); lines inside fenced code blocks and HTML
+comment blocks are skipped.
 Problems carry a line and a fixed reason, never the text of the line.
 """
 
@@ -31,9 +32,19 @@ UNESCAPED_PIPE = re.compile(r"(?<!\\)\|")
 
 
 def _lines(text: str) -> Iterator[tuple[int, str]]:
-    """Yield `(line number, line)` outside fenced code blocks."""
+    """Yield `(line number, line)` outside fenced code blocks and HTML comment blocks.
+
+    A comment block starts at a line that begins with `<!--` and ends at the first `-->`.
+    """
     fence: str | None = None
+    in_comment = False
     for number, line in enumerate(text.splitlines(), start=1):
+        if in_comment:
+            in_comment = "-->" not in line
+            continue
+        if fence is None and line.lstrip().startswith("<!--"):
+            in_comment = "-->" not in line.lstrip()[4:]
+            continue
         match = FENCE.fullmatch(line)
         if fence is None and match:
             fence = match[1]

@@ -99,6 +99,14 @@ def test_codigo_en_linea_al_principio_no_abre_un_bloque():
     ]
 
 
+def test_lo_que_hay_dentro_de_un_comentario_html_no_cuenta():
+    """Pilla un ejemplo comentado tomado por un objetivo sin etiqueta."""
+    text = "<!--\n- ejemplo sin etiqueta\n-->\n<!-- una línea -->\n- tampoco\n"
+    assert check_objectives(text) == [
+        Problem(5, "objetivo sin [medible], [declarado] ni [enlazado]")
+    ]
+
+
 def test_unos_objetivos_con_sus_etiquetas_son_validos():
     """Subelementos, `Meta:`, `Prioridad:` y separadores no son objetivos."""
     assert check_objectives(OBJECTIVES) == []
