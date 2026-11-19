@@ -130,7 +130,8 @@ def _check_file(config_dir: Path, name: str) -> FileReport:
     if not path.exists():
         return FileReport(name, "missing" if name in YAML_SCHEMAS else "pending")
     try:
-        text = path.read_text(encoding="utf-8")
+        # `utf-8-sig` drops the BOM some editors write, which would hide the first heading.
+        text = path.read_text(encoding="utf-8-sig")
     except (OSError, UnicodeDecodeError) as exc:
         # Only the type: a decode error quotes the bytes it could not read.
         return FileReport(

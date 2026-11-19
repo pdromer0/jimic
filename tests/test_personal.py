@@ -224,6 +224,14 @@ def test_un_fichero_que_no_es_utf8_o_no_se_puede_leer_da_solo_el_tipo(config_dir
     )
 
 
+def test_un_fichero_con_bom_se_lee_igual(config_dir):
+    """Pilla el BOM que escriben algunos editores: escondería el primer título."""
+    config_dir.mkdir()
+    routine = "## Horario base\n## Comidas\n## Jornada\n## Fines de semana\n"
+    (config_dir / "rutina.md").write_bytes(b"\xef\xbb\xbf" + routine.encode())
+    assert report_of(config_dir, "rutina.md").status == "ok"
+
+
 def test_los_markdown_presentes_se_comprueban(config_dir):
     write(config_dir, "objetivos.md", "## Salud\n- sin etiqueta\n")
     report = report_of(config_dir, "objetivos.md")
