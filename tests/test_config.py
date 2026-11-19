@@ -4,35 +4,15 @@ import os
 from pathlib import Path
 
 import pytest
+from conftest import VALID_ENV, write_env
 
 from jimic.config import ConfigError, load_settings
 from jimic.paths import resolve_paths
-
-VALID_ENV = {
-    "ENTORNO": "prod",
-    "ZONA_HORARIA": "Europe/Madrid",
-    "MODELO_LATIDO": "modelo-latido-de-prueba",
-    "MODELO_AGENTE": "modelo-agente-de-prueba",
-    "CLAVE_ANTHROPIC": "test-clave-anthropic-123",
-    "TOKEN_TELEGRAM": "test-token-telegram-456",
-    "CHAT_TELEGRAM": "987654321",
-    "TOKEN_TODOIST": "test-token-todoist-789",
-    "RUTA_APEX": "/datos/inventados/apex.json",
-}
-"""Un `.env` válido de producción con valores inventados y fáciles de buscar en un texto."""
 
 
 def distinct_values(values: dict[str, str]) -> list[str]:
     """Return the values that could not appear in a message by chance (not `prod` or a zone)."""
     return [v for k, v in values.items() if k not in ("ENTORNO", "ZONA_HORARIA")]
-
-
-def write_env(values: dict[str, str]) -> Path:
-    """Write `values` as the `.env` of the environment selected by `os.environ`."""
-    paths = resolve_paths(os.environ)
-    paths.config_dir.mkdir(parents=True)
-    paths.env_file.write_text("".join(f"{k}={v}\n" for k, v in values.items()))
-    return paths.env_file
 
 
 def load_error(values: dict[str, str]) -> str:

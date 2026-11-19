@@ -4,11 +4,35 @@ from pathlib import Path
 
 import pytest
 
+from jimic.paths import resolve_paths
+
 SLOW_TIMEOUT = 600
 """Segundos por test `slow`: un tope contra un bucle sin fin, no una medida."""
 
 REAL_HOME = Path(os.path.expanduser("~"))
 """El home real, leído al importar, antes de que ningún fixture lo cambie."""
+
+
+VALID_ENV = {
+    "ENTORNO": "prod",
+    "ZONA_HORARIA": "Europe/Madrid",
+    "MODELO_LATIDO": "modelo-latido-de-prueba",
+    "MODELO_AGENTE": "modelo-agente-de-prueba",
+    "CLAVE_ANTHROPIC": "test-clave-anthropic-123",
+    "TOKEN_TELEGRAM": "test-token-telegram-456",
+    "CHAT_TELEGRAM": "987654321",
+    "TOKEN_TODOIST": "test-token-todoist-789",
+    "RUTA_APEX": "/datos/inventados/apex.json",
+}
+"""Un `.env` válido de producción con valores inventados y fáciles de buscar en un texto."""
+
+
+def write_env(values: dict[str, str]) -> Path:
+    """Write `values` as the `.env` of the environment selected by `os.environ`."""
+    paths = resolve_paths(os.environ)
+    paths.config_dir.mkdir(parents=True)
+    paths.env_file.write_text("".join(f"{k}={v}\n" for k, v in values.items()))
+    return paths.env_file
 
 
 class FixedClock:
