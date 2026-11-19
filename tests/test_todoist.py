@@ -65,12 +65,12 @@ def ids(result: TaskList) -> list[str]:
 
 def test_el_lector_no_tiene_ninguna_funcion_que_escriba():
     """Pilla un método de escritura en la interfaz del lector o en cualquiera de sus versiones."""
-    for cls in (TodoistReader, ApiTodoistReader, FixedTodoistReader):
+    for cls in (TodoistReader, ApiTodoistReader, todoist.GuardedReader, FixedTodoistReader):
         assert public_members(cls) == READ_MEMBERS, cls
 
 
 def test_el_escritor_tiene_las_cuatro_funciones_y_ninguna_de_lectura():
-    for cls in (TodoistWriter, ApiTodoistWriter):
+    for cls in (TodoistWriter, ApiTodoistWriter, todoist.GuardedWriter):
         assert public_members(cls) == WRITE_MEMBERS, cls
 
 

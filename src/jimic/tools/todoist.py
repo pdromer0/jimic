@@ -1,4 +1,4 @@
-"""Todoist: a reader and a writer that are two different objects.
+"""Todoist: a reader and a writer that are two different objects, and the guard of `dev`.
 
 The agent is given **only the reader** (task 1.10): the functions that change Todoist (create,
 move, complete, delete) belong to the code and run after Pedro's button or message (H1-1). A
@@ -7,11 +7,16 @@ test checks that the reader has no method that writes.
 When Todoist cannot be read the list says so with a code and the service goes on (`auth`,
 `timeout`, `http_503`...: a type of failure, never content); it goes to the log once. A write
 that fails raises `ToolFailure` with the same kind of code: whoever executes must know.
+
+With `ENTORNO=dev` the guard (1.5-b) wraps both so that the test copy only sees and touches the
+project in `PROYECTO_PRUEBAS_TODOIST`: the account is Pedro's real one. `build_todoist` applies
+it, so the service cannot forget it.
 """
 
 import asyncio
 import logging
-from collections.abc import AsyncIterator, Awaitable
+from collections.abc import AsyncIterator, Awaitable, Callable
+from dataclasses import dataclass
 from datetime import date, datetime, time
 from typing import Literal, Protocol
 from zoneinfo import ZoneInfo
@@ -19,9 +24,11 @@ from zoneinfo import ZoneInfo
 import httpx
 from dataclass_wizard.errors import JSONWizardError
 from pydantic import BaseModel, ConfigDict, Field
+from todoist_api_python.api_async import TodoistAPIAsync
 from todoist_api_python.models import Task
 
 from jimic.clock import Clock
+from jimic.config import Settings
 from jimic.tools.failures import MAX_PAGES, ToolFailure, TooManyPages, WarnOnce
 
 logger = logging.getLogger(__name__)
@@ -32,6 +39,9 @@ timeout inside every request (60 s to read), so this one is ours."""
 PAGE_SIZE = 200
 """Tasks per page (the most Todoist gives): `MAX_PAGES` pages are up to 2000 tasks."""
 MINUTES_PER_DAY = 24 * 60
+
+OUTSIDE_TEST_PROJECT = "outside_test_project"
+TASK_NOT_FOUND = "task_not_found"
 
 type Due = date | datetime
 """A day (`date`) or a moment (`datetime` with a zone)."""
@@ -324,3 +334,105 @@ class ApiTodoistWriter:
     async def delete(self, task_id: str) -> None:
         if not await _call(self._api.delete_task(task_id)):
             raise ToolFailure("not_deleted")
+
+
+class GuardedReader:
+    """The reader of the test copy: only the project in `PROYECTO_PRUEBAS_TODOIST` exists."""
+
+    def __init__(self, inner: TodoistReader, project_id: str) -> None:
+        self._inner = inner
+        self._project_id = project_id
+
+    async def read_today(self, project_id: str | None = None) -> TaskList:
+        if project_id not in (None, self._project_id):
+            return TaskList.unavailable(OUTSIDE_TEST_PROJECT)
+        return self._only_the_project(await self._inner.read_today(self._project_id))
+
+    async def read_project(self, project_id: str) -> TaskList:
+        if project_id != self._project_id:
+            return TaskList.unavailable(OUTSIDE_TEST_PROJECT)
+        return self._only_the_project(await self._inner.read_project(self._project_id))
+
+    async def get_task(self, task_id: str) -> TodoistTask | None:
+        task = await self._inner.get_task(task_id)
+        if task is not None and task.project_id != self._project_id:
+            raise ToolFailure(OUTSIDE_TEST_PROJECT)  # the code only, not the title
+        return task
+
+    def _only_the_project(self, result: TaskList) -> TaskList:
+        """A second barrier: the request was already limited, so nothing should be left to drop."""
+        kept = [t for t in result.tasks if t.project_id == self._project_id]
+        if len(kept) != len(result.tasks):
+            logger.warning(
+                "the guard dropped %d tasks outside the test project", len(result.tasks) - len(kept)
+            )
+            return result.model_copy(update={"tasks": kept})
+        return result
+
+
+class GuardedWriter:
+    """The writer of the test copy: it creates in the test project and touches nothing else.
+
+    Before it moves, completes or deletes it reads the task fresh and refuses if it is from
+    another project (`reader` is the guarded one, which says so with a code and no title).
+    """
+
+    def __init__(self, inner: TodoistWriter, reader: GuardedReader, project_id: str) -> None:
+        self._inner = inner
+        self._reader = reader
+        self._project_id = project_id
+
+    async def create(
+        self, content: str, project_id: str, due: Due, duration_minutes: int | None = None
+    ) -> TodoistTask:
+        return await self._inner.create(content, self._project_id, due, duration_minutes)
+
+    async def move(self, task_id: str, due: Due) -> None:
+        await self._check(task_id)
+        await self._inner.move(task_id, due)
+
+    async def complete(self, task_id: str) -> None:
+        await self._check(task_id)
+        await self._inner.complete(task_id)
+
+    async def delete(self, task_id: str) -> None:
+        await self._check(task_id)
+        await self._inner.delete(task_id)
+
+    async def _check(self, task_id: str) -> None:
+        if await self._reader.get_task(task_id) is None:
+            raise ToolFailure(TASK_NOT_FOUND)
+
+
+@dataclass(frozen=True)
+class TodoistTools:
+    """The reader, the writer and how to close the connection, as the service gets them."""
+
+    reader: TodoistReader
+    writer: TodoistWriter
+    close: Callable[[], Awaitable[None]]
+
+
+def guard(
+    reader: TodoistReader,
+    writer: TodoistWriter,
+    project_id: str,
+    close: Callable[[], Awaitable[None]],
+) -> TodoistTools:
+    """Wrap `reader` and `writer` so they only see and touch `project_id`."""
+    guarded_reader = GuardedReader(reader, project_id)
+    return TodoistTools(guarded_reader, GuardedWriter(writer, guarded_reader, project_id), close)
+
+
+def build_todoist(settings: Settings, clock: Clock, api: TodoistApi | None = None) -> TodoistTools:
+    """The Todoist of this copy: with `ENTORNO=dev` the guard is always applied."""
+    real: TodoistApi = (
+        api if api is not None else TodoistAPIAsync(settings.todoist_token.get_secret_value())
+    )
+    reader = ApiTodoistReader(real, clock, settings.timezone)
+    writer = ApiTodoistWriter(real, settings.timezone)
+    if settings.environment == "dev":
+        if settings.todoist_test_project is None:
+            raise ValueError("ENTORNO=dev sin PROYECTO_PRUEBAS_TODOIST")
+        return guard(reader, writer, settings.todoist_test_project, real.close)
+    return TodoistTools(reader, writer, real.close)
