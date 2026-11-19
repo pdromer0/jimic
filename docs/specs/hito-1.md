@@ -1020,3 +1020,101 @@ separadora, normalización de la ida y vuelta y más valores inventados). En la 
 el plan tal cual; sus dudas se resolvieron en el código o quedan arriba en Pendiente. El primer
 criterio del issue pasa a ser «una hora con formato inválido (`7h`, `25:00`) o un hábito sin
 prioridad dan un error claro con fichero y línea» (cambio de la revisión del chat).
+
+### Tarea 1.6: lector de APEX
+
+**Qué se hizo.** Issue #19, rama `feat/h1-apex`. Commits: `feat(apex)` del contrato y la foto
+(76b3f83) y del lector local (93f0f27); `docs(diseno)` (c003944); de la revisión propia, un
+`fix(apex)` (eebdf56). Este anexo es el último, `docs(hito-1)`.
+
+**Decisiones de la tarea** (del chat, con Pedro; las notas del issue):
+- **1.6-a · Entreno de hoy:** tres estados, `trained`, `not_recorded` y `unknown`; `unknown` si
+  `meta.ultima_actualizacion` es anterior a las 00:00 de hoy.
+- **1.6-b · Biométricos** (H1-19, decisión 73): se leen y se resumen; nunca a logs ni a SQLite. En
+  la aprobación del plan Pedro eligió que JimiC pueda mencionarlos **con cifras**, lo que cambia
+  8.2 (excepción a «sin cifras en la notificación»).
+- **1.6-c · Objetivos** (H1-20, decisión 74): los de APEX en curso, por `prioridad`; `objetivos.md`
+  no los repite.
+
+**Decisiones del diff** (lo que el plan interpretaba y se aprobó tal cual):
+- `tools/apex_schema.py` (contrato y foto, funciones puras) y `tools/apex.py` (la interfaz y el
+  lector local), en la carpeta `tools/` del diseño 6.7. `service.py` y la CLI no cambian: la 1.7
+  lo cablea.
+- `ApexReader` solo tiene `read_today()`, síncrona (el lector local es instantáneo gracias a la
+  caché; la 2.2 puede cambiarla). Los miembros públicos de la interfaz y de las dos
+  implementaciones se comparan con `{"read_today"}`.
+- Contrato estricto (`strict=True`) en lo que se usa, ciego a lo demás (`extra="ignore"`). Fechas
+  con `[0-9]` y no `\d`. Un número que no cabe en `float`, NaN, infinitos y `bool` rompen el
+  contrato. `biometricos` es opcional; `meta`, `plan`, `entrenamientos` y `objetivos`, obligatorios.
+- «Últimos 7 días» = hoy y los 6 anteriores; la media divide entre las lecturas que hay; las
+  lecturas posteriores a hoy se ignoran. Bloque del plan con `inicio` y `fin` incluidos; sin la
+  clave del día, «sin plan».
+- Caché por `(st_mtime_ns, st_size)` **del fichero abierto** (`fstat`, no el `stat` previo), que
+  se guarda también con el fallo de contenido (JSON roto, formato). Los fallos de E/S (permisos,
+  fichero ausente) no se cachean: una espera de la sincronización de Drive no debe quedarse.
+- Fallos con código: `file_missing`, `file_unreadable` (también carpeta y FIFO: se exige fichero
+  regular y no se abre una tubería), `file_too_large` (10 MiB), `invalid_json` (incluye UTF-8 roto
+  y anidamiento excesivo), `invalid_format:<sección>` (solo secciones conocidas, nunca claves de
+  Pedro) y `unexpected:<Excepción>`. Un aviso `WARNING` al pasar a no disponible, otro si se
+  recupera y vuelve a fallar; sin ruta ni contenido.
+- `ApexSnapshot` oculta de su `repr` los entrenos, objetivos y biométricos (`repr=False`).
+- Datos de prueba en `tests/apex_data.py` (Python), no en `tests/data/`: esa carpeta dispara el
+  módulo `datos-de-referencia`. Incluye `FixedApexReader`, la tercera implementación del diseño,
+  para las pruebas de la 1.7 y la 1.10.
+
+**Valores a mano** (código independiente, antes de implementar): 2030-01-07 es lunes (0),
+2030-01-13 domingo (6), 2030-01-01 martes (1), 2030-02-28 jueves (3, fin del bloque), 2030-03-01
+viernes y 2029-12-31 lunes (fuera). Ventana del 7-ene: 1-ene → 7-ene. Media con huecos (31-dic
+9.9, 1-ene 7.0, 3-ene 6.0, 6-ene 5.0): dentro 7.0, 6.0 y 5.0 dan 6.0; dividida entre 7, 2.5714…;
+con el 31-dic, 6.975. La sincronización del 6-ene a las 23:59:59 es anterior al inicio del 7-ene;
+la de las 00:00:00 no. El 31-mar-2030 las medianoches de Madrid son +01:00 y +02:00 y el día dura
+24 h de calendario (los tests comparan instantes con zona).
+
+**Medidas.** La foto de los datos fijos mide **635 bytes** (`model_dump_json(exclude_none=True)`),
+muy por debajo de los ~4 KB que paraban la tarea. Suite de la tarea: 104 tests en 0,25 s (64 del
+contrato y la foto, 40 del lector). N3, tras la corrección de la revisión: en verde en 0:08
+(pre-commit 0:05, pytest 0:03 con 298 tests, gitleaks de la historia 0:00); este anexo se escribió
+mientras corría y solo es documentación. El contrato no se ha probado contra el `apex_db.json` de
+Pedro (nada personal en el repositorio).
+
+**Versiones incorrectas** (aplicadas y deshechas con un script; ninguna se dejó en el árbol):
+
+| # | Versión | Predicción | Observado |
+| --- | --- | --- | --- |
+| A | `"0"` = domingo (`isoweekday() % 7`) | Fallan los del día de la semana; pasan tres estados, caché, logs y solo lectura | Fallan 7, todos de día de la semana (cuatro de la tabla, el de los siete días, el de la clave ausente y el de la zona); el resto pasa |
+| B | Sin la regla de «desconocido» | Solo el caso de «sincronización anterior al inicio del día» | Fallan 4: los dos de esa regla y, además, los de la zona y del cambio de hora, que también la ejercen |
+| C1 | El log lleva el JSON de la foto | Falla el de logs | Así, solo ese |
+| C2 | `repr` con valores | Fallan el de logs y el del `repr` | Así, esos dos |
+| D | Sin caché | Falla «no se vuelve a leer» | Fallan ese y el del fichero roto cacheado |
+| E | Media entre 7 | Solo el de la media con huecos | Así, solo ese |
+| F | Aviso en cada lectura | Falla «un solo aviso»; pasa «recuperar y fallar» | Fallan el del roto y el del ausente; pasa el de recuperar |
+| G | El lector abre con `r+b` | Falla el de «solo se abre en lectura» y el de carpeta de solo lectura | Así, los dos |
+
+**Revisión** (`/code-review medium`). 9 hallazgos: 1 corregido, 8 explicados y 2 de ellos, con
+Pendiente.
+- Corregido: (7) la media de dos lecturas finitas grandes desbordaba a infinito (eebdf56; el test
+  falla con el código anterior).
+- Explicados: (1) un valor de `estructura_semanal` que no es texto rompe el contrato, como pide
+  «un campo usado con otro tipo»; (3) solo se avisa al pasar a no disponible (lo aprobado en el
+  plan); (4) la clave de caché es la de las notas; (5) «desconocido» con una sincronización vieja es
+  literal de las notas; (6) el pliegue del cambio de hora cae después de la medianoche y no cambia
+  la comparación, y una sincronización futura es un reloj roto; (8) el contrato supone que APEX y
+  la configuración usan la misma zona; (9) el día de descanso viene como texto («Descanso») y
+  «sin plan» es lo que piden las notas.
+- Explicados con Pendiente: (2) una lectura biométrica mala tira toda la foto; y (4) la caché no
+  vería una reescritura que conservara tamaño y `mtime`.
+
+**Pendiente.**
+- Comprobar el contrato contra el `apex_db.json` real, a mano y sin copiarlo. Destino: la 1.7.
+- Si el fichero real manda valores nulos o formatos distintos en los biométricos o en el plan,
+  degradar por series o por lecturas en lugar de tirar toda la foto (hallazgos 1 y 2). Destino: la
+  1.7, con ese fichero a la vista.
+- Si APEX reescribe conservando tamaño y `mtime`, la caché necesita un hash (hallazgo 4). Destino: la
+  comprobación del H1 («APEX conserva el ID»), en la 2.2.
+- Que la foto no se guarde en SQLite (`decisions`): lo decide quien la persiste. Destino: la 1.7 y
+  la 1.8.
+- `actividad_diaria` (pasos…). Destino: la 1.14.
+- Re-medir el tamaño con la serialización que use la herramienta `read_apex_today`. Destino: la
+  1.10. La interfaz asíncrona, si hace falta, en la 2.2.
+- Aparece `tests/apex_data.py`, no `tests/data/`: el módulo `datos-de-referencia` sigue sin
+  dispararse. Destino: decidirlo cuando haya más datos sintéticos (Todoist, 1.5).
