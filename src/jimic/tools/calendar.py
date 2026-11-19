@@ -276,11 +276,11 @@ class GoogleCalendarReader:
             for item in page.get("items", []):
                 if not isinstance(item, dict) or not isinstance(item.get("id"), str):
                     raise _InvalidFormat
+                if item.get("selected") is not True:
+                    continue  # a hidden calendar is skipped before its name is even looked at
                 name = item.get("summary")
                 if name is not None and not isinstance(name, str):
                     raise _InvalidFormat
-                if item.get("selected") is not True:
-                    continue
                 if name == TODOIST_CALENDAR:
                     excluded += 1
                 else:

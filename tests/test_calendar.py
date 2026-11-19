@@ -256,6 +256,13 @@ def test_un_nombre_de_calendario_que_no_es_texto_es_formato_invalido():
     assert day.unavailable_reason == "invalid_format"
 
 
+def test_el_nombre_raro_de_un_calendario_oculto_no_tumba_el_dia():
+    """Pilla mirar el nombre antes que `selected`: un calendario que no se lee no puede romper."""
+    day = read(with_todoist_calendar(name=5, selected=None))
+    assert day.available
+    assert day.calendar_count == 1
+
+
 def test_el_nombre_de_los_calendarios_no_sale_del_lector(caplog):
     """Pilla un nombre de calendario en el `repr`, el JSON o los logs: solo se compara."""
     secret = "Calendario-de-Pedro-secreto-4410"
