@@ -45,6 +45,7 @@ REQUIRED = [
     "complete_recurring_next",
     "move_recurring_to_hour",
     "move_recurring_to_day",
+    "move_recurring_spanish",
     "move_keeps_recurrence",
     "has_subtasks_flag",
     "delete_gone",
@@ -158,6 +159,21 @@ def test_contrato_de_todoist(contract_env):
             )
             seen["move_keeps_recurrence"] = bool(
                 seen["move_recurring_to_hour"] and seen["move_recurring_to_day"]
+            )
+
+            # 6b. Una recurrente escrita en español (como las que Pedro crea en la app): el texto
+            #     viaja con su idioma y sigue siendo recurrente.
+            spanish = await raw.add_task(
+                name("rec-es"),
+                project_id=project,
+                due_string="todos los días a las 9:00",
+                due_lang="es",
+            )
+            created.append(spanish.id)
+            await writer.move(spanish.id, hour)
+            at_spanish = await reader.get_task(spanish.id)
+            seen["move_recurring_spanish"] = (
+                at_spanish is not None and at_spanish.is_recurring and at_spanish.due == hour
             )
 
             # 7. Subtareas: el lector lo sabe, y qué pasa al borrar el padre (anexo B).

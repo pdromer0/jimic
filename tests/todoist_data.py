@@ -41,6 +41,7 @@ def raw_task(
     duration: int | None = None,
     description: str = "",
     due_string: str = "inventado",
+    due_lang: str = "en",
 ) -> dict[str, Any]:
     """The JSON of a task in API v1. `due` is `2030-01-07`, `2030-01-07T09:00:00` (floating)
     or `2030-01-07T09:00:00Z` (UTC)."""
@@ -55,7 +56,7 @@ def raw_task(
         "priority": 1,
         "due": None
         if due is None
-        else {"date": due, "string": due_string, "lang": "en", "is_recurring": recurring},
+        else {"date": due, "string": due_string, "lang": due_lang, "is_recurring": recurring},
         "deadline": None,
         "duration": None if duration is None else {"amount": duration, "unit": "minute"},
         "checked": False,
@@ -216,6 +217,7 @@ class FakeTodoistApi:
         task_id: str,
         *,
         due_string: str | None = None,
+        due_lang: str | None = None,
         due_date: date | None = None,
         due_datetime: datetime | None = None,
     ) -> Task:
@@ -223,6 +225,7 @@ class FakeTodoistApi:
             "update_task",
             task_id=task_id,
             due_string=due_string,
+            due_lang=due_lang,
             due_date=due_date,
             due_datetime=due_datetime,
         )

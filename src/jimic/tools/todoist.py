@@ -155,6 +155,7 @@ class TodoistApi(Protocol):
         task_id: str,
         *,
         due_string: str | None = None,
+        due_lang: str | None = None,
         due_date: date | None = None,
         due_datetime: datetime | None = None,
     ) -> Task: ...
@@ -347,13 +348,17 @@ class ApiTodoistWriter:
         except ToolFailure as error:
             raise ToolFailure(TASK_NOT_FOUND if error.code == "http_404" else error.code) from None
         # A new date alone turns a recurring task into a plain one (contract of 19-nov-2026):
-        # with the text of its recurrence next to the date it stays recurring.
-        recurrence = (
-            current.due.string if current.due is not None and current.due.is_recurring else None
-        )
+        # with the text of its recurrence next to the date it stays recurring. The text is in the
+        # language it was written in (a task made in the app can be in Spanish), so it goes
+        # with that language.
+        recurrence = current.due if current.due is not None and current.due.is_recurring else None
         await _call(
             self._api.update_task(
-                task_id, due_string=recurrence, due_date=due_date, due_datetime=due_datetime
+                task_id,
+                due_string=None if recurrence is None else recurrence.string,
+                due_lang=None if recurrence is None else recurrence.lang,
+                due_date=due_date,
+                due_datetime=due_datetime,
             )
         )
 

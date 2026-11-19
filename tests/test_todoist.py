@@ -541,12 +541,26 @@ def test_mover_una_recurrente_manda_el_texto_de_su_recurrencia_y_sigue_siendo_re
     assert task.is_recurring
 
 
+def test_el_texto_de_la_recurrencia_viaja_con_su_idioma():
+    """Pilla un texto en español mandado como si fuera inglés: Todoist lo leería mal."""
+    api = FakeTodoistApi(
+        [
+            raw_task(
+                "rec", due="2030-01-07", recurring=True, due_string="todos los días", due_lang="es"
+            )
+        ]
+    )
+    run(make_writer(api).move("rec", date(2030, 1, 9)))
+    (call,) = api.calls_of("update_task")
+    assert (call["due_string"], call["due_lang"]) == ("todos los días", "es")
+
+
 def test_mover_una_normal_no_manda_texto_de_recurrencia():
     """Pilla un `due_string` en una tarea normal: su texto es la fecha, no una recurrencia."""
     api = FakeTodoistApi([raw_task("a", due="2030-01-07", due_string="2030-01-07")])
     run(make_writer(api).move("a", date(2030, 1, 9)))
     (call,) = api.calls_of("update_task")
-    assert call["due_string"] is None
+    assert (call["due_string"], call["due_lang"]) == (None, None)
     (task,) = run(make_reader(api).read_project(TEST_PROJECT)).tasks
     assert not task.is_recurring and task.due == date(2030, 1, 9)
 
