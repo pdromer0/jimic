@@ -180,7 +180,7 @@ pasadas cada uno, con un informe de porcentajes. Nunca en el CI.
 
 | Ruta | Qué guarda |
 | --- | --- |
-| `~/.config/jimic/` | Los ficheros personales (7.2 del diseño) y el `.env` |
+| `~/.config/jimic/` | Los ficheros personales (7.2 del diseño), el `.env` y `google_cliente.json` (el cliente OAuth de Google, permisos 600; el token de usuario lo decide la 1.5) |
 | `~/.local/share/jimic/` | SQLite, los logs (`logs/`), las copias y las transcripciones del agente (`CLAUDE_CONFIG_DIR`) |
 | `~/.config/jimic-dev/` y `~/.local/share/jimic-dev/` | Lo mismo para la copia de pruebas |
 
