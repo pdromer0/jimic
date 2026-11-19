@@ -75,11 +75,34 @@ def test_un_valor_vacio_es_un_error():
     assert problems == ["- TOKEN_TELEGRAM está vacía", "- RUTA_APEX está vacía"]
 
 
-def test_una_clave_desconocida_es_un_error():
-    """Pilla erratas que se ignorarían en silencio; tampoco imprime su valor."""
+def test_una_clave_desconocida_es_un_error_sin_nombrarla():
+    """Pilla erratas que se ignorarían en silencio; ni la clave ni su valor salen en el error."""
     problems = load_problems(VALID_ENV | {"TOKEN_TELEGRAMM": "test-errata-000"})
-    assert problems == ["- TOKEN_TELEGRAMM no es una clave conocida"]
+    assert problems == ["- hay 1 línea que no es una clave conocida (no se muestra)"]
     assert_no_values(problems, ["test-errata-000", *distinct_values(VALID_ENV)])
+
+
+def test_un_token_con_igual_pegado_solo_no_sale_en_el_error():
+    """Pilla nombrar la clave desconocida: `abc==` se lee como clave `abc` con valor `=`."""
+    env_file = write_env(VALID_ENV)
+    with env_file.open("a") as env:
+        env.write("dGVzdC10b2tlbi1zdWVsdG8==\nTOKEN_TELEGRAMM=test-errata-000\n")
+    with pytest.raises(ConfigError) as excinfo:
+        load_settings(resolve_paths(os.environ))
+    message = str(excinfo.value)
+    assert message.splitlines()[1:] == [
+        "- hay 2 líneas que no son claves conocidas (no se muestran)"
+    ]
+    for secret in ("dGVzdC10b2tlbi1zdWVsdG8", "TOKEN_TELEGRAMM", "test-errata-000"):
+        assert secret.lower() not in message.lower()
+
+
+def test_una_linea_suelta_sin_igual_se_ignora():
+    """Documenta python-dotenv: una línea sin `=` es una clave sin valor y no llega a Pydantic."""
+    env_file = write_env(VALID_ENV)
+    with env_file.open("a") as env:
+        env.write("test-token-suelto-321\n")
+    assert load_settings(resolve_paths(os.environ)).environment == "prod"
 
 
 def test_sin_env_dice_donde_lo_busca():

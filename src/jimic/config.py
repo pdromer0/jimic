@@ -64,16 +64,23 @@ def _describe(key: str, error_type: str) -> str:
         return f"falta {key}"
     if error_type in ("string_too_short", "too_short"):  # `too_short` comes from `SecretStr`
         return f"{key} está vacía"
-    if error_type == "extra_forbidden":
-        return f"{key} no es una clave conocida"
     return f"{key} no es válida ({error_type})"
 
 
 def _format_errors(exc: ValidationError) -> list[str]:
     problems = []
+    unknown = 0
     for error in exc.errors(include_input=False, include_url=False, include_context=False):
+        if error["type"] == "extra_forbidden":
+            # Never named: a token pasted with `=` in it (`abc==`) is read as the key `abc`.
+            unknown += 1
+            continue
         key = str(error["loc"][0]).upper() if error["loc"] else "?"
         problems.append(_describe(key, error["type"]))
+    if unknown == 1:
+        problems.append("hay 1 línea que no es una clave conocida (no se muestra)")
+    elif unknown > 1:
+        problems.append(f"hay {unknown} líneas que no son claves conocidas (no se muestran)")
     return problems
 
 
