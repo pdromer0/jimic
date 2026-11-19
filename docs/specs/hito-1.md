@@ -743,3 +743,115 @@ métricas del PR. Incluye la espera de la sesión nueva.
 documentación, sin otra N3 por `tarea.md` §4): la prioridad del «solo lectura» y la línea larga
 del anexo de la P1, arriba. Las métricas del PR se completan con las cifras del chat: 3 idas y
 vueltas y 1 ronda de revisión.
+
+### Tarea 1.2: esqueleto del servicio
+
+**Qué se hizo.** Issue #13, rama `feat/h1-esqueleto`, PR #36. Commits: `chore(deps)` (9a949e8),
+`feat(paths)` (bd97d5b), `feat(config)` (7dd2e28), `feat(clock)` (7ccf61c), `feat(memory)` de la
+base (be7556d) y de la retención (498330c), `feat(logs)` (2c1344e), `test(config)` (e0aa0a1, las
+ayudas a `conftest.py`), `feat(service)` (3ee96d0), `chore(claude)` (e974d35), `test(config)`
+(2569957, tras la versión incorrecta B2), `docs(hito-1)` (3775d1e) y `docs(diseno)` (c543c8b). De la
+revisión propia: `fix(service)` (47386bf y 55f3e19), `fix(config)` (f2fe9bc), `fix(logs)` (94dcb2d)
+y `fix(memory)` (fe36728). Este anexo es el último, `docs(hito-1)`.
+
+**Decisiones de la tarea** (del chat, con Pedro):
+- **1.2-a · SQLite:** `sqlite3` de la biblioteca estándar y migraciones SQL numeradas en el paquete
+  (`src/jimic/memory/migrations/0001_initial.sql`), aplicadas al arrancar según `PRAGMA
+  user_version`, una transacción por migración. Es el patrón estándar: sin ADR.
+- **1.2-b · Logs:** a stderr y a `<raíz de datos>/logs/jimic.log`, rotado a medianoche y guardado
+  7 días. Solo qué pasó, nunca el contenido.
+
+**Decisiones del diff.**
+- `JIMIC_ENTORNO` (`prod` o sin definir, y `dev`) elige las dos raíces; el XDG se respeta solo con
+  rutas absolutas. Un *fixture* autouse da a todos los tests un `HOME` falso y quita `XDG_*` y
+  `JIMIC_ENTORNO`.
+- El `.env` define ya todas las claves de la especificación (para que la 1.1 sepa cuáles escribir),
+  en español y sin prefijo; los campos de Python, en inglés con alias. `RUTA_APEX` es una ruta
+  local y no se comprueba que exista (ajuste de la aprobación: el ID de Drive llega en la 2.2).
+  `ENTORNO` debe coincidir con `JIMIC_ENTORNO`; `PROYECTO_PRUEBAS_TODOIST` solo es obligatoria en
+  `dev`. Solo se lee el fichero (fuentes `init` y `dotenv`), no las variables del proceso, y una
+  clave desconocida es un error.
+- Los errores se rehacen con `loc` y `type`: nunca `str(exc)` ni `msg`. Pydantic valida
+  `ZoneInfo` solo, pero su `msg` repite el valor (`invalid timezone: …`). `SecretStr` da
+  `too_short`, y `str`, `string_too_short`. `RUTA_APEX=` sería `Path(".")`; un validador previo lo
+  rechaza como vacío. El `__init__` que pyright sintetiza no conoce `_env_file`: un
+  `pyright: ignore[reportCallIssue]` con su motivo.
+- Momentos en UTC al segundo (`to_db`); días `YYYY-MM-DD` locales; un `CHECK` con `GLOB` impone los
+  dos formatos. Tablas `STRICT`, `CHECK` en los estados, `foreign_keys` activo, `plan_items` →
+  `day_plans` con `ON DELETE CASCADE` y `deleted_tasks.approval_id` sin clave ajena (retenciones
+  distintas). El identificador de la sesión del agente lo añade la 1.10.
+- Conexión con `autocommit=True` y transacciones siempre explícitas (`transaction()`): con
+  `autocommit=False`, `sqlite3` abre una transacción al conectar y `PRAGMA foreign_keys` dentro de
+  ella no hace nada.
+- Retención: cortes absolutos en UTC; las tablas por día comparan con el día local del reloj.
+- Test estructural con `ast`: fuera de `clock.py` nadie llama a `datetime.now`, `datetime.utcnow`,
+  `date.today` ni `time.time`; `clock.now()` sí (ajuste de la aprobación).
+- Señales: `loop.add_signal_handler` para SIGINT y SIGTERM. En los tests, un manejador de guarda
+  que lanza, para que una señal sin manejar falle el test y no mate pytest.
+- El `deny` (`Read` y `Edit` de `~/.config/jimic*/**` y `~/.local/share/jimic*/**`) se probó en
+  esta sesión: `Read` y `cat` de `~/.config/jimic-dev/prueba-deny.txt` (texto inventado, creado
+  antes del `deny`) se deniegan. El clasificador de permisos no dejó lanzar otra sesión de Claude
+  Code desde la tarea; la comprobación en una sesión nueva la hace Pedro.
+- Dependencias: `uv add` trajo `pydantic-core`, `annotated-types` y `typing-inspection`, las de
+  siempre de `pydantic`. La *wheel* (`uv build --offline`) incluye `0001_initial.sql`.
+
+**Valores a mano** (ejecutados con `python3 -I`, sin el paquete):
+- Raíces: `HOME=/h` → `/h/.config/jimic` y `/h/.local/share/jimic`; con `dev`, `…/jimic-dev`;
+  `XDG_CONFIG_HOME=/x/cfg` y `XDG_DATA_HOME=/x/data` con `dev` → `/x/cfg/jimic-dev` y
+  `/x/data/jimic-dev`; `XDG_CONFIG_HOME=rel` y `XDG_DATA_HOME=""` → las de `HOME`.
+- Desde 2026-11-19 09:00 Europe/Madrid (08:00Z), 90 días: corte absoluto `2026-08-21T08:00:00Z`;
+  de pared, `09:00+02:00` = `07:00Z`. Una fila a 07:30Z se borra con el absoluto y no con el de
+  pared. Desde 2026-07-15 12:00 (10:00Z), sin cambio de hora de por medio: 30 días →
+  `2026-06-15T10:00Z`, 90 → `2026-04-16T10:00Z`, 365 → `2025-07-15T10:00Z`.
+- Por día: hoy 2026-11-19 → se borra `day < 2025-11-19`; hoy 2028-02-29 → `< 2027-03-01`.
+- `02:30+02:00` (00:30Z) es anterior a `02:10+01:00` (01:10Z), pero el texto dice lo contrario.
+- Una migración que falla a medias deja `user_version` en 0 y ninguna tabla (comprobado con
+  `sqlite3`, también con `executescript` dentro de un `BEGIN` explícito).
+
+**Versiones incorrectas** (predicción frente a observado; aplicadas y deshechas):
+- A, el migrador no sube `user_version`: predije que fallarían «base vacía» y «arrancar dos veces»
+  y que pasaría «falla a medias». Observado: fallan esas dos (`table decisions already exists`),
+  **y también** «falla a medias» (al no subir la versión, la 0001 se repite y la versión queda en
+  0) y el test del servicio que reabre la base. La predicción no contó con que los dos tests
+  dependen de la versión.
+- B, el error con `str(exc)`: predije que fallarían los tests del valor inválido y de la clave
+  que falta. Observado: fallan 6 de 11, por el formato.
+- B2, el formato propio **más** `str(exc)`: el test de la clave que falta **pasaba**, porque
+  Pydantic recorta el `input_value` (`{'ENTORNO': 'prod', ...apex.json'}`) y los secretos no salen
+  enteros. Corregido en 2569957: cada test compara la cabecera y la lista exacta de problemas.
+  Después, B y B2 fallan los mismos 6.
+- C, la purga registra el `content`: falla solo el test del log; pasan los recuentos. Así.
+- D, el corte de pared: falla solo el de la fila a 07:30Z. Así.
+- E, sin `add_signal_handler`: predije que fallaría el test de SIGINT y SIGTERM y pasaría la parada
+  por evento. Observado: así, y además el de punta a punta de la CLI falla **por el tope de 60 s**.
+  Sin manejador, asyncio no pone *wakeup fd* y el bucle duerme en `epoll` sin volver al manejador
+  de guarda.
+- F, `datetime.now()` en `service.py`: falla el test estructural y también el del servicio (la línea
+  `stopped at` ya no lleva la hora fija). Con `clock.now()` en el mismo sitio pasa todo.
+
+**Medidas.** Suite rápida: 67 tests en 1,1 s; el más lento, el humo del ejecutable (0,20 s); el de
+punta a punta de `jimic run`, 0,05 s. N3: en verde en 0:09 (pre-commit 0:07, pytest 0:02,
+gitleaks-historia 0:00, con 28 commits y ~442 KB), tras las correcciones de la revisión. Este
+anexo se escribió mientras corría y solo es documentación. Tiempo de pared del plan aprobado
+(10:04) a la apertura del PR: en la sección de métricas del PR.
+
+**Revisión** (`/code-review medium`). 10 hallazgos: 5 corregidos y 5 explicados.
+- Corregidos: la raíz de datos se creaba con la umask (0755), porque `mkdir(mode=…)` solo aplica el
+  modo a la última carpeta; un `.env` ilegible (`PermissionError`, o `UnicodeDecodeError`, que cita
+  el byte) escapaba con *traceback*; `sqlite3.Error` y `OSError` salían con 1 en vez de 2; el fallo
+  al abrir la base no llegaba al log (ahora `startup failed (<tipo>)`); `backupCount=7` guardaba 8
+  días (ahora 6 copias más el fichero del día); nada imponía el formato de los momentos de los que
+  depende la purga (ahora `CHECK` con `GLOB`).
+- Explicados: `purge` usa el día del reloj, y el contrato de `Clock.now()` es la zona configurada;
+  `remove_signal_handler` deja SIG_DFL, y `jimic run` es la entrada del proceso, sin manejadores
+  previos; el fichero SQLite queda 0644 dentro de una carpeta 0700; `propagate=True` solo duplicaría
+  si alguien configura el logger raíz, y apagarlo rompería `caplog`.
+
+**Pendiente.**
+- Valorar el *sandbox* de Claude Code: los `deny` no alcanzan a un script de Python que abra las
+  carpetas, ni a raíces XDG movidas. Mientras, `python3` sigue fuera del `allow`. Destino: el cierre
+  del H1 (ajuste de la aprobación).
+- Comprobar en una sesión nueva que leer `~/.config/jimic-dev/prueba-deny.txt` se deniega, y
+  borrarlo con `! rm`. Destino: Pedro, antes de fusionar.
+- La purga se programa en la 1.8; el identificador de la sesión del agente por día, migración 0002
+  en la 1.10.
