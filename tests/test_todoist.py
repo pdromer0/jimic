@@ -379,6 +379,7 @@ def test_crear_con_dia_hora_y_duracion_manda_a_la_api_lo_que_toca():
     assert call["due_datetime"] == datetime(2030, 1, 7, 12, 0, tzinfo=MADRID)
     assert call["due_date"] is None
     assert (call["duration"], call["duration_unit"]) == (75, "minute")
+    assert call["description"] == "Duración: 75 min"
     assert created.id == "t101"
     assert created.duration_minutes == 75
     assert created.due == datetime(2030, 1, 7, 12, 0, tzinfo=MADRID)
@@ -391,6 +392,7 @@ def test_crear_con_un_dia_sin_duracion():
     assert call["due_date"] == date(2030, 1, 7)
     assert call["due_datetime"] is None
     assert (call["duration"], call["duration_unit"]) == (None, None)
+    assert call["description"] is None
 
 
 def test_una_hora_sin_zona_se_rechaza_sin_llamar_a_la_api():
@@ -471,3 +473,102 @@ def test_una_escritura_tambien_tiene_limite_de_tiempo(monkeypatch):
     with pytest.raises(ToolFailure) as caught:
         run(make_writer(api).delete("a"))
     assert caught.value.code == "timeout"
+
+
+# --- La duración en el plan gratuito: la descripción la lleva --------------------------------
+
+
+def test_en_el_plan_gratuito_la_duracion_se_conserva_por_la_descripcion():
+    """Contrato del 19-nov-2026: Todoist gratuito no guarda `duration`. Pilla perder los 75 min."""
+    api = FakeTodoistApi(free_plan=True)
+    created = run(make_writer(api).create("Gimnasio", TEST_PROJECT, date(2030, 1, 7), 75))
+    assert api.find(created.id)["duration"] is None  # type: ignore[index] # existe
+    (read,) = run(make_reader(api).read_project(TEST_PROJECT)).tasks
+    assert read.duration_minutes == 75
+    assert created.duration_minutes == 75
+
+
+def test_con_el_plan_de_pago_la_duracion_viene_del_campo_y_manda_sobre_la_descripcion():
+    api = FakeTodoistApi(free_plan=False)
+    run(make_writer(api).create("Gimnasio", TEST_PROJECT, date(2030, 1, 7), 75))
+    api.tasks[0]["description"] = "Duración: 10 min"  # la descripción no manda si hay campo
+    (read,) = run(make_reader(api).read_project(TEST_PROJECT)).tasks
+    assert api.tasks[0]["duration"]["amount"] == 75
+    assert read.duration_minutes == 75
+
+
+@pytest.mark.parametrize(
+    ("description", "minutes"),
+    [
+        ("Duración: 75 min", 75),
+        ("Nota mía\nDuración: 20 min\notra línea", 20),
+        ("Duración: 0 min", None),
+        ("Duración: 75 minutos", None),
+        ("duración: 75 min", None),
+        ("Duración: abc min", None),
+        ("Duración: ٧٥ min", None),  # dígitos que no son ASCII
+        ("Duración: 123456 min", None),
+        ("Dura 75", None),
+        ("", None),
+    ],
+)
+def test_la_duracion_se_lee_solo_de_la_linea_exacta_de_la_descripcion(description, minutes):
+    """Pilla una expresión demasiado permisiva: solo la línea `Duración: N min`, con N ASCII."""
+    api = FakeTodoistApi([raw_task("a", description=description)])
+    (task,) = run(make_reader(api).read_project(TEST_PROJECT)).tasks
+    assert task.duration_minutes == minutes
+
+
+# --- Mover una recurrente: la recurrencia se conserva -----------------------------------------
+
+
+def recurring_api(due_string: str = "every day") -> FakeTodoistApi:
+    return FakeTodoistApi(
+        [raw_task("rec", due="2030-01-07", recurring=True, due_string=due_string)]
+    )
+
+
+@pytest.mark.parametrize(
+    "target", [date(2030, 1, 9), datetime(2030, 1, 9, 18, 0, tzinfo=MADRID)], ids=["dia", "hora"]
+)
+def test_mover_una_recurrente_manda_el_texto_de_su_recurrencia_y_sigue_siendo_recurrente(target):
+    """El contrato del 19-nov-2026: sin `due_string` la recurrente pasa a ser una normal."""
+    api = recurring_api("every day at 9:00")
+    run(make_writer(api).move("rec", target))
+    (call,) = api.calls_of("update_task")
+    assert call["due_string"] == "every day at 9:00"
+    (task,) = run(make_reader(api).read_project(TEST_PROJECT)).tasks
+    assert task.is_recurring
+
+
+def test_mover_una_normal_no_manda_texto_de_recurrencia():
+    """Pilla un `due_string` en una tarea normal: su texto es la fecha, no una recurrencia."""
+    api = FakeTodoistApi([raw_task("a", due="2030-01-07", due_string="2030-01-07")])
+    run(make_writer(api).move("a", date(2030, 1, 9)))
+    (call,) = api.calls_of("update_task")
+    assert call["due_string"] is None
+    (task,) = run(make_reader(api).read_project(TEST_PROJECT)).tasks
+    assert not task.is_recurring and task.due == date(2030, 1, 9)
+
+
+def test_el_doble_imita_a_todoist_sin_el_texto_la_recurrente_se_pierde():
+    """La prueba del doble: es lo que la API real hizo en el contrato."""
+    api = recurring_api()
+    run(api.update_task("rec", due_date=date(2030, 1, 9)))
+    assert api.tasks[0]["due"]["is_recurring"] is False
+
+
+def test_mover_una_tarea_que_no_existe_es_task_not_found_y_no_escribe():
+    api = FakeTodoistApi()
+    with pytest.raises(ToolFailure) as caught:
+        run(make_writer(api).move("no-existe", date(2030, 1, 9)))
+    assert caught.value.code == "task_not_found"
+    assert api.calls_of("update_task") == []
+
+
+def test_si_falla_la_lectura_previa_al_mover_no_se_escribe():
+    api = FakeTodoistApi([raw_task("a")], error=http_status_error(503))
+    with pytest.raises(ToolFailure) as caught:
+        run(make_writer(api).move("a", date(2030, 1, 9)))
+    assert caught.value.code == "http_503"
+    assert api.calls_of("update_task") == []

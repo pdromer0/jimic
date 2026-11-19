@@ -39,13 +39,15 @@ def raw_task(
     recurring: bool = False,
     parent_id: str | None = None,
     duration: int | None = None,
+    description: str = "",
+    due_string: str = "inventado",
 ) -> dict[str, Any]:
     """The JSON of a task in API v1. `due` is `2030-01-07`, `2030-01-07T09:00:00` (floating)
     or `2030-01-07T09:00:00Z` (UTC)."""
     return {
         "id": task_id,
         "content": title,
-        "description": "",
+        "description": description,
         "project_id": project_id,
         "section_id": None,
         "parent_id": parent_id,
@@ -53,7 +55,7 @@ def raw_task(
         "priority": 1,
         "due": None
         if due is None
-        else {"date": due, "string": "inventado", "lang": "en", "is_recurring": recurring},
+        else {"date": due, "string": due_string, "lang": "en", "is_recurring": recurring},
         "deadline": None,
         "duration": None if duration is None else {"amount": duration, "unit": "minute"},
         "checked": False,
@@ -95,14 +97,21 @@ class _Pages:
 
 class FakeTodoistApi:
     """The tasks live in `tasks` (raw JSON). `calls` records `(method, arguments)`.
-    `error` is raised by every call that goes to the network."""
+    `error` is raised by every call that goes to the network.
+
+    It behaves as the real API did in the contract of 19-nov-2026: with `free_plan` (the default)
+    it does not keep `duration`, and moving a recurring task without `due_string` makes it a plain
+    one.
+    """
 
     def __init__(
         self,
         tasks: list[dict[str, Any]] | None = None,
         page_size: int = 200,
         error: Exception | None = None,
+        free_plan: bool = True,
     ) -> None:
+        self.free_plan = free_plan
         self.tasks = copy.deepcopy(tasks) if tasks is not None else []
         self.page_size = page_size
         self.error = error
@@ -169,6 +178,7 @@ class FakeTodoistApi:
         self,
         content: str,
         *,
+        description: str | None = None,
         project_id: str | None = None,
         due_date: date | None = None,
         due_datetime: datetime | None = None,
@@ -178,6 +188,7 @@ class FakeTodoistApi:
         self.record(
             "add_task",
             content=content,
+            description=description,
             project_id=project_id,
             due_date=due_date,
             due_datetime=due_datetime,
@@ -190,24 +201,48 @@ class FakeTodoistApi:
         if due_datetime is not None:  # as the API stores it: UTC, with a `Z`
             due = due_datetime.astimezone(UTC).isoformat().replace("+00:00", "Z")
         raw = raw_task(
-            f"t{self._next_id}", content, project_id or "inbox", due=due, duration=duration
+            f"t{self._next_id}",
+            content,
+            project_id or "inbox",
+            due=due,
+            duration=None if self.free_plan else duration,
+            description=description or "",
         )
         self.tasks.append(raw)
         return Task.from_dict(raw)
 
     async def update_task(
-        self, task_id: str, *, due_date: date | None = None, due_datetime: datetime | None = None
+        self,
+        task_id: str,
+        *,
+        due_string: str | None = None,
+        due_date: date | None = None,
+        due_datetime: datetime | None = None,
     ) -> Task:
-        self.record("update_task", task_id=task_id, due_date=due_date, due_datetime=due_datetime)
+        self.record(
+            "update_task",
+            task_id=task_id,
+            due_string=due_string,
+            due_date=due_date,
+            due_datetime=due_datetime,
+        )
         await self.wait()
         raw = self.find(task_id)
         if raw is None:
             raise http_status_error(404)
         when = due_date or due_datetime
         assert when is not None
+        if due_datetime is not None:  # as the API stores it: UTC, with a `Z`
+            stored = due_datetime.astimezone(UTC).isoformat().replace("+00:00", "Z")
+        else:
+            stored = when.isoformat()
+        was_recurring = raw["due"] is not None and raw["due"]["is_recurring"]
+        keeps = was_recurring and due_string is not None  # what the contract showed
         raw["due"] = {
-            **(raw["due"] or {"string": "inventado", "lang": "en"}),
-            "date": when.isoformat(),
+            "date": stored,
+            "string": due_string if keeps else stored,
+            "lang": "en",
+            "is_recurring": keeps,
         }
         return Task.from_dict(raw)
 

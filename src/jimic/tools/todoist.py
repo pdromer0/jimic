@@ -15,6 +15,7 @@ it, so the service cannot forget it.
 
 import asyncio
 import logging
+import re
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
 from datetime import date, datetime, time
@@ -39,6 +40,9 @@ timeout inside every request (60 s to read), so this one is ours."""
 PAGE_SIZE = 200
 """Tasks per page (the most Todoist gives): `MAX_PAGES` pages are up to 2000 tasks."""
 MINUTES_PER_DAY = 24 * 60
+DURATION_LINE = re.compile(r"^Duración: ([0-9]{1,5}) min$", re.MULTILINE)
+"""The line that carries the duration in the description: the free plan of Todoist does not
+keep the `duration` field (contract of 19-nov-2026), so it is written here too."""
 
 OUTSIDE_TEST_PROJECT = "outside_test_project"
 TASK_NOT_FOUND = "task_not_found"
@@ -138,6 +142,7 @@ class TodoistApi(Protocol):
         self,
         content: str,
         *,
+        description: str | None = None,
         project_id: str | None = None,
         due_date: date | None = None,
         due_datetime: datetime | None = None,
@@ -146,7 +151,12 @@ class TodoistApi(Protocol):
     ) -> Task: ...
 
     async def update_task(
-        self, task_id: str, *, due_date: date | None = None, due_datetime: datetime | None = None
+        self,
+        task_id: str,
+        *,
+        due_string: str | None = None,
+        due_date: date | None = None,
+        due_datetime: datetime | None = None,
     ) -> Task: ...
 
     async def complete_task(self, task_id: str) -> bool: ...
@@ -220,11 +230,15 @@ def _due(task: Task, timezone: ZoneInfo) -> Due | None:
     return value
 
 
+def _minutes(raw: Task) -> int | None:
+    """The duration: Todoist's own field if it has one, else the line in the description."""
+    if raw.duration is not None:
+        return raw.duration.amount * (MINUTES_PER_DAY if raw.duration.unit == "day" else 1)
+    found = DURATION_LINE.search(raw.description)
+    return int(found[1]) if found is not None and int(found[1]) >= 1 else None
+
+
 def _to_task(raw: Task, timezone: ZoneInfo, has_subtasks: bool) -> TodoistTask:
-    duration = raw.duration
-    minutes = None
-    if duration is not None:
-        minutes = duration.amount * (MINUTES_PER_DAY if duration.unit == "day" else 1)
     return TodoistTask(
         id=raw.id,
         title=raw.content,
@@ -232,7 +246,7 @@ def _to_task(raw: Task, timezone: ZoneInfo, has_subtasks: bool) -> TodoistTask:
         due=_due(raw, timezone),
         is_recurring=raw.due is not None and raw.due.is_recurring,
         has_subtasks=has_subtasks,
-        duration_minutes=minutes,
+        duration_minutes=_minutes(raw),
     )
 
 
@@ -314,6 +328,9 @@ class ApiTodoistWriter:
         raw = await _call(
             self._api.add_task(
                 content,
+                description=None
+                if duration_minutes is None
+                else f"Duración: {duration_minutes} min",
                 project_id=project_id,
                 due_date=due_date,
                 due_datetime=due_datetime,
@@ -325,7 +342,20 @@ class ApiTodoistWriter:
 
     async def move(self, task_id: str, due: Due) -> None:
         due_date, due_datetime = _split_due(due)
-        await _call(self._api.update_task(task_id, due_date=due_date, due_datetime=due_datetime))
+        try:
+            current = await _call(self._api.get_task(task_id))
+        except ToolFailure as error:
+            raise ToolFailure(TASK_NOT_FOUND if error.code == "http_404" else error.code) from None
+        # A new date alone turns a recurring task into a plain one (contract of 19-nov-2026):
+        # with the text of its recurrence next to the date it stays recurring.
+        recurrence = (
+            current.due.string if current.due is not None and current.due.is_recurring else None
+        )
+        await _call(
+            self._api.update_task(
+                task_id, due_string=recurrence, due_date=due_date, due_datetime=due_datetime
+            )
+        )
 
     async def complete(self, task_id: str) -> None:
         if not await _call(self._api.complete_task(task_id)):

@@ -193,7 +193,9 @@ def test_tampoco_si_la_tarea_no_existe(dev, name):
 def test_con_una_tarea_de_pruebas_se_lee_fresca_y_despues_se_escribe(dev, name, write):
     tools, api = dev
     run(operation(tools, name, "prueba-1"))
-    assert [call for call, _ in api.calls if call in ("get_task", write)] == ["get_task", write]
+    calls = [call for call, _ in api.calls if call in ("get_task", write)]
+    assert calls[0] == "get_task"  # primero se lee fresca
+    assert calls[-1] == write and calls.count(write) == 1  # y la escritura va al final, una vez
     assert api.calls_of(write)[0]["task_id"] == "prueba-1"
 
 
