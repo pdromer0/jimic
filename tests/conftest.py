@@ -4,13 +4,17 @@ from pathlib import Path
 
 import pytest
 
-from jimic.paths import resolve_paths
+from jimic.config import Settings, load_settings
+from jimic.paths import Paths, resolve_paths
 
 SLOW_TIMEOUT = 600
 """Segundos por test `slow`: un tope contra un bucle sin fin, no una medida."""
 
 REAL_HOME = Path(os.path.expanduser("~"))
 """El home real, leído al importar, antes de que ningún fixture lo cambie."""
+
+CONTRACT = os.environ.get("JIMIC_CONTRATO") == "1"
+"""Los tests de contrato hablan con las API reales: solo corren con `JIMIC_CONTRATO=1`."""
 
 
 VALID_ENV = {
@@ -63,3 +67,22 @@ def fake_home(tmp_path, monkeypatch):
     for var in ("XDG_CONFIG_HOME", "XDG_DATA_HOME", "JIMIC_ENTORNO"):
         monkeypatch.delenv(var, raising=False)
     return home
+
+
+@pytest.fixture
+def contract_env(monkeypatch) -> tuple[Paths, Settings]:
+    """The real home and the configuration of the **test copy** (`dev`), for the contract tests.
+
+    It never uses `prod`: the contract tests create and delete things in real accounts, so they
+    refuse to run unless the `.env` of `jimic-dev` says `ENTORNO=dev` and names the Todoist test
+    project. A missing or invalid `.env` fails with the message of `load_settings` (keys, never
+    values).
+    """
+    monkeypatch.setenv("HOME", str(REAL_HOME))
+    monkeypatch.setenv("JIMIC_ENTORNO", "dev")
+    paths = resolve_paths(os.environ)
+    assert paths.environment == "dev"
+    settings = load_settings(paths)
+    assert settings.environment == "dev"
+    assert settings.todoist_test_project
+    return paths, settings

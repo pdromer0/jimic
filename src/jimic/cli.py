@@ -12,6 +12,7 @@ from jimic.doctor import diagnose, render
 from jimic.memory import personal
 from jimic.memory.database import MigrationError
 from jimic.paths import PathsError, resolve_paths
+from jimic.tools import google_auth
 
 SETUP_ERROR = 2
 """Exit status when the service cannot start because of its folders, `.env` or database.
@@ -32,7 +33,28 @@ def build_parser() -> argparse.ArgumentParser:
     config_commands = config.add_subparsers(dest="config_command", required=True)
     config_commands.add_parser("check", help="dice dónde falla cada fichero, sin enseñarlo")
     config_commands.add_parser("init", help="crea los YAML que faltan; nunca sobrescribe")
+    google = commands.add_parser("google", help="permiso de Google")
+    google_commands = google.add_subparsers(dest="google_command", required=True)
+    google_commands.add_parser(
+        "autorizar", help="pide el permiso de solo lectura del calendario (una vez por copia)"
+    )
     return parser
+
+
+def google_command() -> int:
+    """Run `jimic google autorizar` for the copy that `JIMIC_ENTORNO` picks."""
+    try:
+        paths = resolve_paths(os.environ)
+    except PathsError as error:
+        print(f"jimic: {error}", file=sys.stderr)
+        return SETUP_ERROR
+    try:
+        google_auth.authorize(paths)
+    except google_auth.GoogleAuthError as error:
+        print(f"jimic: {error}", file=sys.stderr)
+        return SETUP_ERROR
+    print("Permiso guardado: JimiC puede leer el calendario, y solo leerlo.")
+    return 0
 
 
 def config_command(command: str) -> int:
@@ -61,6 +83,8 @@ def main(argv: list[str] | None = None) -> int:
         print(render(diagnose()))
     elif args.command == "config":
         return config_command(args.config_command)
+    elif args.command == "google":
+        return google_command()
     elif args.command == "run":
         try:
             service.run(os.environ)

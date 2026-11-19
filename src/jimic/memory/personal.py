@@ -10,7 +10,6 @@
 """
 
 import os
-import tempfile
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from importlib.resources import files
@@ -19,6 +18,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ValidationError
 
+from jimic.files import write_private
 from jimic.memory.markdown_checks import check_objectives, check_preferences, check_routine
 from jimic.memory.problems import Problem
 from jimic.memory.schemas import Intentions, Limits, cross_check, field_names
@@ -231,19 +231,4 @@ def save_yaml_file(path: Path, doc: object) -> None:
     problems = validate_yaml(path.name, doc)
     if problems:
         raise PersonalFileError(path.name, problems)
-    text = dump_yaml(doc)
-    fd, temporary = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.")  # 0600
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as file:
-            file.write(text)
-            file.flush()
-            os.fsync(file.fileno())  # the data is on disk before the name points at it
-        os.replace(temporary, path)
-    except BaseException:
-        Path(temporary).unlink(missing_ok=True)
-        raise
-    directory = os.open(path.parent, os.O_RDONLY)
-    try:
-        os.fsync(directory)  # and so is the new name: a crash leaves the old file or the new one
-    finally:
-        os.close(directory)
+    write_private(path, dump_yaml(doc))

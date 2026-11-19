@@ -10,8 +10,9 @@ No es un servicio público: no hay cuentas de otros usuarios ni datos de tercero
 ## Qué datos de Google lee
 
 Solo el calendario, en **solo lectura** (permiso `calendar.readonly`). De cada evento lee el título,
-las horas y si el usuario es el organizador. **No lee la descripción** ni los asistentes. JimiC no
-puede crear, cambiar ni borrar nada en el calendario.
+las horas, si dura todo el día, si el usuario es el organizador y si el usuario rechazó el evento:
+Google envía la respuesta de cada invitado, sin su nombre ni su correo, y JimiC solo usa la del
+usuario. **No lee la descripción**, la ubicación ni los correos de los asistentes. JimiC no puede crear, cambiar ni borrar nada en el calendario.
 
 ## Dónde se procesan los datos
 
@@ -23,9 +24,12 @@ puede crear, cambiar ni borrar nada en el calendario.
 ## Qué se guarda y cuánto tiempo
 
 - Los ficheros personales y la base de datos SQLite, solo en el equipo local y fuera del repositorio.
-- La base de datos conserva cada tipo de registro un plazo limitado (de 30 días a un año, según
-  la tabla; las decisiones del latido, 90 días). Las transcripciones locales del agente se borran
-  a los 7 días.
+- El permiso que el usuario concede a Google se guarda en un fichero local (`google_token.json`,
+  legible solo por su propietario), junto a los ficheros de configuración, hasta que se borre.
+- La base de datos conserva la mayoría de los registros un plazo limitado (de 30 días a un año,
+  según la tabla; las decisiones del latido, 90 días). La excepción es el historial de cambios de
+  memoria (`changes`), que se guarda siempre, hasta que el usuario lo borre. Las transcripciones
+  locales del agente se borran a los 7 días.
 - Los registros técnicos (logs) no llevan contenido: ni títulos de eventos ni mensajes.
 
 ## Cómo retirar el permiso y borrar los datos
