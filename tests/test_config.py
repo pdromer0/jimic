@@ -122,3 +122,21 @@ def test_el_entorno_del_env_debe_coincidir_con_la_variable(monkeypatch):
     monkeypatch.setenv("JIMIC_ENTORNO", "dev")
     problems = load_problems(VALID_ENV | {"PROYECTO_PRUEBAS_TODOIST": "proyecto-falso-1"})
     assert problems == ["- ENTORNO no coincide con el que elige JIMIC_ENTORNO"]
+
+
+def test_un_env_que_no_es_utf8_es_un_error_sin_bytes():
+    """Pilla un `UnicodeDecodeError` que escapa con un traceback y el byte que no se pudo leer."""
+    env_file = write_env(VALID_ENV)
+    env_file.write_bytes(env_file.read_bytes() + b"TOKEN_TODOIST=test-\xf1\xff\n")
+    with pytest.raises(ConfigError) as excinfo:
+        load_settings(resolve_paths(os.environ))
+    assert str(excinfo.value) == f"no se puede leer {env_file} (UnicodeDecodeError)"
+
+
+def test_un_env_sin_permiso_de_lectura_es_un_error():
+    """Pilla un `PermissionError` que escapa con un traceback en vez de un error claro."""
+    env_file = write_env(VALID_ENV)
+    env_file.chmod(0o000)
+    with pytest.raises(ConfigError) as excinfo:
+        load_settings(resolve_paths(os.environ))
+    assert str(excinfo.value) == f"no se puede leer {env_file} (PermissionError)"

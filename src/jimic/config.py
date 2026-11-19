@@ -89,6 +89,9 @@ def load_settings(paths: Paths) -> Settings:
     except ValidationError as exc:
         problems = _format_errors(exc)
         raise ConfigError(_render(env_file, problems)) from None
+    except (OSError, UnicodeDecodeError) as exc:
+        # Only the type: a decode error quotes the byte it could not read.
+        raise ConfigError(f"no se puede leer {env_file} ({type(exc).__name__})") from None
     problems = []
     if settings.environment != paths.environment:
         problems.append(f"ENTORNO no coincide con el que elige {ENVIRONMENT_VAR}")
