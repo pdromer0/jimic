@@ -20,7 +20,7 @@ import asyncio
 import logging
 import threading
 from collections.abc import Callable, Iterator
-from datetime import date, datetime, time, timedelta
+from datetime import date, datetime, time
 from typing import Any, Protocol
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -29,6 +29,7 @@ from google.auth.exceptions import RefreshError, TransportError
 from googleapiclient.errors import HttpError
 from pydantic import BaseModel, ConfigDict, Field
 
+from jimic.clock import local_day_bounds
 from jimic.paths import Paths
 from jimic.tools.failures import MAX_PAGES, ToolFailure, TooManyPages, WarnOnce
 from jimic.tools.google_auth import CalendarConnection
@@ -121,10 +122,8 @@ def _pages(request_for: Callable[[str | None], Any]) -> Iterator[dict[str, Any]]
 
 
 def _day_bounds(day: date, timezone: ZoneInfo) -> tuple[str, str]:
-    """Midnight to midnight of `day` in `timezone` (RFC 3339, with offset). The end is the next
-    day's midnight computed from the date, so a day of 23 or 25 hours comes out right."""
-    start = datetime.combine(day, time.min, tzinfo=timezone)
-    end = datetime.combine(day + timedelta(days=1), time.min, tzinfo=timezone)
+    """Midnight to midnight of `day` in `timezone` (RFC 3339, with offset)."""
+    start, end = local_day_bounds(day, timezone)
     return start.isoformat(), end.isoformat()
 
 
