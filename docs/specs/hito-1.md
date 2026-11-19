@@ -180,15 +180,21 @@ pasadas cada uno, con un informe de porcentajes. Nunca en el CI.
 | Ruta | Qué guarda |
 | --- | --- |
 | `~/.config/jimic/` | Los ficheros personales (7.2 del diseño) y el `.env` |
-| `~/.local/share/jimic/` | SQLite, las copias y las transcripciones del agente (`CLAUDE_CONFIG_DIR`) |
+| `~/.local/share/jimic/` | SQLite, los logs (`logs/`), las copias y las transcripciones del agente (`CLAUDE_CONFIG_DIR`) |
 | `~/.config/jimic-dev/` y `~/.local/share/jimic-dev/` | Lo mismo para la copia de pruebas |
 
-- Una variable de entorno cambia las dos raíces; los tests usan carpetas temporales.
-- El `.env` (entorno, zona horaria, rutas, identificadores de los modelos, chat ID, ID del fichero
-  de APEX, proyecto de pruebas de Todoist y claves) se valida al arrancar; un valor que falte da un
-  error claro.
-- `.claude/settings.json` del repositorio gana un `deny` de lectura de las cuatro rutas (pendiente
-  del hito 0, fase 4, punto 5).
+- Una variable de entorno, `JIMIC_ENTORNO` (`prod`, o sin definir, y `dev`), cambia las dos raíces;
+  se respetan `XDG_CONFIG_HOME` y `XDG_DATA_HOME` si son rutas absolutas. Los tests usan carpetas
+  temporales y un `HOME` falso.
+- El `.env` (entorno, zona horaria, identificadores de los modelos, chat ID, ruta local del fichero
+  de APEX (el ID de Drive, en la 2.2), proyecto de pruebas de Todoist y claves) se valida al
+  arrancar; un valor que falte da un error claro que nombra la clave sin imprimir ningún valor.
+  Las claves (tarea 1.2): `ENTORNO`, `ZONA_HORARIA`, `MODELO_LATIDO`, `MODELO_AGENTE`,
+  `CLAVE_ANTHROPIC`, `TOKEN_TELEGRAM`, `CHAT_TELEGRAM`, `TOKEN_TODOIST`, `RUTA_APEX` y, solo con
+  `ENTORNO=dev`, `PROYECTO_PRUEBAS_TODOIST`. `ENTORNO` debe coincidir con `JIMIC_ENTORNO`. Solo se
+  lee el fichero, no las variables del proceso.
+- `.claude/settings.json` del repositorio deniega leer y editar las cuatro rutas (pendiente del
+  hito 0, fase 4, punto 5; hecho en la 1.2). No alcanza a un script de Python que abra los ficheros.
 
 ### Ficheros personales (7.2 del diseño, con H1-2, H1-5 y H1-12)
 
@@ -225,8 +231,12 @@ Las seis tablas de 7.3 del diseño y dos nuevas:
 | `plan_items` | Una fila por tarea del plan confirmado: hecha, «la haré», pendiente o movida, y si se marcó antes de su hora | 1 año |
 | `deleted_tasks` | La foto de cada tarea borrada: contenido, descripción, fecha, duración, proyecto, etiquetas, prioridad, motivo y aprobación | 30 días |
 
-El versionado del esquema y su acceso los propone el plan de la tarea 1.2; si se apartan del
-estándar, ADR.
+Acceso y versionado (tarea 1.2, el estándar de una base embebida, sin ADR): `sqlite3` de la
+biblioteca estándar y migraciones SQL numeradas dentro del paquete
+(`src/jimic/memory/migrations/0001_initial.sql`, …), aplicadas al arrancar según
+`PRAGMA user_version`, cada una en su transacción con la subida de versión. Los momentos se guardan
+como texto ISO 8601 en UTC al segundo; los días, como `YYYY-MM-DD` locales. La retención es una
+función de purga con cortes absolutos en UTC (`jimic.memory.retention.purge`); la programa la 1.8.
 
 ### Lo que puede hacer el agente (sustituye a 6.6 del diseño)
 
