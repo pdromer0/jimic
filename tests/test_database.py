@@ -131,3 +131,42 @@ def test_un_nombre_de_migracion_no_valido_es_un_error(tmp_path):
     (tmp_path / "1_a.sql").write_text("CREATE TABLE a (x);")
     with pytest.raises(MigrationError, match="1_a.sql"):
         load_migrations(tmp_path)
+
+
+@pytest.mark.parametrize(
+    "created_at",
+    [
+        "2026-04-16 10:00:00",
+        "2026-04-16T10:00:00Z",
+        "2026-04-16T12:00:00+02:00",
+        "2026-04-16T10:00:00.500000+00:00",
+    ],
+)
+def test_un_momento_que_no_es_el_de_to_db_se_rechaza(db_path, created_at):
+    """Pilla un momento con otro formato, que la purga (comparando texto) ordenaría mal."""
+    conn = open_database(db_path)
+    try:
+        with pytest.raises(sqlite3.IntegrityError, match="CHECK"):
+            conn.execute(
+                "INSERT INTO decisions (created_at, speak, reason) VALUES (?, 0, 'motivo')",
+                (created_at,),
+            )
+        conn.execute(
+            "INSERT INTO decisions (created_at, speak, reason) VALUES (?, 0, 'motivo')",
+            ("2026-04-16T10:00:00+00:00",),
+        )
+    finally:
+        conn.close()
+
+
+def test_un_dia_que_no_es_yyyy_mm_dd_se_rechaza(db_path):
+    """Pilla un día con otro formato en las tablas que se purgan por día."""
+    conn = open_database(db_path)
+    try:
+        with pytest.raises(sqlite3.IntegrityError, match="CHECK"):
+            conn.execute(
+                "INSERT INTO day_ratings (day, rating, rated_at) VALUES (?, 3, ?)",
+                ("19/11/2026", "2026-11-19T20:00:00+00:00"),
+            )
+    finally:
+        conn.close()
