@@ -770,7 +770,7 @@ y `fix(memory)` (fe36728). Este anexo es el último, `docs(hito-1)`.
   local y no se comprueba que exista (ajuste de la aprobación: el ID de Drive llega en la 2.2).
   `ENTORNO` debe coincidir con `JIMIC_ENTORNO`; `PROYECTO_PRUEBAS_TODOIST` solo es obligatoria en
   `dev`. Solo se lee el fichero (fuentes `init` y `dotenv`), no las variables del proceso, y una
-  clave desconocida es un error.
+  clave desconocida es un error que no la nombra (ajuste de la revisión del chat, abajo).
 - Los errores se rehacen con `loc` y `type`: nunca `str(exc)` ni `msg`. Pydantic valida
   `ZoneInfo` solo, pero su `msg` repite el valor (`invalid timezone: …`). `SecretStr` da
   `too_short`, y `str`, `string_too_short`. `RUTA_APEX=` sería `Path(".")`; un validador previo lo
@@ -791,7 +791,11 @@ y `fix(memory)` (fe36728). Este anexo es el último, `docs(hito-1)`.
 - El `deny` (`Read` y `Edit` de `~/.config/jimic*/**` y `~/.local/share/jimic*/**`) se probó en
   esta sesión: `Read` y `cat` de `~/.config/jimic-dev/prueba-deny.txt` (texto inventado, creado
   antes del `deny`) se deniegan. El clasificador de permisos no dejó lanzar otra sesión de Claude
-  Code desde la tarea; la comprobación en una sesión nueva la hace Pedro.
+  Code desde la tarea. En una sesión nueva (Pedro, en modo plan), `Read` del fichero falló con
+  «File is in a directory that is denied by your permission settings», y la sesión no intentó
+  rodearlo con `cat`. La edición no se probó allí, porque el modo plan no deja editar. Que el
+  `deny` de `Read` también bloquea `Edit` y `Write` lo dice la documentación (anexo B), y hay
+  además un `deny` de `Edit` propio.
 - Dependencias: `uv add` trajo `pydantic-core`, `annotated-types` y `typing-inspection`, las de
   siempre de `pydantic`. La *wheel* (`uv build --offline`) incluye `0001_initial.sql`.
 
@@ -851,7 +855,21 @@ anexo se escribió mientras corría y solo es documentación. Tiempo de pared de
 - Valorar el *sandbox* de Claude Code: los `deny` no alcanzan a un script de Python que abra las
   carpetas, ni a raíces XDG movidas. Mientras, `python3` sigue fuera del `allow`. Destino: el cierre
   del H1 (ajuste de la aprobación).
-- Comprobar en una sesión nueva que leer `~/.config/jimic-dev/prueba-deny.txt` se deniega, y
-  borrarlo con `! rm`. Destino: Pedro, antes de fusionar.
 - La purga se programa en la 1.8; el identificador de la sesión del agente por día, migración 0002
   en la 1.10.
+
+**Ajustes de la revisión del chat** (1 hallazgo, corregido; toca código, así que con otra N3):
+- Fuga en el error del `.env`. Antes de corregir se comprobó la premisa: una línea sin `=`
+  (`test-token-suelto-321`) **no** llega a Pydantic, porque python-dotenv le da valor `None` y
+  pydantic-settings la descarta, así que se ignora sin error. La fuga real es un token con `=`
+  (relleno de base64, `dGVzdC10b2tlbg==`), que se lee como la clave `dGVzdC10b2tlbg` con valor `=`;
+  el error la imprimía en mayúsculas. El filtro propuesto (`^[A-Z][A-Z0-9_]*$` sobre la clave) no
+  bastaba: las claves extra llegan en minúsculas y, en mayúsculas, ese token encaja. Decisión de
+  Pedro: las claves desconocidas no se nombran nunca, solo se cuentan («hay N líneas que no son
+  claves conocidas (no se muestran)»). Una errata sigue dejando pista, porque también sale «falta
+  <la clave buena>». Commit `fix(config)` (dea3b82), con tests del token con `=` (el texto no sale
+  en ninguna capitalización) y de la línea suelta que se ignora. Versión incorrecta, volver a
+  nombrarlas: fallan esos dos tests y pasan los otros 13. Así.
+- La comprobación del `deny` en una sesión nueva, arriba, en «Decisiones del diff».
+- N3 de la ronda: en verde en 0:07 (pre-commit 0:05, pytest 0:01, gitleaks-historia 0:01).
+- Las métricas del PR se completan con las cifras del chat: 3 idas y vueltas y 1 ronda de revisión.
