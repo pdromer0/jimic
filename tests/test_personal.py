@@ -125,6 +125,22 @@ def test_init_nunca_sobrescribe_un_fichero_que_ya_existe(config_dir):
     assert init(config_dir) == [("intenciones.yaml", False), ("limites.yaml", False)]
 
 
+def test_si_falla_la_escritura_init_no_deja_un_fichero_a_medias(config_dir, monkeypatch):
+    """Pilla un fichero vacío que el siguiente `init` ya no repararía («ya existe»)."""
+    real_fdopen = os.fdopen
+
+    def fdopen_that_fails_to_write(fd, *args, **kwargs):
+        real_fdopen(fd).close()
+        raise OSError("disco lleno")
+
+    with monkeypatch.context() as patch:
+        patch.setattr("jimic.memory.personal.os.fdopen", fdopen_that_fails_to_write)
+        with pytest.raises(OSError):
+            init(config_dir)
+    assert list(config_dir.iterdir()) == []
+    assert init(config_dir) == [("intenciones.yaml", True), ("limites.yaml", True)]
+
+
 def test_las_plantillas_generadas_pasan_la_comprobacion(config_dir):
     init(config_dir)
     reports = check(config_dir)

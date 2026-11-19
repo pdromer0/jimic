@@ -184,8 +184,13 @@ def _create_private(path: Path, text: str) -> bool:
         fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
     except FileExistsError:
         return False
-    with os.fdopen(fd, "w", encoding="utf-8") as file:
-        file.write(text)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as file:
+            file.write(text)
+    except BaseException:
+        # Only this call created it: a half-written file would block every later `init`.
+        path.unlink(missing_ok=True)
+        raise
     return True
 
 
