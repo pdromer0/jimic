@@ -32,7 +32,9 @@ pytestmark = [
 ]
 
 # Lo que el diseño da por cierto; cada uno lo comprueba un paso del contrato. Además se imprime,
-# solo informativo, `subtasks_deleted_with_parent` (qué pasa con las subtareas al borrar el padre).
+# solo informativo, `subtasks_deleted_with_parent` (qué pasa con las subtareas al borrar el padre)
+# y `todoist_keeps_duration_field` (falso en el plan gratuito: por eso la duración va también a
+# la descripción).
 REQUIRED = [
     "datetime_kept",
     "duration_kept",
@@ -41,6 +43,8 @@ REQUIRED = [
     "move_works",
     "complete_normal_gone",
     "complete_recurring_next",
+    "move_recurring_to_hour",
+    "move_recurring_to_day",
     "move_keeps_recurrence",
     "has_subtasks_flag",
     "delete_gone",
@@ -91,6 +95,8 @@ def test_contrato_de_todoist(contract_env):
             due += timedelta(days=1)
             made = await writer.create(name("hora"), project, due, 75)
             created.append(made.id)
+            stored = await raw.get_task(made.id)  # el campo en bruto, sin la descripción
+            seen["todoist_keeps_duration_field"] = stored.duration is not None
             read = await reader.get_task(made.id)
             seen["datetime_kept"] = read is not None and read.due == due
             seen["duration_kept"] = read is not None and read.duration_minutes == 75
@@ -130,14 +136,29 @@ def test_contrato_de_todoist(contract_env):
                 and after_day > first_day
             )
 
-            # 6. Mover una recurrente: ¿sigue siéndolo?
+            # 6. Mover una recurrente (con hora en su texto): ¿sigue siéndolo, y llega a la hora y
+            #    al día pedidos?
             other = await raw.add_task(
-                name("rec-mover"), project_id=project, due_string="every day"
+                name("rec-mover"), project_id=project, due_string="every day at 9:00"
             )
             created.append(other.id)
-            await writer.move(other.id, today + timedelta(days=3))
-            after_move = await reader.get_task(other.id)
-            seen["move_keeps_recurrence"] = after_move is not None and after_move.is_recurring
+            hour = datetime(today.year, today.month, today.day, 18, tzinfo=settings.timezone)
+            hour += timedelta(days=3)
+            await writer.move(other.id, hour)
+            at_hour = await reader.get_task(other.id)
+            seen["move_recurring_to_hour"] = (
+                at_hour is not None and at_hour.is_recurring and at_hour.due == hour
+            )
+            await writer.move(other.id, today + timedelta(days=4))
+            at_day = await reader.get_task(other.id)
+            seen["move_recurring_to_day"] = (
+                at_day is not None
+                and at_day.is_recurring
+                and day(at_day) == today + timedelta(days=4)
+            )
+            seen["move_keeps_recurrence"] = bool(
+                seen["move_recurring_to_hour"] and seen["move_recurring_to_day"]
+            )
 
             # 7. Subtareas: el lector lo sabe, y qué pasa al borrar el padre (anexo B).
             parent = await raw.add_task(name("padre"), project_id=project, due_date=today)
