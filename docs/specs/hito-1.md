@@ -839,7 +839,7 @@ gitleaks-historia 0:00, con 28 commits y ~442 KB), tras las correcciones de la r
 anexo se escribió mientras corría y solo es documentación. Tiempo de pared del plan aprobado
 (10:04) a la apertura del PR: en la sección de métricas del PR.
 
-**Revisión** (`/code-review medium`). 10 hallazgos: 5 corregidos y 5 explicados.
+**Revisión** (`/code-review medium`). 10 hallazgos: 6 corregidos y 4 explicados.
 - Corregidos: la raíz de datos se creaba con la umask (0755), porque `mkdir(mode=…)` solo aplica el
   modo a la última carpeta; un `.env` ilegible (`PermissionError`, o `UnicodeDecodeError`, que cita
   el byte) escapaba con *traceback*; `sqlite3.Error` y `OSError` salían con 1 en vez de 2; el fallo
