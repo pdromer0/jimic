@@ -31,7 +31,9 @@ puede crear, cambiar ni borrar nada en el calendario.
 ## Cómo retirar el permiso y borrar los datos
 
 - Para retirar el permiso: <https://myaccount.google.com/permissions>.
-- Para borrar los datos locales: eliminar las carpetas de JimiC en `~/.config` y `~/.local/share`.
+- Para borrar los datos locales: eliminar las carpetas de JimiC en `~/.config` y `~/.local/share`
+  (`jimic` y, si existe, la copia de pruebas `jimic-dev`). Ahí están también el fichero del
+  cliente de Google y el permiso guardado: borrarlas y retirar el permiso son dos pasos distintos.
 
 ## Contacto
 
