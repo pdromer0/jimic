@@ -5,6 +5,8 @@ and `events().list(**kw).execute()`, and records the arguments of every request.
 the code calls in a loop has a cap that raises a clear error.
 """
 
+import threading
+import time
 from collections.abc import Sequence
 from datetime import date
 from typing import Any
@@ -67,6 +69,11 @@ class FakeGoogleService:
         self._events = events or {}
         self._error = error
         self.requests: list[tuple[str, dict[str, Any]]] = []
+        self.delay = 0.0
+        """Seconds each request takes, to make two reads overlap."""
+        self.max_in_flight = 0
+        self._in_flight = 0
+        self._guard = threading.Lock()
 
     def calendarList(self) -> _Collection:  # noqa: N802 - the name of the real API
         return _Collection(self, "calendarList")
@@ -75,6 +82,17 @@ class FakeGoogleService:
         return _Collection(self, "events")
 
     def answer(self, kind: str, arguments: dict[str, Any]) -> dict[str, Any]:
+        with self._guard:
+            self._in_flight += 1
+            self.max_in_flight = max(self.max_in_flight, self._in_flight)
+        try:
+            time.sleep(self.delay)
+            return self._answer(kind, arguments)
+        finally:
+            with self._guard:
+                self._in_flight -= 1
+
+    def _answer(self, kind: str, arguments: dict[str, Any]) -> dict[str, Any]:
         self.requests.append((kind, arguments))
         if len(self.requests) > MAX_CALLS:
             raise RunawayDouble(f"FakeGoogleService recibió más de {MAX_CALLS} peticiones")

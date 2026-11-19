@@ -469,6 +469,27 @@ def test_si_falla_un_calendario_falla_el_dia_entero():
     assert day.events == []
 
 
+# --- Una lectura cada vez ---------------------------------------------------------------------
+
+
+def test_dos_lecturas_a_la_vez_no_comparten_el_cliente_al_mismo_tiempo():
+    """Pilla un cliente HTTP compartido entre hilos: `httplib2` no lo soporta."""
+    service = one_calendar(
+        timed_event("Reunión", "2030-01-07T10:00:00+01:00", "2030-01-07T11:00:00+01:00")
+    )
+    service.delay = 0.03
+    reader = make_reader(service)
+
+    async def both():
+        return await asyncio.gather(reader.read_day(MONDAY), reader.read_day(MONDAY))
+
+    first, second = asyncio.run(both())
+    assert first.available and second.available
+    assert len(first.events) == len(second.events) == 1
+    assert service.max_in_flight == 1
+    assert len(service.requests) == 4  # las dos lecturas se hicieron enteras
+
+
 # --- Avisos y logs ----------------------------------------------------------------------------
 
 

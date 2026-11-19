@@ -14,6 +14,7 @@ events missing would look like a free one.
 
 import asyncio
 import logging
+import threading
 from collections.abc import Callable, Iterator
 from datetime import date, datetime, time, timedelta
 from typing import Any, Protocol
@@ -204,6 +205,7 @@ class GoogleCalendarReader:
         self._connect = connect
         self._timezone = timezone
         self._warn = WarnOnce(logger, "Calendar")
+        self._lock = threading.Lock()  # one `Resource` and one token: `httplib2` is not thread-safe
 
     async def read_day(self, day: date) -> CalendarDay:
         result = await asyncio.to_thread(self._read_day, day)
@@ -212,6 +214,10 @@ class GoogleCalendarReader:
         return result
 
     def _read_day(self, day: date) -> CalendarDay:
+        with self._lock:
+            return self._read_day_locked(day)
+
+    def _read_day_locked(self, day: date) -> CalendarDay:
         try:
             service = self._connect()
             calendars = self._visible_calendars(service)
