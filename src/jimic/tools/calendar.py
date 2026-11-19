@@ -6,6 +6,10 @@ request carries a `fields` mask that asks for the title, the times, the status, 
 organizes and whether he declined: the description, the place and the e-mail addresses are not
 even downloaded (decision 34).
 
+The calendar that Todoist's integration fills with Pedro's dated tasks (decision 1.5-e) is not
+read: it is recognized by its exact name, `Todoist`. That is why the calendar list asks for
+`summary`, only to compare it: the name is never kept, logged or returned, only counted.
+
 When Calendar cannot be read the day says so with a code and the service goes on. The code is a
 type (`auth`, `timeout`, `http_503`...), never part of the content; it goes to the log once,
 when Calendar stops being available. If one calendar fails the whole day does: a day with
@@ -31,8 +35,11 @@ from jimic.tools.google_auth import CalendarConnection
 
 logger = logging.getLogger(__name__)
 
-CALENDAR_FIELDS = "nextPageToken,items(id,selected)"
-"""What is asked of `calendarList.list`: not even the names of the calendars."""
+CALENDAR_FIELDS = "nextPageToken,items(id,selected,summary)"
+"""What is asked of `calendarList.list`. The name (`summary`) only to skip Todoist's calendar."""
+
+TODOIST_CALENDAR = "Todoist"
+"""The exact name of the calendar that Todoist's integration creates (decision 1.5-e)."""
 
 EVENT_FIELDS = (
     "nextPageToken,items(summary,start,end,status,organizer/self,attendees(self,responseStatus))"
@@ -67,6 +74,8 @@ class CalendarDay(BaseModel):
     """A code (`auth`, `timeout`, `http_503`...), never part of the content."""
     calendar_count: int = 0
     """How many visible calendars were read: a count, to log and to check, never a name."""
+    excluded_calendar_count: int = 0
+    """How many visible calendars were skipped because they are Todoist's (decision 1.5-e)."""
     events: list[CalendarEvent] = Field(default_factory=list, repr=False)
 
     @classmethod
@@ -220,7 +229,7 @@ class GoogleCalendarReader:
     def _read_day_locked(self, day: date) -> CalendarDay:
         try:
             service = self._connect()
-            calendars = self._visible_calendars(service)
+            calendars, excluded = self._visible_calendars(service)
             time_min, time_max = _day_bounds(day, self._timezone)
             events: list[CalendarEvent] = []
             for calendar_id in calendars:
@@ -244,15 +253,22 @@ class GoogleCalendarReader:
                         if event is not None:
                             events.append(event)
             events.sort(key=lambda event: _sort_key(event, self._timezone))
-            return CalendarDay(available=True, calendar_count=len(calendars), events=events)
+            return CalendarDay(
+                available=True,
+                calendar_count=len(calendars),
+                excluded_calendar_count=excluded,
+                events=events,
+            )
         except Exception as error:  # a failure here must not take the service down
             return CalendarDay.unavailable(failure_code(error))
 
     @staticmethod
-    def _visible_calendars(service: Service) -> list[str]:
-        """The calendars marked as visible. Google leaves `selected` out of the others, so only
-        `true` counts."""
+    def _visible_calendars(service: Service) -> tuple[list[str], int]:
+        """The ids of the calendars marked as visible, and how many visible ones are Todoist's
+        and skipped. Google leaves `selected` out of the others, so only `true` counts. The name
+        is compared and dropped here: it never leaves this function."""
         ids: list[str] = []
+        excluded = 0
         for page in _pages(
             lambda token: service.calendarList().list(
                 **_with_token({"fields": CALENDAR_FIELDS}, token)
@@ -261,9 +277,16 @@ class GoogleCalendarReader:
             for item in page.get("items", []):
                 if not isinstance(item, dict) or not isinstance(item.get("id"), str):
                     raise _InvalidFormat
-                if item.get("selected") is True:
+                name = item.get("summary")
+                if name is not None and not isinstance(name, str):
+                    raise _InvalidFormat
+                if item.get("selected") is not True:
+                    continue
+                if name == TODOIST_CALENDAR:
+                    excluded += 1
+                else:
                     ids.append(item["id"])
-        return ids
+        return ids, excluded
 
 
 def _with_token(arguments: dict[str, Any], token: str | None) -> dict[str, Any]:
