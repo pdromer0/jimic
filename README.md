@@ -10,6 +10,7 @@ entrenamiento) empieza con su sesión conceptual. Ver la [hoja de ruta](docs/dis
 - [Documentación](docs/README.md): especificaciones de los hitos, decisiones (ADR), proceso y
   diario.
 - [Seguridad](SECURITY.md): cómo avisar de una vulnerabilidad.
+- [Privacidad](PRIVACIDAD.md): qué datos de Google lee JimiC y cómo se tratan.
 
 Se construye con el método EDsim v2
 ([ADR 0001](docs/decisiones/0001-adoptamos-el-metodo-edsim.md)): Pedro decide y fusiona; los
