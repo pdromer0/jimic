@@ -338,10 +338,10 @@ insistente exige editar el fichero a mano.
 
 | Qué | Por defecto | Tipo |
 | --- | --- | --- |
-| Tope de mensajes proactivos al día | 8 (no cuentan las respuestas a Pedro ni las confirmaciones que él pide) | Límite duro |
+| Tope de mensajes proactivos al día | 8 (no cuentan las respuestas a Pedro ni las confirmaciones que él pide); el último queda para el cierre del día mientras no haya salido (decisión 78) | Límite duro |
 | Horas de silencio | Las de la rutina: desde que se acuesta hasta que se levanta | Límite duro |
 | Durante un evento del calendario | Nada proactivo; espera a que termine | Límite duro |
-| Agrupar lo no urgente | Dos avisos a menos de 30 min van en un solo mensaje | Blando |
+| Agrupar lo no urgente | Un aviso (`notice`) a menos de 30 min del último proactivo espera; en el primer latido tras la ventana, los que esperan salen juntos en un solo mensaje, que cuenta 1. El plan, el cierre y las tareas clave no esperan nunca; lo que espera al empezar el silencio se descarta (decisión 79) | Blando |
 | Insistencia en una tarea clave | Hasta 3 al día: amable, directo, con reto o humor; nunca tras [Hoy no] | Tope duro; tono blando |
 | Personaje | Tono cercano con humor, ajustable en `preferencias.md` (decisión 12); personaje propio y gamificación, más adelante (RF-29) | Blando |
 
@@ -622,14 +622,17 @@ Los nodos morados son los únicos que razonan; todo lo demás es código determi
 ### 6.3 El ciclo de un latido
 
 1. **Despertar** (código): el latido lee los cambios de las fuentes.
-2. **Límites, primera pasada** (código): horas de silencio, evento en curso, cupo de mensajes. Si
-   algo falla, el ciclo acaba aquí **sin llamar al modelo**.
+2. **Límites, primera pasada** (código): horas de silencio, cupo de mensajes (ni siquiera el cierre
+   cabe) y evento en curso (con hora, no rechazado; solo si el calendario está disponible). Si algo
+   falla, el ciclo acaba aquí **sin llamar al modelo** ni leer las tareas y APEX.
 3. **Estado del día** (código): hora, agenda, tareas, entreno previsto, avisos de hoy, mensajes que
    quedan e intenciones activas.
 4. **Decisión** (Haiku): `{hablar, intención, motivo, mensaje, botones}`. Si hace falta razonar o
    usar herramientas, pasa el turno al agente.
-5. **Límites, segunda pasada** (código): tope por intención, no repetir, agrupar. Esta pasada
-   **garantiza** los límites, decida lo que decida el modelo.
+5. **Límites, segunda pasada** (código): tope por intención (el plan y el cierre, uno al día; cada
+   aviso, uno al día y en sus días; una tarea clave, `min(max_per_day, max_insist_per_task)`), no
+   repetir lo que agotó su tope, el hueco del cierre (decisión 78) y agrupar (decisión 79). Esta
+   pasada **garantiza** los límites, decida lo que decida el modelo, y da siempre un motivo en código.
 6. **Guardia**: libre, con botón o bloqueado (6.5).
 7. **Salida**: Telegram; se registran la decisión con su motivo y el aviso.
 8. **Pulsaciones**: un botón con acción predefinida («A las 11:00») lo resuelve el código, sin
@@ -1431,6 +1434,9 @@ cuando haya casos reales de sobra y si Pedro lo considera necesario; exige evalu
 | 74 | Objetivos de entrenamiento: los de APEX en curso son los del área de entrenamientos, en el orden de su `prioridad` (1 es la más alta); se leen solos y `objetivos.md` no los repite; `[enlazado]` queda para otras apps (Nutri, H3). Ajusta la 7 (H1-20) | Una sola fuente de verdad sin pasar por la puesta en marcha. Descartado: enlazarlos a mano en `objetivos.md` (se desfasan al cambiar APEX) | — |
 | 75 | El JimiC de pruebas solo ve y toca el proyecto de `PROYECTO_PRUEBAS_TODOIST` (1.5-b): con `ENTORNO=dev`, una guardia envuelve al lector y al escritor de Todoist; la lectura se acota en origen (las tareas de otros proyectos ni se descargan) y, de refuerzo, se descarta lo que no sea del proyecto; crear va siempre a él; mover, completar y borrar leen la tarea fresca y rechazan con un código (`outside_test_project`, `task_not_found`) sin enseñar el título. `build_todoist` la aplica, para que el servicio no pueda olvidarla. Se prueba con dobles, nunca contra tareas reales | El proyecto de pruebas vive en la cuenta real de Pedro (1.1-b), así que el código es la única barrera. Descartada: una segunda cuenta solo para pruebas (más pasos). Límite conocido: la guardia lee y después escribe, dos llamadas; con un solo usuario una carrera con otro cliente de Todoist no se contempla | — |
 | 76 | Los tests de contrato de Todoist y Calendar los ejecuta también el agente (1.5-c), con mitigaciones: detrás de `JIMIC_CONTRATO=1` y solo sobre la copia `dev` (se niegan a correr si el `.env` no lo es); sin contenido real, ni al pasar ni al fallar (Calendar: solo forma, campos y recuentos; Todoist: títulos inventados `jimic-contrato-<uuid>` en el proyecto de pruebas, borrados en un `finally` hasta dejarlo como estaba); nunca se imprime la respuesta cruda de una API; el permiso de Google lo da Pedro con `jimic google autorizar`. Excepción consciente a «el agente no usa las claves» (el proceso de los tests sí; el agente no las lee) | Sin contratos ejecutables, las suposiciones sobre las API se quedan sin probar (el del 19-nov-2026 cazó dos). Descartada: que los lance solo Pedro (más idas y vueltas por una prueba de unos 30 s) | — |
+| 77 | JimiC ignora el calendario «Todoist», que la integración de Todoist llena en un solo sentido con las tareas con fecha y hora: lo reconoce por su nombre exacto, `Todoist`. La lista de calendarios pide también `summary`, **solo para comparar**: el nombre no se guarda, no se registra y no sale del lector; los saltados se cuentan aparte (`excluded_calendar_count`) (1.5-e) | Las tareas saldrían dos veces y, como eventos, silenciarían a JimiC durante cada una. Decisión de Pedro del 19-nov-2026. Descartado: elegir los calendarios a mano en la configuración | — |
+| 78 | El cierre del día siempre tiene su hueco: lo que no es `day_close` se bloquea cuando los proactivos de hoy llegan a `max_messages_per_day - 1`; el cierre entra mientras haya menos de `max_messages_per_day`. El hueco se guarda solo mientras haya un `day_close` activo sin enviar hoy. Proactivos = filas de `notices`, que solo escribe el latido; un mensaje agrupado son filas con el mismo `telegram_message_id` y cuenta 1 (1.7-a) | Un día con muchos avisos no puede quedarse sin cierre. Decisión de Pedro del 19-nov-2026; lo de «mientras falte» y el recuento por `telegram_message_id`, en la sesión de la tarea 1.7 (sin migración) | — |
+| 79 | Agrupar es guardar y juntar: un `notice` que llega antes de que pase `group_window` desde el último proactivo espera en una cola en memoria; en el primer latido después de la ventana salen todos juntos en un mensaje que cuenta 1, tras reaplicar el tope por intención y el cupo. El plan, el cierre y las tareas clave no esperan; si en un latido sale uno de ellos, pasa a ser el último proactivo y la cola sigue esperando. Lo que espera al empezar el silencio, o de otro día, se descarta y solo se registra cuántos y por qué. Límite conocido: un reinicio pierde la cola (como mucho un aviso, que el modelo vuelve a decidir) (1.7-b) | Menos interrupciones sin perder avisos. Decisión de Pedro del 19-nov-2026. Descartados: una tabla para la cola (más estado para un aviso no urgente) y enviar la cola junto a un urgente en el mismo latido | — |
 
 ### Correspondencia con las decisiones candidatas de la referencia
 
@@ -1545,3 +1551,4 @@ P1, P2 y P6 (decisión 42), P3 (decisión 43), P4 (decisión 44), P5 (decisión 
 | Todoist Beginner, **confirmado en el contrato de la 1.5**: crear una tarea con `duration` (75 min) no la conserva (ni la respuesta de crear la trae); JimiC escribe además `Duración: 75 min` en la descripción y la lee de ahí, y el campo propio manda si algún día existe | 19-nov-2026 | Contrato de la tarea 1.5 con `todoist-api-python` 4.0.1 (API v1), proyecto de pruebas |
 | Todoist API v1, mover una recurrente: cambiar solo `due_date` o `due_datetime` la convierte en una tarea normal. Con `due_string` igual al texto de su recurrencia (`due.string`, por ejemplo «every day at 9:00») más la nueva fecha u hora, sigue siendo recurrente: la hora pedida manda para esa ocurrencia y el texto no cambia; con solo la fecha, esa ocurrencia queda sin hora | 19-nov-2026 | Contrato y experimentos de la tarea 1.5 en el proyecto de pruebas |
 | Google Calendar API: `calendarList.list` no manda `selected` en los calendarios no visibles (la clave falta, no viene a `false`); con una máscara `fields` solo llegan las claves pedidas, comprobado en 8 días de eventos de los calendarios visibles de Pedro (recuentos, sin contenido) | 19-nov-2026 | Contrato de la tarea 1.5 (`calendar.readonly`, app «En producción» sin verificar: primera autorización con el aviso de app no verificada) |
+| Todoist con Google Calendar: la integración crea un calendario aparte, que no se puede elegir, y copia en él, en un solo sentido, solo las tareas con fecha y hora, o también las de solo fecha si se activa «Sincronizar tareas de todo el día» | 19-nov-2026 | todoist.com/help/articles/360022000500 |

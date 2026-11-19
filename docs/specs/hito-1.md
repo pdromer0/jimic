@@ -59,7 +59,7 @@ clave: el gimnasio y una prioridad diaria (revisar ofertas).
 | 7:50 | Pedro acepta dos propuestas, cambia una y confirma el borrado de una atrasada duplicada; el código crea y borra | El código, tras los botones |
 | 10:00–11:00 | Reunión en curso: el ciclo se corta antes de llamar al modelo | Código, primera pasada |
 | 12:45 | Gimnasio previsto a las 12:00 sin hacer: primer aviso, tono amable | Haiku |
-| 13:00 | Sin respuesta: no se repite el aviso | Código, segunda pasada |
+| 13:00 | Sin respuesta: no se repite el aviso | Haiku; el código solo garantiza el tope de 3 (tarea 1.7) |
 | 13:30 | Segundo aviso, más directo; [Más tarde] mueve la tarea sin modelo | Haiku, después el código |
 | 17:20 | La prioridad diaria se completa a tiempo: no habla | Haiku |
 | 20:15 | Gimnasio completado: una felicitación de una línea; se acaba la insistencia | Haiku |
