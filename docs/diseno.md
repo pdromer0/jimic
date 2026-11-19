@@ -1048,6 +1048,9 @@ fijo y el permiso de `drive.file`.
 **Google OAuth.** La app de OAuth de JimiC se publica «En producción», sin verificar (uso
 personal): en modo «Testing», Google caduca los tokens de renovación a los 7 días y JimiC perdería
 Calendar y Drive cada semana. Al autorizarla aparece una vez el aviso de app no verificada.
+Publicarla exigió, además del nombre y los correos, una página principal y una política de
+privacidad (`PRIVACIDAD.md`, cuya URL queda fijada en la pantalla de consentimiento), aunque el
+formulario las marca como opcionales (anexo B).
 
 **El servicio en el VPS** (decisión 30):
 
@@ -1078,13 +1081,13 @@ los límites del plan, no contra los créditos.
 
 | Pieza | Qué es | En JimiC |
 | --- | --- | --- |
-| Organización | La cuenta de facturación: saldo, condiciones comerciales, miembros | «Pedro», nueva, vinculada al plan |
+| Organización | La cuenta de facturación: saldo, condiciones comerciales, miembros | La **existente** de Pedro (con un correo solo se puede crear una), vinculada al plan; el vínculo solo lo cambia soporte |
 | Espacio de trabajo | Una división con sus claves, su tope de gasto y su uso | `jimic` (producción) y `jimic-dev` (desarrollo y evaluaciones) |
-| Clave de API | Identifica al programa; lo que gasta se apunta en su espacio | Una en el `.env` del VPS y otra en el `.env` del PC; nunca en el repositorio |
+| Clave de API | Identifica al programa; lo que gasta se apunta en su espacio | Una en el `.env` del VPS y otra en el `.env` del PC; nunca en el repositorio. Son **personales** (ligadas a la identidad de Pedro), de **un solo espacio** y sin caducidad: no hace falta la cabecera `anthropic-workspace-id`. En el H2, clave nueva para el VPS y valorar una cuenta de servicio |
 | Facturación y uso | Saldo, topes, avisos, gráficas por espacio, clave y modelo | El coste real, frente al contador propio de JimiC |
 
 ```
-Organización «Pedro»  ←  100 $/mes de créditos del plan, sin recarga automática
+Organización         ←  100 $/mes de créditos del plan, sin recarga automática
 ├── Espacio «jimic»      tope 50 $/mes   → clave en el .env del VPS
 └── Espacio «jimic-dev»  tope 30 $/mes   → clave en el .env del PC
 ```
@@ -1093,7 +1096,8 @@ Por qué así:
 
 - **Condiciones comerciales** (decisión 21): las claves de API se rigen por ellas, y los términos
   de los créditos forman parte del mismo acuerdo.
-- **Sin recarga ni créditos comprados:** si se agotan, las peticiones se paran y no se cobra nada;
+- **Sin recarga automática:** si se agotan los créditos del mes, se gasta un saldo comprado antiguo
+  y pequeño que queda en la organización y después las peticiones se paran, sin más cobros;
   JimiC degrada a las horas por defecto (RF-04).
 - **Dos espacios:** un bucle en desarrollo se para en el tope de `jimic-dev` sin dejar a JimiC sin
   cerebro en producción, y el uso de cada uno se ve por separado.
@@ -1379,7 +1383,7 @@ cuando haya casos reales de sobra y si Pedro lo considera necesario; exige evalu
 | 28 | Equipo de ejecución (P-9, B-11): se desarrolla y se prueba en el PC actual (WSL2); la producción va a un VPS en la UE (Ubuntu Server LTS, ≥ 2 vCPU y 4 GB), elegido y con precio verificado al migrar | Decisión de Pedro: siempre encendido y sin hardware en casa. Descartados: el PC actual como producción (no siempre encendido; reinicios de Windows; WSL no arranca sin sesión) y un mini-PC en casa (hardware propio; cortes de luz y de fibra) | — |
 | 29 | Lector de APEX (cierra la elección de la decisión 18): fichero local en desarrollo; API de Drive con el permiso `drive.file` (el fichero elegido una vez con Google Picker) en el VPS. La app de OAuth de Google, «En producción» sin verificar | Drive para escritorio no existe para Linux; `drive.file` evita el permiso de lectura de todo el Drive; en «Testing», los tokens caducan a los 7 días. Descartado: `drive.readonly` (todo el Drive) | — |
 | 30 | Despliegue en el VPS (9.3): `systemd` con `Restart=always`, sin puertos de entrada salvo SSH con clave, secretos en `.env` con permisos 600 (sin `keyring`), copia diaria cifrada con `age` subida a Drive; en el agente, `CLAUDE_CONFIG_DIR` propio, `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` y `max_turns`. Ajusta la medida 10 de 8.3: en el VPS se acepta que el proveedor controla el disco, con mitigaciones | RNF-05 y RNF-09; la memoria automática de Claude Code se carga aunque `setting_sources=[]`; una sesión del SDK no caduca sola | — |
-| 31 | Facturación (P-8, B-14): los créditos mensuales de API del plan de Claude (100 $) en una organización nueva de la Consola vinculada al plan, sin recarga automática ni créditos comprados, con dos espacios de trabajo (`jimic` y `jimic-dev`), cada uno con su clave y su tope | Coste cero adicional; condiciones comerciales (decisión 21); si se agotan, no se cobra nada y JimiC degrada; un error en desarrollo no deja sin cerebro a la producción. Descartados: una clave de pago aparte (cuesta dinero sin necesidad) y el login del plan (Anthropic no lo permite en productos hechos con el SDK, y gastaría los límites de Pedro) | — |
+| 31 | Facturación (P-8, B-14): los créditos mensuales de API del plan de Claude (100 $) en la organización existente de la Consola, vinculada al plan, sin recarga automática (queda un saldo comprado antiguo y pequeño), con dos espacios de trabajo (`jimic` y `jimic-dev`), cada uno con su clave y su tope | Coste cero adicional; condiciones comerciales (decisión 21); si se agotan, no se cobra nada y JimiC degrada; un error en desarrollo no deja sin cerebro a la producción. Descartados: una clave de pago aparte (cuesta dinero sin necesidad) y el login del plan (Anthropic no lo permite en productos hechos con el SDK, y gastaría los límites de Pedro) | — |
 | 32 | Presupuesto (RNF-04, 10.3): objetivo de 30 $/mes con aviso a los 24 $; tope diario propio de 3 $ con degradación a Haiku; 0,50 $ por sesión del agente; topes en la Consola de 50 $ (`jimic`) y 30 $ (`jimic-dev`); los valores de JimiC, en `limites.yaml` | El uso intenso estimado ronda los 29 $; el tope diario frena un bucle el mismo día; el coste del SDK es una estimación, el tope de verdad es el de la Consola | — |
 | 33 | Cómo se prueba un agente (P-16, 13.2): cuatro capas. Tests deterministas con reloj inyectado; dobles de las APIs y un decisor falso; evaluaciones a mano (latido y plan del día, 3 pasadas, con `jimic-dev`, nunca en el CI); inyección garantizada por el código. El banco crece con la tabla `decisions` etiquetada por Pedro; los casos reales, fuera del repositorio | La seguridad se prueba sin modelo porque la ponen los límites y la guardia; el juicio del modelo se mide con porcentajes; las evaluaciones cuestan y no son deterministas | — |
 | 34 | El calendario es contenido externo desde el H1: `read_calendar` pasa solo título, horas y si Pedro organiza (sin descripción), y la contaminación se aplica a lo que devuelve | Las invitaciones las escriben terceros; mínimo dato (principio 4) | — |
@@ -1529,3 +1533,8 @@ P1, P2 y P6 (decisión 42), P3 (decisión 43), P4 (decisión 44), P5 (decisión 
 | Gmail API: con el permiso `gmail.metadata`, `messages.get` solo devuelve ID, etiquetas y cabeceras, y los formatos `full` y `raw` dan error; según una guía de terceros, tampoco permite la búsqueda (`q`). Las apps sin verificar con menos de 100 usuarios no tienen restricciones de acceso a Gmail | 18-nov-2026 | Referencia de `google-api-python-client` (gmail v1); Stack Overflow; medium.com (Nat); support.google.com/a/answer/9352843 |
 | Versiones: `pydantic-settings` 2.16.3 (13-nov-2026; `Requires-Python >=3.11`; depende de `pydantic>=2.7.0` y `python-dotenv>=1.2.2`), `pydantic` 2.14.3 (4-nov-2026), `python-dotenv` 1.2.4 (1-oct-2026) | 19-nov-2026 | Páginas de PyPI de cada paquete |
 | Claude Code, reglas de permisos `Read` y `Edit`: sintaxis de gitignore; `~/ruta` cuelga del home y `//ruta` es absoluta. Un `deny` de `Read` también bloquea `Edit` y `Write` en la misma ruta (no `NotebookEdit`). Los `deny` cubren las herramientas de ficheros, los comandos de fichero que Claude Code reconoce en Bash (`cat`, `head`, `tail`, `sed`, `tee`) y las redirecciones; no un subproceso que abre los ficheros por su cuenta, como un script de Python: para eso está el *sandbox* | 19-nov-2026 | code.claude.com/docs/en/permissions |
+| Consola de Anthropic: una organización por correo, y el vínculo de los créditos del plan es permanente (solo lo cambia soporte) | 19-nov-2026 | support.claude.com, artículos 9796807 y 17154008 |
+| Las claves de API de la Consola pueden ser personales o de cuenta de servicio, ligadas a una identidad; una clave de un solo espacio trabaja siempre en ese espacio | 19-nov-2026 | platform.claude.com/docs/en/manage-claude/authentication y …/workspaces |
+| Google Cloud: el secreto del cliente OAuth solo se puede ver y descargar al crearlo | 19-nov-2026 | support.google.com/cloud/answer/15549257 |
+| Google Auth Platform: «Publicar app» exige una página principal y una política de privacidad aunque el formulario las marque como opcionales | 19-nov-2026 | Foros de discuss.google.dev (oct-nov de 2026); observado el 19-nov-2026 |
+| Todoist Beginner (gratuito): 5 proyectos personales activos. La duración de las tareas figura como función de Pro y Business, y una versión más reciente de la ayuda es ambigua; por confirmar en la 1.5 | 19-nov-2026 | todoist.com/help/articles/205064592 y /9281236249628 |
