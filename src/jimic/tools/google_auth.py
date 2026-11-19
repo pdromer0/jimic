@@ -153,7 +153,11 @@ class CalendarConnection:
             credentials.refresh(
                 google_auth_httplib2.Request(httplib2.Http(timeout=REQUEST_TIMEOUT))
             )
-        except RefreshError:
+        except RefreshError as error:
+            if (
+                error.retryable
+            ):  # a 5xx or a rate limit of the token endpoint: the permission is fine
+                raise ToolFailure("network") from None
             raise GoogleAuthError(INVALID_TOKEN) from None
         try:
             write_private(self._paths.google_token_file, credentials.to_json())

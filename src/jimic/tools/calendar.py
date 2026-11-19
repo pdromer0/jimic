@@ -180,7 +180,7 @@ def failure_code(error: Exception) -> str:
     if isinstance(error, ToolFailure):
         return error.code
     if isinstance(error, RefreshError):
-        return "auth"
+        return "network" if error.retryable else "auth"
     if isinstance(error, HttpError):
         status = error.resp.status
         return "auth" if status == 401 else f"http_{status}"

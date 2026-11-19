@@ -264,6 +264,23 @@ def test_si_la_renovacion_falla_es_un_error_de_permiso_y_el_token_no_se_toca(pat
     assert paths.google_token_file.read_text() == before
 
 
+def test_un_fallo_pasajero_al_renovar_no_pide_volver_a_autorizar(paths, monkeypatch, caplog):
+    """Pilla tratar un 5xx del servidor de tokens como un permiso roto: el token no se toca."""
+
+    def unavailable(self, _request: Any) -> None:
+        raise RefreshError("servidor ocupado", retryable=True)
+
+    monkeypatch.setattr(Credentials, "refresh", unavailable)
+    write_token(paths, expiry=PAST)
+    before = paths.google_token_file.read_text()
+    reader = build_calendar(paths, ZoneInfo("Europe/Madrid"))
+    with caplog.at_level(logging.INFO, logger="jimic.tools.calendar"):
+        day = asyncio.run(reader.read_day(date(2030, 1, 7)))
+    assert day.unavailable_reason == "network"
+    assert [r.getMessage() for r in caplog.records] == ["Calendar unavailable (network)"]
+    assert paths.google_token_file.read_text() == before
+
+
 def test_si_no_se_puede_guardar_el_token_renovado_se_sigue_y_se_avisa_sin_contenido(
     paths, renewals, monkeypatch, caplog
 ):

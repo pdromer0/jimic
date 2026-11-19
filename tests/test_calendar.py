@@ -410,6 +410,7 @@ def test_el_doble_lanza_un_error_claro_si_se_le_llama_en_bucle():
         (http_error(403), "http_403"),
         (http_error(503), "http_503"),
         (RefreshError("invalid_grant"), "auth"),
+        (RefreshError("servidor ocupado", retryable=True), "network"),
         (ToolFailure("auth"), "auth"),
         (TimeoutError("timed out"), "timeout"),
         (ConnectionError("sin red"), "network"),
