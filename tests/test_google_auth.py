@@ -79,6 +79,7 @@ def test_autorizar_pide_solo_el_permiso_de_lectura_del_calendario(paths, monkeyp
     assert scopes == ["https://www.googleapis.com/auth/calendar.readonly"]
     assert flow.kwargs["port"] == 0
     assert flow.kwargs["open_browser"] is False
+    assert flow.kwargs["prompt"] == "consent"  # sin él, una segunda vez no trae refresh token
     assert "{url}" in flow.kwargs["authorization_prompt_message"]
     assert flow.kwargs["timeout_seconds"] == google_auth.FLOW_TIMEOUT
 
@@ -118,6 +119,17 @@ def test_un_permiso_distinto_del_pedido_no_se_guarda(paths, monkeypatch):
     write_client(paths)
     old = write_token(paths, token="test-token-viejo")
     with pytest.raises(GoogleAuthError, match="distinto"):
+        authorize(paths)
+    assert json.loads(old.read_text())["token"] == "test-token-viejo"
+
+
+@pytest.mark.parametrize("missing", [None, ""])
+def test_un_permiso_sin_refresh_token_no_se_guarda(paths, monkeypatch, missing):
+    """Pilla guardar un permiso que se rechazaría en la primera lectura: el viejo sigue."""
+    install_flow(monkeypatch, FakeFlow(granted(refresh_token=missing)))
+    write_client(paths)
+    old = write_token(paths, token="test-token-viejo")
+    with pytest.raises(GoogleAuthError, match="renovación"):
         authorize(paths)
     assert json.loads(old.read_text())["token"] == "test-token-viejo"
 

@@ -40,8 +40,8 @@ def write_client(paths: Paths) -> None:
     paths.google_client_file.write_text('{"installed": {"client_id": "test-cliente-3"}}')
 
 
-def granted(scopes: list[str] | None = None) -> Credentials:
-    return Credentials.from_authorized_user_info(token_info(scopes=scopes or [SCOPE]))
+def granted(scopes: list[str] | None = None, **overrides: Any) -> Credentials:
+    return Credentials.from_authorized_user_info(token_info(scopes=scopes or [SCOPE], **overrides))
 
 
 class FakeFlow:

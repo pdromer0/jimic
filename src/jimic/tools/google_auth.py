@@ -46,6 +46,10 @@ MISSING_CLIENT = (
 )
 INVALID_CLIENT = "google_cliente.json no es el cliente OAuth de escritorio que JimiC necesita"
 WRONG_SCOPE = f"Google concedió un permiso distinto de {SCOPE}: no se guarda nada"
+NO_REFRESH_TOKEN = (
+    "Google no dio el permiso de renovación: no se guarda nada; "
+    f"vuelve a lanzar `{COMMAND}` y acepta todo lo que pide"
+)
 
 
 class GoogleAuthError(ToolFailure):
@@ -72,6 +76,7 @@ def authorize(paths: Paths) -> None:
         credentials = flow.run_local_server(
             port=0,  # any free port: on WSL2 the browser of Windows reaches it as `localhost`
             open_browser=False,
+            prompt="consent",  # without it a repeat grant comes back with no refresh token
             timeout_seconds=FLOW_TIMEOUT,
             authorization_prompt_message="Abre este enlace en el navegador:\n{url}\n",
             success_message="Listo: ya puedes cerrar esta pestaña.",
@@ -82,6 +87,8 @@ def authorize(paths: Paths) -> None:
         ) from None
     if set(credentials.scopes or ()) != {SCOPE}:
         raise GoogleAuthError(WRONG_SCOPE)
+    if not credentials.refresh_token:
+        raise GoogleAuthError(NO_REFRESH_TOKEN)  # it would be rejected at the first read
     try:
         write_private(paths.google_token_file, credentials.to_json())
     except OSError as error:
