@@ -264,6 +264,28 @@ def test_si_la_renovacion_falla_es_un_error_de_permiso_y_el_token_no_se_toca(pat
     assert paths.google_token_file.read_text() == before
 
 
+def test_si_la_biblioteca_renueva_el_token_tras_un_401_se_guarda_en_la_siguiente_lectura(paths):
+    """Pilla un token renovado por dentro que nunca llega al fichero, o que llega con otro modo."""
+    write_token(paths)
+    seen: list[Credentials] = []
+    connection = CalendarConnection(
+        paths, build_service=lambda credentials: seen.append(credentials)
+    )
+    connection()
+    unchanged = paths.google_token_file.read_text()
+    connection()
+    assert paths.google_token_file.read_text() == unchanged  # sin cambios, no se reescribe
+    seen[0].token = "test-token-renovado-por-dentro-6"  # lo que hace AuthorizedHttp tras un 401
+    paths.google_token_file.chmod(0o644)
+    connection()
+    assert json.loads(paths.google_token_file.read_text())["token"] == (
+        "test-token-renovado-por-dentro-6"
+    )
+    assert mode(paths.google_token_file) == 0o600
+    connection()
+    assert leftovers(paths) == []
+
+
 def test_un_fallo_pasajero_al_renovar_no_pide_volver_a_autorizar(paths, monkeypatch, caplog):
     """Pilla tratar un 5xx del servidor de tokens como un permiso roto: el token no se toca."""
 

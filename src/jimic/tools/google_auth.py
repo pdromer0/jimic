@@ -127,8 +127,9 @@ def _build_service(credentials: Credentials) -> Any:
 class CalendarConnection:
     """What `GoogleCalendarReader` calls to get an authorized `Resource` (in a thread).
 
-    The permission is read on the first call and kept; when it has expired it is renewed and
-    saved again before the request, so the library never renews it behind our back.
+    The permission is read on the first call and kept. When it has expired it is renewed and
+    saved before the request. The library can still renew it by itself if a request gets a 401;
+    the new token is then saved on the next call, so the file never keeps an older one.
     """
 
     def __init__(
@@ -137,15 +138,20 @@ class CalendarConnection:
         self._paths = paths
         self._build_service = build_service
         self._credentials: Credentials | None = None
+        self._saved_token: str | None = None
         self._service: Any = None
 
     def __call__(self) -> Any:
         if self._credentials is None:
             self._credentials = load_credentials(self._paths)
-        if not self._credentials.valid:
-            self._renew(self._credentials)
+            self._saved_token = self._credentials.token
+        credentials = self._credentials
+        if not credentials.valid:
+            self._renew(credentials)
+        elif credentials.token != self._saved_token:
+            self._save(credentials)  # renewed inside the library, after a 401
         if self._service is None:
-            self._service = self._build_service(self._credentials)
+            self._service = self._build_service(credentials)
         return self._service
 
     def _renew(self, credentials: Credentials) -> None:
@@ -154,11 +160,14 @@ class CalendarConnection:
                 google_auth_httplib2.Request(httplib2.Http(timeout=REQUEST_TIMEOUT))
             )
         except RefreshError as error:
-            if (
-                error.retryable
-            ):  # a 5xx or a rate limit of the token endpoint: the permission is fine
+            # A 5xx or a rate limit of the token endpoint: the permission itself is fine.
+            if error.retryable:
                 raise ToolFailure("network") from None
             raise GoogleAuthError(INVALID_TOKEN) from None
+        self._save(credentials)
+
+    def _save(self, credentials: Credentials) -> None:
+        self._saved_token = credentials.token  # tried once: a full disk is not warned at every read
         try:
             write_private(self._paths.google_token_file, credentials.to_json())
         except OSError:  # the renewed token works in memory; the next start renews it again
