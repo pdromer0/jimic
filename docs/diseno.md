@@ -781,7 +781,7 @@ las dos: el fichero dice cómo están las cosas ahora; `changes`, cómo se lleg�
   `actividad_diaria` (pasos…) queda fuera; se decide en la 1.14.
 - **La foto del día.** El fichero (~220 KB y creciendo) se lee entero solo cuando cambian su fecha
   de modificación o su tamaño; al modelo llega una foto pequeña (unos 600 bytes con los datos
-  fijos de los tests): el entreno previsto hoy; el de hoy en tres estados (`trained`,
+  fijos de los tests y unos 2,5 KB con los reales): el entreno previsto hoy; el de hoy en tres estados (`trained`,
   `not_recorded` y `unknown`, este último si la última sincronización es anterior al inicio del
   día); los entrenos de los últimos 7 días (hoy y los 6 anteriores); los objetivos en curso por
   `prioridad` (1 es la más alta); de cada serie biométrica, el último valor con su fecha y la
@@ -948,7 +948,7 @@ con botón).
 | Finanzas | Bancos, nóminas, Hacienda, inversiones | Consentimiento por uso |
 | Legal y administración | Abogados, juzgados, notarías, multas | Consentimiento por uso |
 | Credenciales e identidad | Códigos de verificación, contraseñas, DNI o pasaporte escaneados | Nunca: solo «Tienes un correo con un código» |
-| Datos propios de APEX, Nutri y Apple Health | Entrenos, peso, sueño | Libre, con mínimo dato: al modelo cuando la intención lo necesita; nunca con cifras en la notificación. **Excepción, los biométricos de APEX** (decisión 73): el modelo los recibe resumidos y JimiC puede mencionarlos con cifras por su cuenta; nunca a los logs ni a SQLite, y sin consejo médico |
+| Datos propios de APEX, Nutri y Apple Health | Entrenos, peso, sueño | Libre, con mínimo dato: al modelo cuando la intención lo necesita; nunca con cifras en la notificación. **Excepción, los biométricos de APEX** (decisión 73): el modelo los recibe resumidos y JimiC puede mencionarlos con cifras por su cuenta, en la conversación o en el cuerpo de un mensaje y **nunca al principio de un aviso**, que es lo que se ve en la vista previa de la pantalla bloqueada; nunca a los logs ni a SQLite, y sin consejo médico |
 | Valoración del 1 al 5 | Cómo ha ido el día | Libre, solo para la revisión semanal |
 
 Los remitentes y las palabras clave de cada categoría viven en `limites.yaml` (zona protegida).
@@ -1421,7 +1421,7 @@ cuando haya casos reales de sobra y si Pedro lo considera necesario; exige evalu
 | 70 | Configuración del servicio en un `.env` validado al arrancar; SQLite con `plan_items` y `deleted_tasks` además de las seis tablas de la 19; acceso y migraciones, en el plan de la tarea 1.2 (ADR si se apartan del estándar) (H1-16) | Criterio del chat, aceptado por Pedro | — |
 | 71 | Pasan al repositorio, con los datos inventados, 8 de los 9 escenarios del piloto (e05, de correo, al H4) (H1-17) | Concreta la 54: lo bruto no entra; lo destilado, sí | — |
 | 72 | Módulos del método, uno por tarea de proceso: P1 `tablero`, P2 `metricas-pr`, P3 `revisor-plan` y P4 `adr-y-releases`, cada uno justo antes de hacer falta (H1-18) | Una novedad del método por tarea. Descartado: `adr-y-releases` en el cierre (los ADR, de memoria al final) | — |
-| 73 | Biométricos de APEX (sueño, peso…): se leen y se resumen (último valor con su fecha y media de 7 días); llegan al modelo y JimiC puede mencionarlos por su cuenta, con cifras; **nunca** se escriben en los logs ni en SQLite; JimiC no da consejo médico. Excepción a la 22 (H1-19) | Decisión de Pedro del 19-nov-2026: el dato ya es suyo y sirve para el plan y para las charlas. Descartados: no leerlos (se pierde contexto útil) y mencionarlos solo sin cifras (más tosco, y la 8.2 ya cubre el mínimo dato) | — |
+| 73 | Biométricos de APEX (sueño, peso…): se leen y se resumen (último valor con su fecha y media de 7 días); llegan al modelo y JimiC puede mencionarlos por su cuenta, con cifras, en la conversación o en el cuerpo de un mensaje y **nunca al principio de un aviso** (la vista previa de la pantalla bloqueada); **nunca** se escriben en los logs ni en SQLite; JimiC no da consejo médico. Excepción a la 22 (H1-19) | Decisión de Pedro del 19-nov-2026 (lo de la vista previa, en su revisión del PR): el dato ya es suyo y sirve para el plan y para las charlas. Descartados: no leerlos (se pierde contexto útil) y mencionarlos solo sin cifras (más tosco, y la 8.2 ya cubre el mínimo dato) | — |
 | 74 | Objetivos de entrenamiento: los de APEX en curso son los del área de entrenamientos, en el orden de su `prioridad` (1 es la más alta); se leen solos y `objetivos.md` no los repite; `[enlazado]` queda para otras apps (Nutri, H3). Ajusta la 7 (H1-20) | Una sola fuente de verdad sin pasar por la puesta en marcha. Descartado: enlazarlos a mano en `objetivos.md` (se desfasan al cambiar APEX) | — |
 
 ### Correspondencia con las decisiones candidatas de la referencia

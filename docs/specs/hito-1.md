@@ -437,7 +437,7 @@ informe de `revisor-plan` (desde la P3); en las tareas de Telegram, una captura 
 | H1-16 | Configuración en un `.env` validado; SQLite con `plan_items` y `deleted_tasks` además de las seis tablas; acceso y migraciones, en el plan de la 1.2 | Criterio del chat, aceptado por Pedro |
 | H1-17 | Pasan al repositorio, con los datos inventados, 8 de los 9 escenarios del piloto; el de correo, al H4 | Decisiones 33 y 54 |
 | H1-18 | Módulos: P1 `tablero`, P2 `metricas-pr`, P3 `revisor-plan` y P4 `adr-y-releases`, cada uno justo antes de hacer falta | Una novedad del método por tarea. Descartado: `adr-y-releases` en el cierre |
-| H1-19 | Biométricos de APEX: se leen y se resumen; llegan al modelo y JimiC puede mencionarlos, con cifras, por su cuenta; nunca a los logs ni a SQLite; sin consejo médico. Excepción a 8.2 | Decisión de Pedro del 19-nov-2026. Descartados: no leerlos y mencionarlos solo sin cifras |
+| H1-19 | Biométricos de APEX: se leen y se resumen; llegan al modelo y JimiC puede mencionarlos, con cifras, por su cuenta, en la conversación o en el cuerpo de un mensaje y nunca al principio de un aviso (vista previa de la pantalla bloqueada); nunca a los logs ni a SQLite; sin consejo médico. Excepción a 8.2 | Decisión de Pedro del 19-nov-2026. Descartados: no leerlos y mencionarlos solo sin cifras |
 | H1-20 | Los objetivos de APEX en curso son los de entrenamiento, por su `prioridad`; se leen solos y `objetivos.md` no los repite; `[enlazado]` queda para otras apps | Una sola fuente de verdad. Descartado: enlazarlos a mano en `objetivos.md` |
 
 ## Tareas y orden
@@ -1074,8 +1074,9 @@ la de las 00:00:00 no. El 31-mar-2030 las medianoches de Madrid son +01:00 y +02
 muy por debajo de los ~4 KB que paraban la tarea. Suite de la tarea: 104 tests en 0,25 s (64 del
 contrato y la foto, 40 del lector). N3, tras la corrección de la revisión: en verde en 0:08
 (pre-commit 0:05, pytest 0:03 con 298 tests, gitleaks de la historia 0:00); este anexo se escribió
-mientras corría y solo es documentación. El contrato no se ha probado contra el `apex_db.json` de
-Pedro (nada personal en el repositorio).
+mientras corría y solo es documentación. El chat comprobó el contrato contra el `apex_db.json` real
+el 19-nov-2026, fuera del repositorio y sin copiar nada: valida sin errores y la foto real mide unos
+2,5 KB (los objetivos ocupan ~1,5 KB).
 
 **Versiones incorrectas** (aplicadas y deshechas con un script; ninguna se dejó en el árbol):
 
@@ -1105,16 +1106,26 @@ Pendiente.
   vería una reescritura que conservara tamaño y `mtime`.
 
 **Pendiente.**
-- Comprobar el contrato contra el `apex_db.json` real, a mano y sin copiarlo. Destino: la 1.7.
-- Si el fichero real manda valores nulos o formatos distintos en los biométricos o en el plan,
-  degradar por series o por lecturas en lugar de tirar toda la foto (hallazgos 1 y 2). Destino: la
-  1.7, con ese fichero a la vista.
+- Como precaución si APEX cambia el formato (valores nulos o distintos en los biométricos o en el
+  plan), degradar por series o por lecturas en lugar de tirar toda la foto (hallazgos 1 y 2).
+  Destino: la 1.7.
+- Las cifras de los biométricos pueden ir en la conversación y en el cuerpo de un mensaje, pero
+  nunca al principio de un aviso (vista previa de la pantalla bloqueada; decisión 73). Destino: la
+  1.8.
 - Si APEX reescribe conservando tamaño y `mtime`, la caché necesita un hash (hallazgo 4). Destino: la
   comprobación del H1 («APEX conserva el ID»), en la 2.2.
 - Que la foto no se guarde en SQLite (`decisions`): lo decide quien la persiste. Destino: la 1.7 y
   la 1.8.
 - `actividad_diaria` (pasos…). Destino: la 1.14.
-- Re-medir el tamaño con la serialización que use la herramienta `read_apex_today`. Destino: la
-  1.10. La interfaz asíncrona, si hace falta, en la 2.2.
+- Re-medir el tamaño con la serialización que use la herramienta `read_apex_today`; con el fichero
+  real son unos 2,5 KB, y los objetivos ocupan ~1,5 KB. Destino: la 1.10. La interfaz asíncrona,
+  si hace falta, en la 2.2.
 - Aparece `tests/apex_data.py`, no `tests/data/`: el módulo `datos-de-referencia` sigue sin
   dispararse. Destino: decidirlo cuando haya más datos sintéticos (Todoist, 1.5).
+
+**Ajustes de la revisión del chat (PR #38).** Dos, solo de documentación (sin N3 nueva):
+- El contrato, comprobado contra el fichero real (valida, ~2,5 KB): cambian «Medidas» y los dos
+  pendientes afectados, y el diseño (7.1) añade la cifra real.
+- Decisión de Pedro del 19-nov-2026 en la revisión: las cifras de los biométricos pueden ir en la
+  conversación y en el cuerpo de un mensaje, nunca al principio de un aviso (vista previa de la
+  pantalla bloqueada). Cambian la decisión 73, H1-19 y la fila de 8.2, con destino en la 1.8.
