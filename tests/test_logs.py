@@ -16,7 +16,7 @@ KNOWN_TITLE = "Recoger el paraguas inventado del tinte Zq7"
 
 
 def test_el_fichero_rota_a_medianoche_y_guarda_siete_dias(tmp_path):
-    """Pilla una rotación distinta o sin límite de copias: el log crecería sin fin."""
+    """Pilla una rotación distinta o sin límite, y 7 copias más el fichero del día (8 días)."""
     logs_dir = tmp_path / "logs"
     with logging_to(logs_dir) as logger:
         files = [h for h in logger.handlers if isinstance(h, TimedRotatingFileHandler)]
@@ -24,7 +24,7 @@ def test_el_fichero_rota_a_medianoche_y_guarda_siete_dias(tmp_path):
         assert len(files) == 1
         assert len(streams) == 1
         assert files[0].when == "MIDNIGHT"
-        assert files[0].backupCount == 7
+        assert files[0].backupCount == 6
         assert files[0].baseFilename == str(logs_dir / LOG_FILE)
 
 

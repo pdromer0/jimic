@@ -13,6 +13,7 @@ from pathlib import Path
 LOGGER_NAME = "jimic"
 LOG_FILE = "jimic.log"
 DAYS_KEPT = 7
+"""Days of logs on disk: today's file plus `DAYS_KEPT - 1` rotated copies."""
 FORMAT = "%(asctime)s %(levelname)s %(name)s: %(message)s"
 
 
@@ -24,7 +25,7 @@ def logging_to(logs_dir: Path) -> Generator[logging.Logger]:
     handlers: list[logging.Handler] = [
         logging.StreamHandler(),
         TimedRotatingFileHandler(
-            logs_dir / LOG_FILE, when="midnight", backupCount=DAYS_KEPT, encoding="utf-8"
+            logs_dir / LOG_FILE, when="midnight", backupCount=DAYS_KEPT - 1, encoding="utf-8"
         ),
     ]
     logger = logging.getLogger(LOGGER_NAME)
