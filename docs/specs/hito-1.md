@@ -876,3 +876,144 @@ anexo se escribió mientras corría y solo es documentación. Tiempo de pared de
 - La comprobación del `deny` en una sesión nueva, arriba, en «Decisiones del diff».
 - N3 de la ronda: en verde en 0:07 (pre-commit 0:05, pytest 0:01, gitleaks-historia 0:01).
 - Las métricas del PR se completan con las cifras del chat: 3 idas y vueltas y 1 ronda de revisión.
+
+### Tarea 1.3: ficheros personales y esquemas
+
+**Qué se hizo.** Issue #15 (★, primera tarea con `revisor-plan`), rama `feat/h1-ficheros`.
+Commits: `chore(deps)` (73f9de8); `feat(memory)` de los esquemas (74300dc), del YAML de ida y
+vuelta (7d94268), de los Markdown (cfe91a0) y de plantillas, `init` y `check` (9e64331);
+`feat(cli)` (5cca8fd); `docs(diseno)` (c2732ff) y `docs(hito-1)` (d5b9c3e). De la revisión propia,
+siete `fix(memory)`: d3fb1fa, 2c413e5, cf585c4, 05708f7, 76b7d2d, dfa8c92 y 44f267a. Este anexo es
+el último, `docs(hito-1)`.
+
+**Decisiones de la tarea** (del chat, con Pedro):
+- **1.3-a · Horas:** valen con o sin comillas (con YAML 1.2, `7:00` llega como texto); el esquema
+  acepta `H:MM` o `HH:MM`, de 00:00 a 23:59. JimiC las escribe entre comillas.
+- **1.3-b · Los cinco ficheros:** los dos YAML, con Pydantic; los tres Markdown, con una
+  comprobación de estructura que no juzga el contenido. `ideas.md` queda fuera.
+- **1.3-c · Enlace:** la `key_task` apunta a su hábito con `habit: <id>`; el nombre de Todoist
+  sale del hábito. Se rechazan un `habit:` que no existe y dos hábitos con el mismo `id`.
+- **1.3-d · Chat ID:** solo en el `.env`; `limites.yaml` no lleva `allowed_chat_id`.
+- **1.3-e · Generación (Pedro, en la revisión del plan):** `jimic config init` genera solo los
+  dos YAML. `rutina.md`, `objetivos.md` y `preferencias.md` los crea la puesta en marcha (1.13), y
+  CU-12 conserva su disparador («no existe `objetivos.md`»). `config check` dice «aún no existe:
+  lo crea la puesta en marcha» sin contarlo como error.
+
+**Decisiones del diff.**
+- Modelos estrictos (`strict=True`, `extra="forbid"`): `"8"`, `true` u `8.0` como tope son
+  error. Los tipos de ruamel pasan: `CommentedMap`, `CommentedSeq` y `ScalarFloat` son subclases de
+  `dict`, `list` y `float`, y un entero vale en un campo `float` (`budget: 30`).
+- Horas y duraciones con `PlainValidator` propios, `[0-9]` y `re.fullmatch` (`\d` acepta `٧`, y `$`
+  de Python acepta un `\n` final). Toda excepción al convertir una duración (`OverflowError` de
+  `timedelta`, `ValueError` de `int` con más de 4300 cifras) es `duration_format`.
+- Hábitos: todos los campos obligatorios; `id` con `^[a-z0-9_]+$` (el `pattern` de Pydantic usa el
+  motor de Rust, donde `$` es el final del texto). Hábitos e intenciones tienen espacios de ids
+  separados; dentro de cada lista, el error marca la segunda aparición.
+- Intención nueva `day_close`, la del cierre (CU-14), con `window` opcional como `daily_plan`.
+  `tool_levels`, solo `free` y `blocked`: lo que pide botón son funciones del código (decisión
+  55). `sensitive_categories`, solo `{}` hasta el H4.
+- Errores: `<fichero>:<línea>: <ruta>: <motivo>`. La ruta solo lleva nombres del esquema e
+  índices desde 0; se descartan las claves de Pedro (las de un dict y la de una clave
+  desconocida). La línea sale de bajar por `loc` en el documento de ruamel, saltando la etiqueta
+  de la unión; si falta la clave, la de su padre. Al cargar se captura **cualquier** excepción
+  (`!!int` lanza un `ValueError` normal) y queda solo el tipo y «cerca de la línea N».
+- Ficheros: `utf-8-sig` al leer; `init`, carpeta 0700 y ficheros 0600 con `O_CREAT | O_EXCL`
+  (nunca sobrescribe, y si falla la escritura se borra lo creado); `save_yaml_file` valida, escribe
+  un temporal 0600, `fsync`, `os.replace` y `fsync` de la carpeta.
+- Markdown: títulos `##` exactos, con o sin almohadillas de cierre; se saltan los bloques de
+  código (cierre con valla del mismo carácter, al menos igual de larga) y los comentarios HTML. La
+  estructura que se comprueba está en 7.2 del diseño, para que la 1.13 escriba lo que `check`
+  acepta.
+- La plantilla de `intenciones.yaml` lleva un hábito y una `key_task` de ejemplo comentados, con
+  la instrucción de quitar los «# » (quitar solo la `#` deja tres espacios y la `key_task` no
+  encaja). Un test los descomenta y los valida. Los dos ejemplos de 7.2 también validan con el
+  esquema (comprobado a mano).
+- Dependencias: `uv add ruamel.yaml` fijó la 0.19.1 sin dependencias nuevas; la *wheel* (`uv build
+  --offline`) incluye `templates/`.
+
+**Zona protegida** (todo `limites.yaml`): la dirección «más discreta» de cada campo, para la regla
+asimétrica de la 1.12.
+
+| Campo | Más discreto |
+| --- | --- |
+| `max_messages_per_day`, `max_insist_per_task`, `max_deletions_per_day` | Baja |
+| `quiet_hours` | Más horas de silencio (qué significa `from == to`, en Pendiente) |
+| `silent_during_events` | `true` |
+| `group_window` | Sube |
+| `budget` (los tres importes) | Bajan; `warn_at`, por decidir en la 1.12 |
+| `tool_levels` | De `free` a `blocked` |
+| `sensitive_categories` | Llega en el H4 |
+
+**Valores a mano** (ruamel.yaml 0.19.1 y pydantic 2.14.3 en un entorno del scratchpad, con
+permiso, antes del `uv add`; recalculados por `revisor-plan`):
+- `7:00`, `"7:00"` y `07:00` llegan como texto; con `%YAML 1.1`, `7:00` llega como `int 420`.
+- Ida y vuelta: 10 cambios sobre un fichero con 21 comentarios, sin perder ninguno. Solo se
+  normalizan los espacios de los mapas en línea (`{ from: … }` → `{from: …}`, `{ }` → `{}`): un
+  fichero con el estilo antiguo cambia esas líneas al guardarse por primera vez. El test de
+  «solo cambia esa línea» se hace sobre las plantillas, que ya vienen sin esos espacios.
+- Errores de carga: `!!int` → `ValueError` sin marca; alias sin definir → `ComposerError`;
+  carácter de control → `ReaderError` sin marca; `!!timestamp` → `ConstructorError`. Una lista en
+  línea sin cerrar en la línea 2 da la marca en la 3 (el plan decía 4, con otro texto): de ahí
+  «cerca de».
+- Líneas de los ficheros de prueba, contadas buscando cada marcador. Dos esperados de los tests de
+  Markdown los escribí de memoria y fallaron (17 y no 18; 16, 18, 19 y 20 y no 18, 20, 21 y 22);
+  se corrigieron con la cuenta independiente, sin tocar el código.
+
+**Medidas.** Suite rápida: 194 tests en 1,8 s (antes 67); ninguno de los nuevos entre los cinco
+más lentos. N3: en verde en 0:06 (pre-commit 0:03, pytest 0:03, gitleaks-historia 0:00, 26
+commits y ~526 KB), tras las correcciones de la revisión. Este anexo se escribió mientras corría y
+solo es documentación. `jimic config init` y `check` se probaron a mano con un `HOME` falso: salidas
+1, 0, 0 y 0; 0700 y 0600; un tope `"5"` da `limites.yaml:9: max_deletions_per_day: debe ser un
+número entero` y salida 1; `JIMIC_ENTORNO=otro`, salida 2.
+
+**Versiones incorrectas** (aplicadas y deshechas con un script; suite rápida de 186 tests):
+
+| # | Versión | Predicción | Observado |
+| --- | --- | --- | --- |
+| A | La hora acepta 24–29 | Falla el test de formato de hora | Así (24:00 y 25:00), y además el del criterio de `test_personal`, que lleva un `25:00` |
+| B | `habit:` sin comprobar | Falla el de la referencia; pasa el de ids repetidos | Así: los tres de la referencia (esquema, `check` y `zx83`) |
+| C | `init` con `O_TRUNC` | Falla «nunca sobrescribe» | Así, solo ese |
+| D | El motivo añade el valor | Fallan el de valores inventados y los de lista exacta | Así: `zx81`, `zx83`, `zx86` y cuatro de lista exacta; pasan `zx82`, `zx84`, `zx85` y los Markdown, que no pasan por Pydantic |
+| E | `\d` en vez de `[0-9]` | Solo el de dígitos no ASCII | Así |
+| F | Sin `preserve_quotes` | Falla la ida y vuelta | Así: los cuatro de ida y vuelta |
+| G | Línea contada desde 0 | Fallan los de línea; pasa el de valores inventados | Así (10) |
+| H | Modo laxo | Falla el de `true`/`"8"` como tope | Así, y además el guardado inválido (en modo laxo el tipo es `int_parsing`) |
+| I | Capturar solo `YAMLError` | Falla `zx84`; pasan los errores con marca | Así: `zx84` y los dos de `!!int`/`!!float` |
+
+El test de valores inventados se pilló a sí mismo al escribirlo: el caso `zx81` cambiaba el primer
+`"08:00"` de la plantilla, que está en un comentario, y el fichero seguía siendo válido. Por eso
+cada caso comprueba que el valor está en el fichero, que el motivo esperado sale **y** que el valor
+no sale.
+
+**Revisión** (`/code-review medium`). 10 hallazgos: 8 corregidos y 2 explicados. Cada corrección
+lleva su test, comprobado en rojo con el código anterior.
+- Corregidos: (1) una valla de tres comillas cerraba un bloque abierto con cuatro y (2) código en
+  línea al principio de una línea abría un bloque (d3fb1fa); (3) `## Comidas ##` no contaba
+  (2c413e5); (4) el BOM escondía el primer título (05708f7); (5) un `init` que fallaba al escribir
+  dejaba un fichero vacío que ya no reparaba (76b7d2d); (7) el guardado no hacía `fsync` (dfa8c92);
+  (8) un objetivo dentro de un comentario HTML se señalaba (cf585c4); (10) un nombre que no es de
+  los dos YAML daba un `KeyError` (44f267a).
+- Explicados: (6) `os.replace` sustituye un enlace simbólico por un fichero; seguirlo escribiría
+  fuera de la raíz de configuración, y lo decide quien guarda (Pendiente, 1.12). (9) `mkdir` no
+  restringe una carpeta que ya existía con 0755; es el criterio de la raíz de datos de la 1.2, y
+  cambiar en silencio los permisos de la carpeta del `.env` es intrusivo. Los ficheros sí quedan en
+  0600.
+
+**Pendiente.**
+- Qué significa `from == to` en `quiet_hours` y en `window` (0 o 24 horas). Destino: la 1.7, que
+  aplica los límites, y la 1.12, que decide qué es «más discreto».
+- `max_per_day` de la `key_task` frente a `max_insist_per_task`: cuál manda. Destino: la 1.7 y la
+  1.15.
+- La `window` opcional de `day_close`, frente a la ventana que CU-14 saca de la rutina. Destino: la
+  1.16.
+- Enlaces simbólicos al guardar (hallazgo 6). Destino: la 1.12.
+- `jimic run` aún no carga ni valida los ficheros personales. Destino: la 1.7.
+
+**Ajustes de la revisión del chat (plan).** Dos rondas con `revisor-plan` (veredicto «dudas»
+las dos). La primera dio la decisión 1.3-e y doce ajustes (horas `H:MM`, comillas con
+`DoubleQuotedScalarString`, duraciones sin *traceback*, campos de los hábitos, modo estricto, motivo
+de `tool_levels`, cualquier excepción al cargar, `os.open` 0600, objetivos de primer nivel, fila
+separadora, normalización de la ida y vuelta y más valores inventados). En la segunda, Pedro aprobó
+el plan tal cual; sus dudas se resolvieron en el código o quedan arriba en Pendiente. El primer
+criterio del issue pasa a ser «una hora con formato inválido (`7h`, `25:00`) o un hábito sin
+prioridad dan un error claro con fichero y línea» (cambio de la revisión del chat).
