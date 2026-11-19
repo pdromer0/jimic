@@ -15,18 +15,25 @@ def distinct_values(values: dict[str, str]) -> list[str]:
     return [v for k, v in values.items() if k not in ("ENTORNO", "ZONA_HORARIA")]
 
 
-def load_error(values: dict[str, str]) -> str:
-    """Write `values`, load them, and return the `ConfigError` message (fails if none)."""
-    write_env(values)
+def load_problems(values: dict[str, str]) -> list[str]:
+    """Write `values`, load them, and return the problem lines of the `ConfigError` message.
+
+    The message must be exactly the header plus those lines: any extra text (such as a
+    truncated `input_value` from Pydantic) changes the list and fails the test.
+    """
+    env_file = write_env(values)
     with pytest.raises(ConfigError) as excinfo:
         load_settings(resolve_paths(os.environ))
     error = excinfo.value
     assert error.__cause__ is None
     assert error.__context__ is None or error.__suppress_context__
-    return str(excinfo.value)
+    header, *problems = str(error).splitlines()
+    assert header == f"{env_file} no es válido:"
+    return problems
 
 
-def assert_no_values(message: str, values: list[str]) -> None:
+def assert_no_values(problems: list[str], values: list[str]) -> None:
+    message = "\n".join(problems)
     for value in values:
         assert value not in message, f"el error imprime un valor: {value!r}"
 
@@ -44,36 +51,35 @@ def test_un_env_valido_se_carga_con_sus_tipos():
 
 
 def test_una_clave_que_falta_se_nombra_sin_imprimir_valores():
-    """Pilla `str(exc)` de Pydantic: su `input_value` lleva todos los valores del `.env`."""
+    """Pilla `str(exc)` de Pydantic: su `input_value` lleva los valores del `.env`, recortados."""
     values = {k: v for k, v in VALID_ENV.items() if k != "TOKEN_TODOIST"}
-    message = load_error(values)
-    assert "- falta TOKEN_TODOIST" in message.splitlines()
-    assert_no_values(message, distinct_values(values))
+    problems = load_problems(values)
+    assert problems == ["- falta TOKEN_TODOIST"]
+    assert_no_values(problems, distinct_values(values))
 
 
 def test_valores_invalidos_se_nombran_sin_imprimirlos():
     """Pilla el `msg` de Pydantic, que repite el valor («invalid timezone: …»)."""
     values = VALID_ENV | {"ZONA_HORARIA": "Marte/Olimpo-inventada", "CHAT_TELEGRAM": "chat-xyz"}
-    message = load_error(values)
-    lines = message.splitlines()
-    assert "- ZONA_HORARIA no es válida (zoneinfo_str)" in lines
-    assert "- CHAT_TELEGRAM no es válida (int_parsing)" in lines
-    assert_no_values(message, ["Marte/Olimpo-inventada", *distinct_values(values)])
+    problems = load_problems(values)
+    assert problems == [
+        "- ZONA_HORARIA no es válida (zoneinfo_str)",
+        "- CHAT_TELEGRAM no es válida (int_parsing)",
+    ]
+    assert_no_values(problems, ["Marte/Olimpo-inventada", *distinct_values(values)])
 
 
 def test_un_valor_vacio_es_un_error():
     """Pilla `RUTA_APEX=` aceptada como `.` y un token vacío aceptado."""
-    message = load_error(VALID_ENV | {"TOKEN_TELEGRAM": "", "RUTA_APEX": ""})
-    lines = message.splitlines()
-    assert "- TOKEN_TELEGRAM está vacía" in lines
-    assert "- RUTA_APEX está vacía" in lines
+    problems = load_problems(VALID_ENV | {"TOKEN_TELEGRAM": "", "RUTA_APEX": ""})
+    assert problems == ["- TOKEN_TELEGRAM está vacía", "- RUTA_APEX está vacía"]
 
 
 def test_una_clave_desconocida_es_un_error():
     """Pilla erratas que se ignorarían en silencio; tampoco imprime su valor."""
-    message = load_error(VALID_ENV | {"TOKEN_TELEGRAMM": "test-errata-000"})
-    assert "- TOKEN_TELEGRAMM no es una clave conocida" in message.splitlines()
-    assert_no_values(message, ["test-errata-000", *distinct_values(VALID_ENV)])
+    problems = load_problems(VALID_ENV | {"TOKEN_TELEGRAMM": "test-errata-000"})
+    assert problems == ["- TOKEN_TELEGRAMM no es una clave conocida"]
+    assert_no_values(problems, ["test-errata-000", *distinct_values(VALID_ENV)])
 
 
 def test_sin_env_dice_donde_lo_busca():
@@ -85,24 +91,22 @@ def test_sin_env_dice_donde_lo_busca():
 
 def test_un_env_vacio_dice_todas_las_claves_que_faltan():
     """Pilla que solo se informe del primer fallo: salen las nueve claves obligatorias."""
-    message = load_error({})
-    missing = [line for line in message.splitlines() if line.startswith("- falta ")]
-    assert len(missing) == 9
+    problems = load_problems({})
+    assert problems == [f"- falta {key}" for key in VALID_ENV]
 
 
 def test_las_variables_del_proceso_no_cuentan(monkeypatch):
     """Pilla que una variable suelta del entorno complete o cambie el `.env`."""
     monkeypatch.setenv("TOKEN_TODOIST", "test-desde-el-entorno")
     values = {k: v for k, v in VALID_ENV.items() if k != "TOKEN_TODOIST"}
-    message = load_error(values)
-    assert "- falta TOKEN_TODOIST" in message.splitlines()
+    assert load_problems(values) == ["- falta TOKEN_TODOIST"]
 
 
 def test_dev_exige_el_proyecto_de_pruebas(monkeypatch):
     """Pilla que la copia de pruebas arranque sin proyecto de pruebas de Todoist."""
     monkeypatch.setenv("JIMIC_ENTORNO", "dev")
-    message = load_error(VALID_ENV | {"ENTORNO": "dev"})
-    assert "- falta PROYECTO_PRUEBAS_TODOIST (obligatoria con ENTORNO=dev)" in message
+    problems = load_problems(VALID_ENV | {"ENTORNO": "dev"})
+    assert problems == ["- falta PROYECTO_PRUEBAS_TODOIST (obligatoria con ENTORNO=dev)"]
 
 
 def test_dev_con_proyecto_de_pruebas_se_carga(monkeypatch):
@@ -116,5 +120,5 @@ def test_dev_con_proyecto_de_pruebas_se_carga(monkeypatch):
 def test_el_entorno_del_env_debe_coincidir_con_la_variable(monkeypatch):
     """Pilla el `.env` de producción copiado en la carpeta de pruebas."""
     monkeypatch.setenv("JIMIC_ENTORNO", "dev")
-    message = load_error(VALID_ENV | {"PROYECTO_PRUEBAS_TODOIST": "proyecto-falso-1"})
-    assert "- ENTORNO no coincide con el que elige JIMIC_ENTORNO" in message.splitlines()
+    problems = load_problems(VALID_ENV | {"PROYECTO_PRUEBAS_TODOIST": "proyecto-falso-1"})
+    assert problems == ["- ENTORNO no coincide con el que elige JIMIC_ENTORNO"]
