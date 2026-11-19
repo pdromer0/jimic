@@ -3,7 +3,7 @@
 Everything else asks a `Clock` for `now()`, so tests can travel to any hour without waiting.
 """
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime, time, timedelta
 from typing import Protocol
 from zoneinfo import ZoneInfo
 
@@ -32,3 +32,14 @@ def to_db(moment: datetime) -> str:
     if moment.utcoffset() is None:
         raise ValueError("a naive datetime has no place in the database")
     return moment.astimezone(UTC).isoformat(timespec="seconds")
+
+
+def local_day_bounds(day: date, timezone: ZoneInfo) -> tuple[datetime, datetime]:
+    """Midnight of `day` and of the next day in `timezone`, as aware datetimes.
+
+    The end comes from the next date, not from adding 24 hours, so the days the clocks change
+    (23 or 25 hours) come out right.
+    """
+    start = datetime.combine(day, time.min, tzinfo=timezone)
+    end = datetime.combine(day + timedelta(days=1), time.min, tzinfo=timezone)
+    return start, end
