@@ -5,6 +5,7 @@ is not called and Todoist and APEX are not even read. The cycle neither sends no
 sending the verdicts and recording them in `decisions` and `notices` is task 1.8's.
 """
 
+import asyncio
 import logging
 import sqlite3
 from collections.abc import Awaitable, Callable
@@ -70,12 +71,17 @@ async def run_cycle(
         logger.info("first pass: stop (%s)", first.stop)
         return CycleResult(first.stop, dropped)
     assert first.calendar is not None  # the first pass reads it whenever it goes on
+    # APEX reads a file and may parse it: in a thread, so the loop keeps serving, and at the
+    # same time as Todoist.
+    tasks, apex = await asyncio.gather(
+        sources.todoist.reader.read_today(), asyncio.to_thread(sources.apex.read_today)
+    )
     state = build_day_state(
         now,
         timezone,
         first.calendar,
-        await sources.todoist.reader.read_today(),
-        sources.apex.read_today(),
+        tasks,
+        apex,
         sent,
         intentions,
         limits,

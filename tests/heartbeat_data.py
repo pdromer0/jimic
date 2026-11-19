@@ -6,6 +6,7 @@ every double the code calls in a loop.
 """
 
 import sqlite3
+import threading
 from datetime import date, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -188,9 +189,11 @@ class CountingApex:
     def __init__(self, snapshot: ApexSnapshot | None = None) -> None:
         self.snapshot = snapshot if snapshot is not None else invented_snapshot()
         self.reads = 0
+        self.threads: list[int] = []
 
     def read_today(self) -> ApexSnapshot:
         self.reads += 1
+        self.threads.append(threading.get_ident())
         return self.snapshot
 
 

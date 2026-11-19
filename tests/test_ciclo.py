@@ -6,6 +6,7 @@ tareas ni APEX.
 
 import asyncio
 import logging
+import threading
 from datetime import UTC, date, datetime, time, timedelta
 
 import pytest
@@ -14,6 +15,7 @@ from conftest import FixedClock
 from heartbeat_data import (
     MADRID,
     SECRET_TEXT,
+    CountingApex,
     SpyDecide,
     add_notice,
     all_day,
@@ -91,6 +93,16 @@ def test_durante_un_evento_no_se_llama_a_decide(conn, now):
     assert result.stopped == "in_event"
     assert spy.calls == 0
     assert reads(srcs) == (1, 0, 0)
+
+
+def test_apex_se_lee_fuera_del_bucle_de_eventos(conn):
+    """Pilla leer el fichero de APEX en el hilo del bucle: pararía Telegram mientras dura."""
+    srcs = sources()
+    cycle(conn, "2030-01-07T11:00", srcs)
+    apex = srcs.apex
+    assert isinstance(apex, CountingApex)
+    assert apex.threads and threading.get_ident() not in apex.threads
+    assert reads(srcs) == (1, 1, 1)
 
 
 def test_al_acabar_el_evento_ya_se_llama(conn):
