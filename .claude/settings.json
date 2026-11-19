@@ -47,7 +47,15 @@
       "Bash(git push * main)",
       "Bash(git push * main *)",
       "Bash(git push * *:main*)",
-      "Read(./.env)"
+      "Read(./.env)",
+      "Read(~/.config/jimic/**)",
+      "Edit(~/.config/jimic/**)",
+      "Read(~/.config/jimic-dev/**)",
+      "Edit(~/.config/jimic-dev/**)",
+      "Read(~/.local/share/jimic/**)",
+      "Edit(~/.local/share/jimic/**)",
+      "Read(~/.local/share/jimic-dev/**)",
+      "Edit(~/.local/share/jimic-dev/**)"
     ]
   },
   "hooks": {
