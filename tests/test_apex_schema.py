@@ -191,6 +191,18 @@ def test_una_serie_sin_datos_recientes_conserva_el_ultimo_valor_y_no_tiene_media
     assert (summary.last_date, summary.last_value) == (date(2030, 1, 2), 70.0)
 
 
+def test_una_media_que_se_sale_de_los_numeros_no_pasa_a_la_foto_como_infinito():
+    """Dos lecturas de 1e308 son finitas, pero su suma no: la media queda vacía, el resto sale."""
+    data = with_sleep([("2030-01-05", 1e308), ("2030-01-06", 1e308)])
+    summary = snapshot_of(data).biometrics["sueno_horas"]
+    assert summary.average_7d is None
+    assert summary.last_value == 1e308
+    assert (
+        json.loads(snapshot_of(data).to_json())["biometrics"]["sueno_horas"].get("average_7d")
+        is None
+    )
+
+
 def test_una_serie_vacia_no_sale_y_la_lectura_de_manana_se_ignora():
     data = invented()
     data["biometricos"]["vacia"] = []

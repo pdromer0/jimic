@@ -209,10 +209,12 @@ def build_snapshot(data: ApexData, now: datetime, timezone: ZoneInfo) -> ApexSna
         # Reversed, so that of two readings of the same day the last one in the file wins.
         last = max(reversed(known), key=lambda r: r.fecha)
         window = [r.valor for r in known if r.fecha >= first_day]
+        average = sum(window) / len(window) if window else None
         biometrics[name] = BiometricSummary(
             last_date=last.fecha,
             last_value=last.valor,
-            average_7d=sum(window) / len(window) if window else None,
+            # Finite readings can still add up past the largest `float`.
+            average_7d=average if average is not None and math.isfinite(average) else None,
         )
 
     return ApexSnapshot(
