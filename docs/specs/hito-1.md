@@ -1129,3 +1129,54 @@ Pendiente.
 - Decisión de Pedro del 19-nov-2026 en la revisión: las cifras de los biométricos pueden ir en la
   conversación y en el cuerpo de un mensaje, nunca al principio de un aviso (vista previa de la
   pantalla bloqueada). Cambian la decisión 73, H1-19 y la fila de 8.2, con destino en la 1.8.
+
+### Tarea 1.1: cuentas y credenciales
+
+**Qué se hizo.** Issue #12, rama `chore/h1-cuentas`. La parte de persona la hizo Pedro el
+19-nov-2026, guiada por el chat; sin valores aquí. Commits: `docs(privacidad)` (e55b23d),
+`docs(diseno)` (7172a21), `docs(hito-1)` (edb1201); de la revisión propia, `docs(privacidad)`
+(3a8b6f5) y `docs(diseno)` (bab8842). Este anexo es el último, `docs(hito-1)`.
+
+**Lo que existe, sin valores.** Espacios `jimic` (tope 50 $/mes) y `jimic-dev` (30 $/mes) en la
+organización existente de la Consola, con una clave personal de un solo espacio cada uno; dos bots
+de Telegram y el chat ID; el token de Todoist y el proyecto de pruebas; el proyecto `jimic` de
+Google, con la pantalla «En producción» y solo `calendar.readonly`, y el cliente `jimic-pc`; y los
+dos `.env` y `google_cliente.json` en `~/.config/jimic*/`, con permisos 600.
+
+**Decisiones de la tarea** (del chat, con Pedro):
+- **1.1-a · Guía desde el chat:** el chat comprueba las pantallas actuales de las webs; el agente
+  no puede leer `~/.config/jimic*` ni buscar en la web.
+- **1.1-b · Proyecto de pruebas de Todoist en la cuenta real:** el código es la única barrera. La
+  1.5 lleva un test obligatorio de que, con `ENTORNO=dev`, ninguna escritura sale de
+  `PROYECTO_PRUEBAS_TODOIST`. Descartada: una segunda cuenta solo para pruebas.
+
+**Decisiones del diff.**
+- `PRIVACIDAD.md` en la raíz, sin nombre propio ni datos de la cuenta; su URL está fijada en la
+  pantalla de consentimiento de Google. Todo lo que dice sale del diseño (decisiones 23 y 34, 7.3
+  y 8.1).
+- Un solo cliente OAuth `jimic-pc` para las dos copias (lo dicen las notas del chat).
+- El diseño cambia en 10.1, la decisión 31 y el glosario (organización existente, saldo antiguo
+  sin recarga), en 9.3 (publicar exigió página principal y privacidad) y en el anexo B (cinco
+  hechos del 19-nov-2026).
+
+**Valores a mano.** No hay: la tarea es solo documentación.
+
+**Versiones incorrectas.** No hay.
+
+**Revisión propia** (`/code-review medium`, 6 hallazgos).
+- Corregidos: (1) el borrado de datos nombra la copia `jimic-dev` y el permiso guardado; (4) la
+  decisión 31 decía «no se cobra nada» con un saldo antiguo; (5) el glosario seguía hablando de la
+  organización «Pedro».
+- Explicados: (3) la cláusula de Anthropic es la del diseño (8.1 y anexo B, con su fecha), y una
+  página de URL fija no lleva plazos; (6) un solo cliente para las dos copias es lo decidido, y
+  separarlos queda para el H2.
+- Pendiente: (2) ver abajo.
+
+**Pendiente.**
+- **1.5:** el test de que el entorno de pruebas no sale de su proyecto; la duración de las tareas
+  en el plan gratuito de Todoist (si no funciona, el plan del día la pone en la descripción); dónde
+  se guarda el token de usuario de Google (fichero 600 en `~/.config/jimic*/`); la primera
+  autorización, con el aviso de app no verificada.
+- **2.2:** añadir `drive.file` al mismo proyecto de Google, comprobar si un permiso nuevo exige
+  volver a publicar y **actualizar `PRIVACIDAD.md`** (hoy solo habla de Calendar).
+- **H2:** clave nueva para el VPS (y valorar una cuenta de servicio) y desactivar `jimic-pc`.
