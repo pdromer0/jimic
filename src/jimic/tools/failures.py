@@ -19,6 +19,13 @@ class ToolFailure(Exception):
         self.code = code
 
 
+class TooManyPages(ToolFailure):
+    """A paginated list went on for more than `MAX_PAGES` pages."""
+
+    def __init__(self) -> None:
+        super().__init__("too_many_pages")
+
+
 class WarnOnce:
     """Log a `WARNING` when a source goes from available to unavailable, and again if it comes
     back and fails once more; a source that stays down is not repeated."""

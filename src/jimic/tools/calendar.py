@@ -25,7 +25,7 @@ from googleapiclient.errors import HttpError
 from pydantic import BaseModel, ConfigDict, Field
 
 from jimic.paths import Paths
-from jimic.tools.failures import MAX_PAGES, ToolFailure, WarnOnce
+from jimic.tools.failures import MAX_PAGES, ToolFailure, TooManyPages, WarnOnce
 from jimic.tools.google_auth import CalendarConnection
 
 logger = logging.getLogger(__name__)
@@ -90,10 +90,6 @@ class _InvalidFormat(Exception):
     """Google answered with something that is not what the mask asks for."""
 
 
-class _TooManyPages(Exception):
-    """A list went on for more than `MAX_PAGES` pages."""
-
-
 type Service = Any
 """The Google `Resource`. `googleapiclient` builds its methods at run time and ships no types, so
 this is the one `Any` of the module: it never leaves it, and the data that comes out of it is
@@ -111,7 +107,7 @@ def _pages(request_for: Callable[[str | None], Any]) -> Iterator[dict[str, Any]]
         token = page.get("nextPageToken")
         if not token:
             return
-    raise _TooManyPages
+    raise TooManyPages
 
 
 def _day_bounds(day: date, timezone: ZoneInfo) -> tuple[str, str]:
@@ -192,8 +188,6 @@ def failure_code(error: Exception) -> str:
         return "timeout"
     if isinstance(error, _InvalidFormat):
         return "invalid_format"
-    if isinstance(error, _TooManyPages):
-        return "too_many_pages"
     if isinstance(error, OSError | httplib2.HttpLib2Error | TransportError):
         return "network"
     return f"unexpected:{type(error).__name__}"
