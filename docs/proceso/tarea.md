@@ -29,6 +29,21 @@ empezar: cada uno añade los pasos de un módulo activo y dice en qué punto del
   justificada en `.gitleaks.toml`.
 - **Lo bruto del piloto y los casos reales** nunca entran en el repositorio; solo su versión
   destilada o sintética.
+- **Los tests no dejan basura** (regla de Pedro, 21-nov-2026).
+  - **Incidente:** el 19-nov, en la 1.5, unos experimentos sueltos con tareas recurrentes con
+    hora se borraron de Todoist en 1 o 2 segundos, pero la sincronización de Todoist con Google
+    Calendar creó los eventos 12 y 18 segundos **después** del borrado y nunca los quitó.
+    Quedaron dos series diarias huérfanas en el calendario «Todoist», que el chat borró el 21-nov.
+  - La regla:
+    1. Nada de experimentos sueltos contra servicios reales: solo dentro de un test de contrato,
+       con el prefijo `jimic-contrato-` y limpieza en `finally`.
+    2. Tareas recurrentes con hora solo si el test lo necesita.
+    3. Tras un contrato o un test contra un servicio real, el PR lo dice y Pedro (o el chat, con
+       su conector) comprueba que no quedan restos: el proyecto de pruebas vacío y ningún evento
+       `jimic-contrato-*` en el calendario «Todoist». JimiC solo puede leer el calendario, así que
+       no puede borrarlos.
+    4. Con Telegram, las pruebas con el bot de pruebas no dejan mensajes fijados, ni comandos
+       configurados que no se usen, ni nada en el bot de verdad.
 
 ## 1. Arranque
 
