@@ -1511,12 +1511,11 @@ En el plan, las filas 1, 2 y 4 prometían menos (1 o 2 tests): las afiné al esc
 antes de aplicarlas. Además, cada corrección de la revisión se comprobó deshaciendo el código: sus
 tests nuevos fallan sin ella (3 rojos).
 
-**Revisión** (`/code-review medium`). 10 hallazgos: 2 corregidos (más un refactor de tipos), 6
-explicados y 2 con Pendiente.
+**Revisión** (`/code-review medium`). 10 hallazgos: 3 corregidos, 5 explicados y 2 con Pendiente.
 - Corregidos: (2) un fallo parcial de [Créalo todo] ahora sale como `partially_resolved` y el
   toque avisa «No he podido hacerlo» (6d30b83); (6) `stop()` captura `Exception` para que cada
   paso corra antes de cerrar la base (aa91be1); (10) tipos de la factoría de la demo (599531e).
-- Explicados: (4) el estado de la fila dice cómo acabó el mensaje (`expired`); lo decidido sigue en
+- Explicados (5): (4) el estado de la fila dice cómo acabó el mensaje (`expired`); lo decidido sigue en
   `payload` y se ejecutó al tocar; (5) `create` lanza por errores de quien crea el mensaje, y la
   demo es fija y válida; (6, `on_text`) lo recoge el gestor de errores, que registra el tipo; (7)
   los niveles de log globales son deliberados, el proceso es el servicio; (8) `filters.ALL`: los
