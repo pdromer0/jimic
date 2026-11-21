@@ -412,3 +412,33 @@ def test_el_primer_latido_tras_el_cambio_de_hora_sigue_en_un_cuarto():
     """2030-03-31: a las 2:00 pasan a ser las 3:00. Desde la 1:50, el siguiente es las 3:00."""
     assert next_beat(madrid("2030-03-31T01:50")).isoformat() == "2030-03-31T03:00:00+02:00"
     assert next_beat(madrid("2030-03-31T01:50")).time() == time(3, 0)
+
+
+def test_si_falla_el_contador_lo_que_esperaba_sale_igual_y_hay_una_sola_fila(conn, monkeypatch):
+    """Revisión propia, hallazgos 2 y 5: la segunda pasada ya sacó de la cola lo que esperaba;
+    un fallo al contar el gasto no puede perderlo ni dejar dos filas en el latido."""
+    add_notice(conn, "plan_del_dia", madrid("2030-01-07T10:00"), 1)
+    replies = iter([api_message(answer(True, "regar", "Riega")), api_message(answer())])
+    world = World(conn, FakeMessages(lambda request: next(replies)))
+    world.at("2030-01-07T10:15")
+
+    def broken(*args, **kwargs):
+        raise RuntimeError("la base falla")
+
+    monkeypatch.setattr("jimic.heartbeat.beat.usage.record", broken)
+    world.at("2030-01-07T10:30")
+    assert world.sender.texts == ["Riega"]
+    assert len(world.rows()) == 2
+    assert world.reasons()[1] == f"{SECRET_REASON} [send released]"
+
+
+def test_si_falla_el_registro_de_un_aviso_del_sistema_no_hay_otra_fila(conn, monkeypatch):
+    def broken(*args, **kwargs):
+        raise RuntimeError("la base falla")
+
+    monkeypatch.setattr("jimic.heartbeat.beat.system_notices.detect", broken)
+    monkeypatch.setattr("jimic.heartbeat.beat.system_notices.pending", broken)
+    world = World(conn, FakeMessages(api_down()))
+    world.at("2030-01-07T16:30")
+    assert world.reasons() == ["api_down [send ok]"]
+    assert world.sender.texts == ["⏰ Mirar las ofertas"]

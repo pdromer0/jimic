@@ -136,18 +136,30 @@ class Heartbeat:
             self._record(now, False, None, result.stopped)
         else:
             await self._after_decision(now, result)
-        await self._send_system_notices()
+        # The row of this heartbeat is written: what follows must never write a second one.
+        try:
+            await self._send_system_notices()
+        except Exception as error:
+            logger.error("heartbeat system notices failed (%s)", type(error).__name__)
 
     async def _after_decision(self, now: datetime, result: CycleResult) -> None:
+        """Send first (the second pass already took what waited from the queue), then the row
+        of the heartbeat, then the bookkeeping, which can fail without losing either."""
         decision = result.decision
         assert decision is not None  # the cycle decides whenever the first pass goes on
+        failures = await self._send(result.verdicts)
+        reason = decision.reason + _verdict_codes(result.verdicts, failures)
+        self._record(now, decision.speak, decision.intent, reason)
+        try:
+            self._bookkeeping(now, decision, result)
+        except Exception as error:
+            logger.error("heartbeat bookkeeping failed (%s)", type(error).__name__)
+
+    def _bookkeeping(self, now: datetime, decision: Decision, result: CycleResult) -> None:
         day = now.date()
         if decision.usage is not None:
             usage.record(self._conn, day, self._decider.model, decision.usage)
             self._check_budget(now)
-        failures = await self._send(result.verdicts)
-        reason = decision.reason + _verdict_codes(result.verdicts, failures)
-        self._record(now, decision.speak, decision.intent, reason)
         if decision.api_down:
             system_notices.detect(self._conn, "api_down", day, now)
         if result.state is not None:
