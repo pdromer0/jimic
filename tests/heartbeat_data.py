@@ -1,25 +1,33 @@
 """Doubles and invented data for the heartbeat: nothing here is real.
 
 `limits` and `intentions` build the two YAML files as the schemas read them. The sources are
-fixed doubles that count their reads; `SpyDecide` stands in for the model and has a cap, like
-every double the code calls in a loop.
+fixed doubles that count their reads; `SpyDecide` stands in for the whole decision and
+`FakeMessages` for the API of the model. Both have a cap, like every double the code calls in a
+loop.
 """
 
+import asyncio
+import json
 import sqlite3
 import threading
+from collections.abc import Callable
 from datetime import date, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
+import anthropic
+import httpx2
+from anthropic.types import Message
 from apex_data import invented_snapshot
 from calendar_data import SECRET_TITLE
 from todoist_data import FixedTodoistReader
 
-from jimic.clock import to_db
+from jimic.clock import local_day_bounds, to_db
 from jimic.heartbeat.cycle import Decision
-from jimic.heartbeat.limits import Outgoing
+from jimic.heartbeat.limits import Outgoing, WaitingNotices
 from jimic.heartbeat.sources import Sources
-from jimic.heartbeat.state import DayState
+from jimic.heartbeat.state import DayState, build_day_state
+from jimic.memory.notices import sent_between
 from jimic.memory.schemas import Intentions, Limits
 from jimic.tools.apex_schema import ApexSnapshot
 from jimic.tools.calendar import CalendarDay, CalendarEvent, CalendarReader
@@ -104,6 +112,14 @@ BINS = {
     "default_time": "21:00",
     "priority": "medium",
 }
+OFFERS = {
+    "id": "ofertas",
+    "type": "notice",
+    "purpose": "Mirar las ofertas",
+    "days": ["mon", "tue", "wed", "thu", "fri"],
+    "default_time": "16:30",
+    "priority": "medium",
+}
 HABIT = {
     "id": "gimnasio",
     "name": "Gimnasio",
@@ -118,6 +134,26 @@ def intentions(*items: dict[str, Any], **changes: Any) -> Intentions:
     """The plan, the close, the gym, two notices and the gym habit; `items` replaces them."""
     chosen = list(items) if items else [PLAN, CLOSE, GYM, PLANTS, BINS]
     return Intentions.model_validate({"intentions": chosen, "habits": [HABIT], **changes})
+
+
+def day_state(
+    conn: sqlite3.Connection,
+    now: datetime,
+    its: Intentions | None = None,
+    calendar: CalendarDay | None = None,
+) -> DayState:
+    """The state at `now`, with what `notices` says and fixed, invented sources."""
+    return build_day_state(
+        now,
+        MADRID,
+        calendar if calendar is not None else calendar_with(),
+        TaskList(available=True, tasks=[task("t1")]),
+        invented_snapshot(),
+        sent_between(conn, *local_day_bounds(now.date(), MADRID)),
+        its if its is not None else intentions(),
+        limits(),
+        WaitingNotices(),
+    )
 
 
 def outgoing(intent: str, text: str = SECRET_TEXT) -> Outgoing:
@@ -255,3 +291,78 @@ class SpyDecide:
     @property
     def calls(self) -> int:
         return len(self.states)
+
+
+# --- The model -----------------------------------------------------------------------------------
+
+MAX_MODEL_CALLS = 200
+"""Calls `FakeMessages` accepts: a day has at most 100 heartbeats."""
+SECRET_REASON = "Motivo-secreto-con-datos-del-dia-5512"
+"""A reason of the model: it may quote the day, so it must never reach a log."""
+ONE_CALL_USAGE: dict[str, Any] = {
+    "input_tokens": 2500,
+    "output_tokens": 100,
+    "cache_read_input_tokens": 2000,
+    "cache_creation_input_tokens": 0,
+}
+
+
+def api_message(answer: dict[str, Any] | str, usage: dict[str, Any] | None = None) -> Message:
+    """A real `Message` of the SDK whose only text block is `answer` (JSON if it is a dict)."""
+    text = answer if isinstance(answer, str) else json.dumps(answer, ensure_ascii=False)
+    return Message.model_validate(
+        {
+            "id": "msg_inventado",
+            "type": "message",
+            "role": "assistant",
+            "model": "claude-haiku-5-5",
+            "content": [{"type": "text", "text": text}],
+            "stop_reason": "end_turn",
+            "stop_sequence": None,
+            "usage": usage if usage is not None else ONE_CALL_USAGE,
+        }
+    )
+
+
+def answer(
+    speak: bool = False,
+    intent: str | None = None,
+    message: str | None = None,
+    reason: str = SECRET_REASON,
+) -> dict[str, Any]:
+    return {"speak": speak, "intent": intent, "reason": reason, "message": message}
+
+
+def api_down() -> anthropic.APIConnectionError:
+    return anthropic.APIConnectionError(
+        request=httpx2.Request("POST", "https://api.anthropic.com/v1/messages")
+    )
+
+
+Reply = Message | BaseException | Callable[[dict[str, Any]], Message | BaseException]
+
+
+class FakeMessages:
+    """Stands in for `AsyncAnthropic().messages.create`: records each request and answers with
+    `reply` (a message, an error to raise, or a function of the request). It has a cap."""
+
+    def __init__(self, reply: Reply | None = None) -> None:
+        self.reply: Reply = reply if reply is not None else api_message(answer())
+        self.requests: list[dict[str, Any]] = []
+        self.gate: asyncio.Event | None = None
+        """If set, every call waits for it: a heartbeat that is still running."""
+
+    async def create(self, **request: Any) -> Message:
+        self.requests.append(request)
+        if len(self.requests) > MAX_MODEL_CALLS:
+            raise RunawayDouble(f"the model was called more than {MAX_MODEL_CALLS} times")
+        if self.gate is not None:
+            await self.gate.wait()
+        reply = self.reply(request) if callable(self.reply) else self.reply
+        if isinstance(reply, BaseException):
+            raise reply
+        return reply
+
+    @property
+    def calls(self) -> int:
+        return len(self.requests)

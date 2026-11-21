@@ -1,0 +1,284 @@
+"""La decisión del latido con Haiku: la petición, la respuesta, lo no válido y el plan B.
+
+El modelo es un doble (`FakeMessages`) con tope que devuelve mensajes de verdad del SDK; no hay
+red. Los textos y motivos son inventados y fáciles de buscar en un log.
+"""
+
+import asyncio
+import logging
+
+import anthropic
+import httpx2
+import pytest
+from conftest import VALID_ENV
+from heartbeat_data import (
+    BINS,
+    CLOSE,
+    GYM,
+    OFFERS,
+    PLAN,
+    PLANTS,
+    SECRET_REASON,
+    SECRET_TEXT,
+    FakeMessages,
+    add_notice,
+    answer,
+    api_down,
+    api_message,
+    day_state,
+    intentions,
+    madrid,
+)
+from pydantic import SecretStr
+
+from jimic.config import Settings
+from jimic.heartbeat.decide import (
+    API_URL,
+    CACHE_TTL,
+    EFFORT,
+    HaikuDecider,
+    build_client,
+    fixed_block,
+    usage_of,
+)
+from jimic.memory.database import open_database
+from jimic.memory.usage import TokenUsage
+
+MODEL = "claude-haiku-5-5"
+FAKE_KEY = VALID_ENV["CLAVE_ANTHROPIC"]
+ALL = (PLAN, CLOSE, GYM, PLANTS, BINS, OFFERS)
+
+
+@pytest.fixture
+def conn(tmp_path):
+    connection = open_database(tmp_path / "jimic.db")
+    yield connection
+    connection.close()
+
+
+def decide(conn, now: str, fake: FakeMessages, items=ALL):
+    its = intentions(*items)
+    state = day_state(conn, madrid(now), its)
+    return asyncio.run(HaikuDecider(fake.create, MODEL, its)(state)), state
+
+
+# --- La petición --------------------------------------------------------------------------------
+
+
+def test_la_peticion_lleva_el_bloque_fijo_con_cache_y_el_estado_al_final(conn):
+    """Pilla una petición sin `cache_control`, con el estado dentro del bloque fijo (rompería
+    la caché en cada latido) o sin la salida estructurada."""
+    fake = FakeMessages()
+    _, state = decide(conn, "2030-01-07T11:15", fake)
+    (request,) = fake.requests
+    (block,) = request["system"]
+    assert block["cache_control"] == {"type": "ephemeral", "ttl": "1h"}
+    assert CACHE_TTL == "1h"
+    assert state.to_json() not in block["text"]
+    assert request["messages"] == [{"role": "user", "content": state.to_json()}]
+    assert request["model"] == MODEL
+    assert request["output_config"]["effort"] == EFFORT == "low"
+    schema = request["output_config"]["format"]
+    assert schema["type"] == "json_schema"
+    assert schema["schema"]["required"] == ["speak", "intent", "reason", "message"]
+    assert "buttons" not in schema["schema"]["properties"]  # 1.8-a
+
+
+def test_el_bloque_fijo_lleva_las_intenciones_de_hoy_y_no_cambia_en_el_dia(conn):
+    """Pilla un bloque que cambia de un latido a otro (la caché no leería nunca) o que lleva
+    un aviso fuera de sus días (regar es lunes y jueves; el 8 es martes)."""
+    its = intentions(*ALL)
+    morning = fixed_block(its, madrid("2030-01-07T07:00"))
+    assert morning == fixed_block(its, madrid("2030-01-07T22:45"))
+    assert '"id":"regar"' in morning and '"habit":"Gimnasio"' in morning
+    tuesday = fixed_block(its, madrid("2030-01-08T07:00"))
+    assert '"id":"regar"' not in tuesday and '"id":"basura"' in tuesday
+    assert "<<INTENCIONES>>" not in morning
+
+
+# --- La respuesta -------------------------------------------------------------------------------
+
+
+def test_hablar_con_un_aviso_activo_propone_su_mensaje(conn):
+    fake = FakeMessages(api_message(answer(True, "ofertas", SECRET_TEXT)))
+    decision, _ = decide(conn, "2030-01-07T16:30", fake)
+    assert (decision.speak, decision.intent, decision.reason) == (True, "ofertas", SECRET_REASON)
+    assert [(p.intent, p.text) for p in decision.proposals] == [("ofertas", SECRET_TEXT)]
+    assert decision.usage == TokenUsage(2500, 100, cache_read_tokens=2000)
+    assert not decision.api_down
+
+
+def test_no_hablar_guarda_el_motivo_y_no_propone_nada(conn):
+    fake = FakeMessages(api_message(answer(False, "ofertas", SECRET_TEXT)))
+    decision, _ = decide(conn, "2030-01-07T11:15", fake)
+    assert (decision.speak, decision.intent, decision.reason) == (False, None, SECRET_REASON)
+    assert decision.proposals == ()
+
+
+@pytest.mark.parametrize(
+    ("reply", "code"),
+    [
+        (answer(True, "inventada", SECRET_TEXT), "unknown_intent"),
+        (answer(True, "regar", SECRET_TEXT), "unknown_intent"),  # martes: no es de hoy
+        (answer(True, "ofertas", None), "no_message"),
+        (answer(True, "ofertas", "   "), "no_message"),
+        (answer(True, "ofertas", "🏋" * 201), "too_long"),
+        ('{"speak": true, "intent": "ofertas"', "unparsed"),
+        (
+            {"speak": True, "intent": "ofertas", "reason": "x", "message": "y", "buttons": []},
+            "unparsed",
+        ),
+    ],
+)
+def test_una_decision_no_valida_no_habla_y_no_se_reintenta(conn, reply, code):
+    """Pilla que una respuesta no válida hable, que se reintente (dos llamadas) o que pierda su
+    uso (el contador debe sumarla igual)."""
+    fake = FakeMessages(api_message(reply))
+    decision, _ = decide(conn, "2030-01-08T16:30", fake)
+    assert fake.calls == 1
+    assert (decision.speak, decision.intent, decision.proposals) == (False, None, ())
+    assert decision.reason == f"invalid_decision:{code}"
+    assert decision.usage is not None
+    assert not decision.api_down
+
+
+def test_el_tope_del_mensaje_se_mide_como_telegram(conn):
+    """400 en UTF-16 caben: 200 🏋 (2 cada uno) sí, 201 no (ver el caso de arriba)."""
+    fake = FakeMessages(api_message(answer(True, "ofertas", "🏋" * 200)))
+    decision, _ = decide(conn, "2030-01-08T16:30", fake)
+    assert decision.speak and decision.proposals
+
+
+@pytest.mark.parametrize(("intent", "task"), [("plan_del_dia", "1.14"), ("cierre_del_dia", "1.16")])
+@pytest.mark.parametrize("message", [None, SECRET_TEXT])
+def test_el_plan_y_el_cierre_se_deciden_sin_enviar_nada(conn, intent, task, message):
+    """Decisión 1.8-b: se registra con su intención y «pendiente», pero sin propuesta. Pilla el
+    plan que sale antes de la 1.14."""
+    fake = FakeMessages(api_message(answer(True, intent, message)))
+    decision, _ = decide(conn, "2030-01-07T08:00", fake)
+    assert (decision.speak, decision.intent) == (True, intent)
+    assert decision.reason == f"{SECRET_REASON} (pendiente: {task})"
+    assert decision.proposals == ()
+
+
+# --- El plan B (RF-04) --------------------------------------------------------------------------
+
+
+def down(conn, now: str, items=ALL):
+    fake = FakeMessages(api_down())
+    decision, _ = decide(conn, now, fake, items)
+    assert decision.api_down and decision.reason == "api_down"
+    return decision
+
+
+@pytest.mark.parametrize(("now", "sent"), [("16:30", True), ("16:44", True), ("16:45", False)])
+def test_con_la_api_caida_el_aviso_sale_solo_en_su_tramo(conn, now, sent):
+    """`16:30 <= ahora < 16:45`. Pilla una plantilla que sale en todos los latidos tras su hora."""
+    decision = down(conn, f"2030-01-07T{now}")
+    assert [p.intent for p in decision.proposals] == (["ofertas"] if sent else [])
+    assert decision.speak is sent
+
+
+def test_con_la_api_caida_lo_que_ya_salio_hoy_no_vuelve_a_salir(conn):
+    add_notice(conn, "ofertas", madrid("2030-01-07T09:00"), 7)
+    assert down(conn, "2030-01-07T16:30").proposals == ()
+
+
+def test_las_plantillas_tienen_su_texto_fijo(conn):
+    """La tarea clave nombra su hábito; el aviso, su propósito."""
+    gym = down(conn, "2030-01-07T13:00").proposals
+    assert [(p.intent, p.text) for p in gym] == [("insistir_gimnasio", "⏰ Toca Gimnasio")]
+    offers = down(conn, "2030-01-07T16:30").proposals
+    assert [p.text for p in offers] == ["⏰ Mirar las ofertas"]
+
+
+def test_con_la_api_caida_el_plan_y_el_cierre_no_tienen_plantilla(conn):
+    """Decisión 1.8-b: ni a su hora por defecto (8:00 y 22:00)."""
+    for now in ("2030-01-07T08:00", "2030-01-07T22:00"):
+        decision = down(conn, now)
+        assert (decision.speak, decision.intent, decision.proposals) == (False, None, ())
+
+
+def test_dos_plantillas_en_el_mismo_tramo_van_las_dos(conn):
+    late_gym = {**GYM, "default_time": "16:35"}
+    decision = down(
+        conn,
+        "2030-01-07T16:45",
+        (late_gym, OFFERS, {**OFFERS, "id": "o2", "default_time": "16:40"}),
+    )
+    assert decision.intent == "insistir_gimnasio,o2"
+    assert len(decision.proposals) == 2
+
+
+def test_un_aviso_fuera_de_sus_dias_no_tiene_plantilla(conn):
+    """Regar es lunes y jueves: el martes a su hora no sale."""
+    assert down(conn, "2030-01-08T19:00").proposals == ()
+    assert [p.intent for p in down(conn, "2030-01-07T19:00").proposals] == ["regar"]
+
+
+@pytest.mark.parametrize("error", ["status", "timeout"])
+def test_cualquier_error_de_la_api_es_api_caida(conn, error):
+    request = httpx2.Request("POST", "https://api.anthropic.com/v1/messages")
+    raised = (
+        anthropic.APITimeoutError(request)
+        if error == "timeout"
+        else anthropic.InternalServerError(
+            "caída", response=httpx2.Response(529, request=request), body=None
+        )
+    )
+    decision, _ = decide(conn, "2030-01-07T16:30", FakeMessages(raised))
+    assert decision.api_down and [p.intent for p in decision.proposals] == ["ofertas"]
+
+
+# --- El uso, el cliente y los logs --------------------------------------------------------------
+
+
+def test_el_uso_separa_la_escritura_de_cache_por_su_ttl():
+    usage = {
+        "input_tokens": 10,
+        "output_tokens": 5,
+        "cache_creation_input_tokens": 30,
+        "cache_read_input_tokens": None,
+        "cache_creation": {"ephemeral_5m_input_tokens": 10, "ephemeral_1h_input_tokens": 20},
+    }
+    assert usage_of(api_message(answer(), usage)) == TokenUsage(10, 5, 0, 10, 20)
+
+
+def test_sin_el_desglose_la_escritura_cuenta_al_ttl_que_se_pide():
+    usage = {"input_tokens": 10, "output_tokens": 5, "cache_creation_input_tokens": 30}
+    assert usage_of(api_message(answer(), usage)) == TokenUsage(10, 5, 0, 0, 30)
+
+
+def test_el_cliente_usa_la_clave_del_env_y_no_el_entorno(monkeypatch):
+    """JimiC solo lee su `.env`: ni `ANTHROPIC_API_KEY` ni `ANTHROPIC_BASE_URL` del proceso."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-clave-del-entorno-000")
+    monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://otro-servidor.invalid")
+    settings = Settings.model_construct(anthropic_api_key=SecretStr(FAKE_KEY))
+    client = build_client(settings)
+    try:
+        assert client.api_key == FAKE_KEY
+        assert str(client.base_url).rstrip("/") == API_URL
+        assert client.max_retries == 2
+    finally:
+        asyncio.run(client.close())
+
+
+def test_los_logs_no_llevan_motivos_ni_mensajes(conn, caplog):
+    caplog.set_level(logging.DEBUG)
+    for reply in (
+        api_message(answer(True, "ofertas", SECRET_TEXT)),
+        api_message(answer(False)),
+        api_message(answer(True, "inventada", SECRET_TEXT)),
+        api_down(),
+    ):
+        decide(conn, "2030-01-07T16:30", FakeMessages(reply))
+    assert SECRET_REASON not in caplog.text and SECRET_TEXT not in caplog.text
+    assert "api_down (APIConnectionError)" in caplog.text
+    assert "invalid_decision:unknown_intent" in caplog.text
+
+
+def test_el_repr_de_la_decision_no_lleva_el_motivo(conn):
+    decision, _ = decide(
+        conn, "2030-01-07T16:30", FakeMessages(api_message(answer(True, "ofertas", SECRET_TEXT)))
+    )
+    assert SECRET_REASON not in repr(decision) and SECRET_TEXT not in repr(decision)
