@@ -440,3 +440,32 @@ def test_el_modulo_expone_el_gestor_de_errores_y_sin_concurrencia():
     application = build_application(TOKEN, FakeRequest())
     assert application.concurrent_updates == 1
     assert bot_module.ALLOWED_UPDATES == ("message", "callback_query")
+
+
+def test_un_fallo_parcial_de_creelo_todo_avisa_en_el_toque(make_channel, request_double):
+    """Pilla un [Créalo todo] que deja un elemento sin resolver sin decírselo a Pedro."""
+
+    async def flaky(item: Item, option: str) -> str:
+        if item.title == SECRET_TITLE:
+            raise RuntimeError("falla")
+        return "✓ creada"
+
+    channel, application = make_channel()
+    channel._handlers["demo"] = flaky
+    approval_id = send_and_drive(channel, application)
+    request_double.calls.clear()
+    drive(application, callback_update(f"{approval_id}:g:all"))
+    assert request_double.methods() == ["editMessageText", "answerCallbackQuery"]
+    assert request_double.params("answerCallbackQuery")[0]["text"] == bot_module.COULD_NOT
+
+
+def test_parar_sigue_aunque_un_paso_falle_con_cualquier_error(conn, clock):
+    """Un `OSError` al cerrar el *updater* no impide parar la aplicación ni cerrarla."""
+    app = FakeApplication()
+
+    async def broken_stop() -> None:
+        raise OSError("disco")
+
+    app.updater.stop = broken_stop
+    asyncio.run(fake_channel(app, conn, clock).stop())
+    assert app.log == ["shutdown"]

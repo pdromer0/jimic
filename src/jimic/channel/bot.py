@@ -147,8 +147,9 @@ class TelegramChannel:
         for name, step in steps:
             try:
                 await step()
-            except (TelegramError, RuntimeError) as error:
-                # RuntimeError: a step that was never started has nothing to stop.
+            except Exception as error:
+                # Whatever it is (a step that was never started raises `RuntimeError`), the
+                # rest must still run: the database is closed right after.
                 logger.debug("telegram stop of %s skipped (%s)", name, _code(error))
         if self._running:
             logger.info("telegram polling stopped")
@@ -201,7 +202,7 @@ class TelegramChannel:
     def _toast(code: str) -> str | None:
         if code in ("nothing_to_do", "already_resolved"):
             return ALREADY_RESOLVED
-        if code == "handler_failed":
+        if code in ("handler_failed", "partially_resolved"):
             return COULD_NOT
         return None
 
