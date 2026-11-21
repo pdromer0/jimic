@@ -32,6 +32,7 @@ uv run pytest                # todo, incluidos los slow (como el CI)
 uv run pytest -m "not slow"  # rápidos
 uv run pre-commit run --all-files   # ruff, pyright, gitleaks (lo preparado) y ficheros
 uv run jimic --version   # CLI
+JIMIC_ENTORNO=dev uv run jimic telegram demo   # plan inventado en el bot de pruebas; lo lanza Pedro
 scripts/n3.sh                # antes del push: pre-commit, gitleaks de la historia y pytest
 scripts/gh.sh …              # GitHub por REST (issues, PR, checks)
 ```
