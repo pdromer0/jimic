@@ -141,6 +141,7 @@ def test_un_manejador_que_falla_deja_ese_elemento_pendiente_sin_contenido_en_el_
     handler = RecordingHandler(fail_on={SECRET_TITLE})
     with caplog.at_level(logging.INFO):
         result = run(conn, clock, handler, Tap(approval_id, None, "all"))
+    assert result.code == "partially_resolved"
     assert result.view is not None
     assert f"2. {SECRET_TITLE}\n3. Leer 21:00 — ✓ creada" in result.view.text
     assert "1. Gimnasio 13:00 — ✓ creada" in result.view.text

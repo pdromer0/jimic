@@ -82,7 +82,8 @@ async def process_tap(
     if not store.save(conn, approval.id, updated, final_status(updated), now):
         return TapResult("not_pending")
     logger.info("approval %d: %d item(s) resolved", approval.id, len(outcomes))
-    return TapResult("resolved", render(updated, approval.id))
+    code = "resolved" if len(outcomes) == len(chosen) else "partially_resolved"
+    return TapResult(code, render(updated, approval.id))
 
 
 def _expire(
