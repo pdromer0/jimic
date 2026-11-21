@@ -34,9 +34,11 @@ INTERVAL = timedelta(minutes=15)
 SOURCE_NAMES = {"calendar": "el calendario", "tasks": "las tareas de Todoist", "apex": "APEX"}
 HINTS = {"calendar:auth": "Para volver a darle permiso: jimic google autorizar"}
 """The command to run when a source needs Pedro (pending of task 1.5)."""
-API_DOWN_TEXT = (
-    "⚠️ No consigo hablar con el modelo: la API de Anthropic no responde. Mientras tanto, tus"
-    " avisos salen a su hora por defecto con un texto sencillo."
+MEANWHILE = "Mientras tanto, tus avisos salen a su hora por defecto con un texto sencillo."
+API_DOWN_TEXT = f"⚠️ No consigo hablar con el modelo: la API de Anthropic no responde. {MEANWHILE}"
+API_REJECTED_TEXT = (
+    "⚠️ La API de Anthropic rechaza las peticiones ({code}): revisa CLAVE_ANTHROPIC y"
+    f" MODELO_LATIDO en el .env. {MEANWHILE}"
 )
 
 
@@ -160,8 +162,8 @@ class Heartbeat:
         if decision.usage is not None:
             usage.record(self._conn, day, self._decider.model, decision.usage)
             self._check_budget(now)
-        if decision.api_down:
-            system_notices.detect(self._conn, "api_down", day, now)
+        if decision.api_error is not None:
+            system_notices.detect(self._conn, "api_down", day, now, decision.api_error)
         if result.state is not None:
             down = [
                 f"{name}:{source['unavailable_reason']}"
@@ -216,7 +218,8 @@ class Heartbeat:
 
     def _text_of(self, notice: system_notices.PendingNotice, day: date) -> str:
         if notice.kind == "api_down":
-            return API_DOWN_TEXT
+            kind, _, code = notice.detail.partition(":")
+            return API_REJECTED_TEXT.format(code=code) if kind == "rejected" else API_DOWN_TEXT
         if notice.kind == "budget":
             return self._budget_text(day)
         parts = [entry.split(":", 1)[0] for entry in notice.detail.split(",")]

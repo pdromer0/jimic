@@ -47,7 +47,13 @@ class Decision:
     """What goes to the second pass: nothing, the model's message or the templates."""
     usage: TokenUsage | None = None
     """What the call used, if the API answered."""
-    api_down: bool = False
+    api_error: str | None = None
+    """If the API failed, a code: `down:<Type>`, or `rejected:<Type>` for a request it refuses
+    (a key or a model that is wrong), which retrying will not fix."""
+
+    @property
+    def api_down(self) -> bool:
+        return self.api_error is not None
 
 
 type Decide = Callable[[DayState], Awaitable[Decision]]

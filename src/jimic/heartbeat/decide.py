@@ -229,13 +229,24 @@ class HaikuDecider:
             message = await self._create(**request)
         except anthropic.APIError as error:
             logger.warning("decision: api_down (%s)", type(error).__name__)
-            return self.plan_b(state)
+            return self.plan_b(state, api_error_code(error))
         return judge(message, state)
 
-    def plan_b(self, state: DayState) -> Decision:
+    def plan_b(self, state: DayState, error: str) -> Decision:
         chosen = templates(self._intentions, state)
         intents = ",".join(item.intent for item in chosen) or None
-        return Decision(bool(chosen), intents, "api_down", chosen, api_down=True)
+        return Decision(bool(chosen), intents, "api_down", chosen, api_error=error)
+
+
+RETRYABLE_STATUS = frozenset({408, 409, 429})
+
+
+def api_error_code(error: anthropic.APIError) -> str:
+    """`rejected:<Type>` for a 4xx that will not go away by waiting (a wrong key or model id,
+    a bad request); `down:<Type>` for everything else."""
+    status = getattr(error, "status_code", None)
+    rejected = isinstance(status, int) and 400 <= status < 500 and status not in RETRYABLE_STATUS
+    return f"{'rejected' if rejected else 'down'}:{type(error).__name__}"
 
 
 def build_client(settings: Settings) -> anthropic.AsyncAnthropic:

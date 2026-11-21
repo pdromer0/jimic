@@ -8,6 +8,8 @@ import asyncio
 import logging
 from datetime import UTC, date, datetime, time, timedelta
 
+import anthropic
+import httpx2
 import pytest
 from calendar_data import SECRET_TITLE
 from conftest import FixedClock
@@ -442,3 +444,26 @@ def test_si_falla_el_registro_de_un_aviso_del_sistema_no_hay_otra_fila(conn, mon
     world.at("2030-01-07T16:30")
     assert world.reasons() == ["api_down [send ok]"]
     assert world.sender.texts == ["⏰ Mirar las ofertas"]
+
+
+@pytest.mark.parametrize(
+    ("status", "error", "text"),
+    [
+        (401, "AuthenticationError", "rechaza las peticiones (AuthenticationError)"),
+        (404, "NotFoundError", "rechaza las peticiones (NotFoundError)"),
+        (429, "RateLimitError", "no responde"),
+        (529, "OverloadedError", "no responde"),
+    ],
+)
+def test_una_clave_o_un_modelo_mal_puestos_no_se_avisan_como_api_caida(conn, status, error, text):
+    """Revisión propia, hallazgo 4: un 401 o un 404 no se arreglan esperando; el aviso lo dice y
+    apunta al `.env`. El plan B sigue igual (plantillas a su hora)."""
+    request = httpx2.Request("POST", "https://api.anthropic.com/v1/messages")
+    response = httpx2.Response(status, request=request)
+    raised = getattr(anthropic, error)("fallo", response=response, body=None)
+    world = World(conn, FakeMessages(raised))
+    world.at("2030-01-07T16:30")
+    template, notice = world.sender.texts
+    assert template == "⏰ Mirar las ofertas"
+    assert text in notice
+    assert ("CLAVE_ANTHROPIC" in notice) is (status in (401, 404))
