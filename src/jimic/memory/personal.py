@@ -7,6 +7,8 @@
 - `jimic config init` (`init`): writes the two YAML templates that are missing, private, and
   never overwrites a file.
 - `save_yaml_file`: validates a changed document and writes it atomically (task 1.12 uses it).
+- `load_personal`: what `jimic run` loads; the two YAML files must be correct, and the Markdown
+  ones may be missing until the onboarding (task 1.13).
 """
 
 import os
@@ -72,6 +74,10 @@ class FileReport:
     name: str
     status: Status
     problems: tuple[Problem, ...] = ()
+
+
+class PersonalFilesInvalid(Exception):
+    """`jimic run` cannot start: the message is the report of `jimic config check`."""
 
 
 class PersonalFileError(Exception):
@@ -232,3 +238,21 @@ def save_yaml_file(path: Path, doc: object) -> None:
     if problems:
         raise PersonalFileError(path.name, problems)
     write_private(path, dump_yaml(doc))
+
+
+def load_personal(config_dir: Path) -> tuple[Intentions, Limits]:
+    """Load and validate `intenciones.yaml` and `limites.yaml`.
+
+    Raises `PersonalFilesInvalid` with the whole report of `check` if either is missing or
+    invalid. The Markdown files do not stop the service.
+    """
+    reports = check(config_dir)
+    if any(r.status != "ok" for r in reports if r.name in YAML_SCHEMAS):
+        raise PersonalFilesInvalid(render_check(config_dir, reports))
+    intentions = Intentions.model_validate(_read_yaml(config_dir / INTENTIONS_FILE))
+    limits = Limits.model_validate(_read_yaml(config_dir / LIMITS_FILE))
+    return intentions, limits
+
+
+def _read_yaml(path: Path) -> object:
+    return parse_yaml(path.read_text(encoding="utf-8-sig"))

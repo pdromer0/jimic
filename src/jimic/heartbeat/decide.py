@@ -20,6 +20,7 @@ What the model writes (`reason`, `message`) never reaches a log: logs say codes 
 import json
 import logging
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from importlib.resources import files
 from typing import Any
@@ -250,3 +251,16 @@ def build_client(settings: Settings) -> anthropic.AsyncAnthropic:
         timeout=TIMEOUT_SECONDS,
         max_retries=MAX_RETRIES,
     )
+
+
+@dataclass(frozen=True)
+class ModelApi:
+    """What the service needs from the client: the call, and closing it when it stops."""
+
+    create: CreateMessage
+    close: Callable[[], Awaitable[None]]
+
+
+def build_model_api(settings: Settings) -> ModelApi:
+    client = build_client(settings)
+    return ModelApi(client.messages.create, client.close)

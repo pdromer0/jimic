@@ -6,22 +6,35 @@ import signal
 import sqlite3
 import threading
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
+from datetime import time as dt_time
 from zoneinfo import ZoneInfo
 
 import pytest
 from conftest import VALID_ENV, FixedClock, write_env
+from heartbeat_data import FakeMessages, intentions, limits
+from todoist_data import FakeTodoistApi
 
 import jimic.cli
 import jimic.service
 from jimic.channel.bot import ChannelError
+from jimic.config import load_settings
+from jimic.heartbeat.decide import ModelApi
 from jimic.logs import LOG_FILE
+from jimic.memory import personal
 from jimic.memory.database import load_migrations, open_database, schema_version
 from jimic.paths import resolve_paths
+from jimic.runtime import Runtime
 
 NOW = datetime(2026, 11, 19, 9, 0, tzinfo=ZoneInfo("Europe/Madrid"))
 SIGNAL_WAIT = 10
 """Segundos como mucho para que el servicio arranque o pare tras la señal en los tests."""
+
+
+def write_setup(env: dict[str, str] = VALID_ENV) -> None:
+    """A valid `.env` and the two YAML templates, as `jimic config init` writes them."""
+    write_env(env)
+    personal.init(resolve_paths(os.environ).config_dir)
 
 
 class GuardSignalError(Exception):
@@ -209,12 +222,12 @@ def test_jimic_run_con_un_canal_que_no_arranca_sale_con_2_sin_valores(
     monkeypatch, capsys, guard_signals
 ):
     """De punta a punta: el mensaje nombra el tipo de fallo y nunca el token."""
-    write_env(VALID_ENV)
+    write_setup()
     events: list[str] = []
     monkeypatch.setattr(
         jimic.service,
-        "build_channel",
-        lambda settings, conn, clock: FakeChannel(conn, events, fail_start=True),
+        "build_runtime",
+        lambda settings, paths, clock, conn, its, lim: FakeChannel(conn, events, fail_start=True),
     )
     assert jimic.cli.main(["run"]) == 2
     err = capsys.readouterr().err
@@ -224,10 +237,12 @@ def test_jimic_run_con_un_canal_que_no_arranca_sale_con_2_sin_valores(
 
 def test_jimic_run_arranca_y_para_con_sigterm(guard_signals, capsys, monkeypatch):
     """De punta a punta: la CLI valida el `.env`, arranca y para con SIGTERM saliendo con 0."""
-    write_env(VALID_ENV)
+    write_setup()
     events: list[str] = []
     monkeypatch.setattr(
-        jimic.service, "build_channel", lambda settings, conn, clock: FakeChannel(conn, events)
+        jimic.service,
+        "build_runtime",
+        lambda settings, paths, clock, conn, its, lim: FakeChannel(conn, events),
     )
     paths = resolve_paths(os.environ)
     log_file = paths.logs_dir / LOG_FILE
@@ -255,7 +270,7 @@ def test_jimic_run_arranca_y_para_con_sigterm(guard_signals, capsys, monkeypatch
 
 def test_una_base_rota_sale_con_2_y_queda_en_el_log(capsys):
     """Pilla un traceback con salida 1 y un log que no dice por qué no arrancó."""
-    write_env(VALID_ENV)
+    write_setup()
     paths = resolve_paths(os.environ)
     paths.data_dir.mkdir(parents=True)
     paths.database.write_bytes(b"esto no es una base de datos SQLite, es texto inventado" * 20)
@@ -263,3 +278,136 @@ def test_una_base_rota_sale_con_2_y_queda_en_el_log(capsys):
     assert capsys.readouterr().err.endswith("jimic: file is not a database\n")
     log = (paths.logs_dir / LOG_FILE).read_text()
     assert "startup failed (DatabaseError)" in log
+
+
+# --- Lo que arranca `jimic run` (tarea 1.8) ------------------------------------------------------
+
+
+def test_jimic_run_no_arranca_con_un_limites_yaml_no_valido(capsys):
+    """Pilla un servicio que arranca con la zona protegida rota (y así sin límites que valgan).
+    El informe es el de `jimic config check` y no enseña el contenido."""
+    write_setup()
+    config_dir = resolve_paths(os.environ).config_dir
+    limits_file = config_dir / "limites.yaml"
+    text = limits_file.read_text().replace("max_messages_per_day: 8", "max_messages_per_day: ocho")
+    limits_file.write_text(text)
+    assert jimic.cli.main(["run"]) == 2
+    err = capsys.readouterr().err
+    assert "limites.yaml: no es válido" in err
+    assert "max_messages_per_day: debe ser un número entero" in err
+    assert "ocho" not in err
+    assert not resolve_paths(os.environ).database.exists()
+
+
+def test_jimic_run_no_arranca_sin_los_yaml_pero_si_sin_los_markdown(capsys, monkeypatch):
+    """Los Markdown los crea la puesta en marcha (1.13): no impiden arrancar."""
+    write_env(VALID_ENV)
+    assert jimic.cli.main(["run"]) == 2
+    assert "no existe: créalo con `jimic config init`" in capsys.readouterr().err
+    personal.init(resolve_paths(os.environ).config_dir)
+    monkeypatch.setattr(
+        jimic.service,
+        "build_runtime",
+        lambda settings, paths, clock, conn, its, lim: FakeChannel(conn, [], fail_start=True),
+    )
+    assert jimic.cli.main(["run"]) == 2  # llega hasta el canal: los ficheros ya valen
+    assert "no se pudo arrancar Telegram" in capsys.readouterr().err
+
+
+def test_jimic_run_no_arranca_con_un_modelo_sin_precio(capsys):
+    """Nada se gasta sin contarlo."""
+    write_setup({**VALID_ENV, "MODELO_LATIDO": "modelo-sin-precio"})
+    assert jimic.cli.main(["run"]) == 2
+    assert capsys.readouterr().err == (
+        "jimic: el modelo modelo-sin-precio no tiene precio en jimic.memory.usage\n"
+    )
+
+
+class FakeRuntimeChannel:
+    """The channel as the runtime uses it: start, stop, send and schedule, all recorded."""
+
+    def __init__(self, events: list, fail_start: bool = False) -> None:
+        self.events = events
+        self.fail_start = fail_start
+        self.scheduled: list[tuple] = []
+
+    async def start(self) -> None:
+        self.events.append("channel start")
+        if self.fail_start:
+            raise ChannelError("no se pudo arrancar Telegram (InvalidToken)")
+
+    async def stop(self) -> None:
+        self.events.append("channel stop")
+
+    async def send_text(self, text: str) -> int:
+        raise AssertionError("the runtime test sends nothing")
+
+    def schedule_every(self, task, interval, first, name) -> None:
+        self.scheduled.append((name, interval, first))
+
+    def schedule_daily(self, task, at, name) -> None:
+        self.scheduled.append((name, at))
+
+
+def runtime_with(conn, events, fail_start=False):
+    write_env(VALID_ENV)
+    paths = resolve_paths(os.environ)
+    settings = load_settings(paths)
+    channel = FakeRuntimeChannel(events, fail_start)
+    todoist = FakeTodoistApi()
+
+    async def close_model() -> None:
+        events.append("model close")
+
+    runtime = Runtime(
+        settings,
+        paths,
+        FixedClock(NOW.replace(minute=7)),
+        conn,
+        intentions(),
+        limits(),
+        channel_factory=lambda settings, conn, clock: channel,  # pyright: ignore[reportArgumentType] - a double of the channel
+        model_factory=lambda settings: ModelApi(FakeMessages().create, close_model),
+        todoist_api=todoist,
+    )
+    return runtime, channel, todoist
+
+
+def test_el_runtime_programa_el_latido_alineado_y_la_purga_y_para_en_orden(tmp_path):
+    """Cada 15 min desde el siguiente cuarto (9:07 → 9:15) y la purga a las 4:00 de Madrid. Al
+    parar: el canal primero (ya no hay latidos), después el modelo y las fuentes."""
+    conn = open_database(tmp_path / "jimic.db")
+    events: list[str] = []
+    runtime, channel, todoist = runtime_with(conn, events)
+    madrid = ZoneInfo("Europe/Madrid")
+
+    async def scenario():
+        await runtime.start()
+        assert not todoist.closed
+        await runtime.stop()
+
+    try:
+        asyncio.run(scenario())
+    finally:
+        conn.close()
+    assert channel.scheduled == [
+        ("latido", timedelta(minutes=15), datetime(2026, 11, 19, 9, 15, tzinfo=madrid)),
+        ("purga", dt_time(4, 0, tzinfo=madrid)),
+    ]
+    assert events == ["channel start", "channel stop", "model close"]
+    assert todoist.closed
+    assert runtime.heartbeat is not None
+
+
+def test_si_el_canal_no_arranca_el_runtime_cierra_el_modelo_y_las_fuentes(tmp_path):
+    conn = open_database(tmp_path / "jimic.db")
+    events: list[str] = []
+    runtime, channel, todoist = runtime_with(conn, events, fail_start=True)
+    try:
+        with pytest.raises(ChannelError):
+            asyncio.run(runtime.start())
+    finally:
+        conn.close()
+    assert events == ["channel start", "model close"]
+    assert todoist.closed
+    assert channel.scheduled == []

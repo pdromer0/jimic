@@ -14,17 +14,22 @@ from jimic.config import ConfigError
 from jimic.doctor import diagnose, render
 from jimic.memory import personal
 from jimic.memory.database import MigrationError
+from jimic.memory.personal import PersonalFilesInvalid
+from jimic.memory.usage import UnpricedError
 from jimic.paths import PathsError, resolve_paths
 from jimic.tools import google_auth
 
 SETUP_ERROR = 2
-"""Exit status when the service cannot start because of its folders, `.env` or database.
+"""Exit status when the service cannot start because of its folders, `.env`, personal files or
+database.
 
 The messages of these errors name keys, paths and SQLite failures, never values."""
 
 SETUP_ERRORS = (
     PathsError,
     ConfigError,
+    PersonalFilesInvalid,
+    UnpricedError,
     MigrationError,
     ChannelError,
     demo.DemoError,
