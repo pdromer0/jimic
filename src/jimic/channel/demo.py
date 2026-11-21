@@ -9,6 +9,7 @@ launches it, never the agent**.
 
 import asyncio
 import logging
+import sqlite3
 from collections.abc import Mapping
 from datetime import timedelta
 
@@ -73,7 +74,7 @@ def demo_factory(settings: Settings, clock: Clock) -> ChannelFactory:
         await channel.send(KIND, demo_message(), clock.now() + TTL)
         logger.info("demo plan sent; press Ctrl+C to stop")
 
-    def factory(conn):
+    def factory(conn: sqlite3.Connection) -> TelegramChannel:
         return build_channel(
             settings, conn, clock, handlers={KIND: demo_handler}, on_started=send_plan
         )
