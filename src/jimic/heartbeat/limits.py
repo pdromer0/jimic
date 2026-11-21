@@ -10,7 +10,7 @@ of a message.
 """
 
 import logging
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import date, datetime, time
 from typing import Literal
@@ -34,7 +34,7 @@ type Action = Literal["send", "wait", "block"]
 
 
 class Outgoing(BaseModel):
-    """What the decision proposes to send: an intention and its text (task 1.8 fills it)."""
+    """What the decision proposes to send: an intention and its text."""
 
     model_config = ConfigDict(frozen=True, strict=True)
 
@@ -304,19 +304,21 @@ class _Pass:
 
 def second_pass(
     now: datetime,
-    proposal: Outgoing | None,
+    proposals: Sequence[Outgoing],
     intentions: Intentions,
     limits: Limits,
     sent: SentToday,
     queue: WaitingNotices,
 ) -> list[Verdict]:
-    """The verdicts of this heartbeat for the proposal and for what waits. `queue` changes.
+    """The verdicts of this heartbeat for the proposals and for what waits. `queue` changes.
 
-    An urgent message that goes out becomes the last proactive one, so the queue waits for the
+    The model proposes one at most; the templates of a heartbeat with the API down can be
+    several, and they go through in order, each one seeing what the previous ones did. An
+    urgent message that goes out becomes the last proactive one, so the queue waits for the
     window to pass again: grouping never sends two messages in one heartbeat.
     """
     state = _Pass(now, intentions, limits, sent, queue)
-    if proposal is not None:
+    for proposal in proposals:
         state.proposal(proposal)
     state.release()
     for verdict in state.verdicts:

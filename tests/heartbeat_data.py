@@ -16,6 +16,7 @@ from calendar_data import SECRET_TITLE
 from todoist_data import FixedTodoistReader
 
 from jimic.clock import to_db
+from jimic.heartbeat.cycle import Decision
 from jimic.heartbeat.limits import Outgoing
 from jimic.heartbeat.sources import Sources
 from jimic.heartbeat.state import DayState
@@ -243,11 +244,13 @@ class SpyDecide:
         self.answer = answer
         self.states: list[DayState] = []
 
-    async def __call__(self, state: DayState) -> Outgoing | None:
+    async def __call__(self, state: DayState) -> Decision:
         self.states.append(state)
         if len(self.states) > MAX_DECISIONS:
             raise RunawayDouble(f"decide called more than {MAX_DECISIONS} times")
-        return self.answer
+        if self.answer is None:
+            return Decision(False, None, "motivo del espía")
+        return Decision(True, self.answer.intent, "motivo del espía", (self.answer,))
 
     @property
     def calls(self) -> int:
