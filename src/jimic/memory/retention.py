@@ -4,7 +4,8 @@ Cutoffs are absolute: `now` in UTC minus N whole days, not N days of wall-clock 
 daylight-saving change does not move them by an hour. Day-keyed tables compare their local
 `YYYY-MM-DD` with today's date in the configured zone. `changes` is kept forever.
 
-The 1.8 schedules `purge`; it logs how many rows went from each table, never their content.
+The service runs `purge` once a day (task 1.8); it logs how many rows went from each table,
+never their content.
 """
 
 import logging
@@ -21,6 +22,7 @@ MOMENT_RETENTION = (
     ("notices", "sent_at", 365),
     ("approvals", "created_at", 30),
     ("deleted_tasks", "deleted_at", 30),
+    ("system_notices", "detected_at", 365),
 )
 """(table, timestamp column, days kept)."""
 
@@ -28,6 +30,7 @@ DAY_RETENTION = (
     ("plan_items", 365),
     ("day_ratings", 365),
     ("day_plans", 365),
+    ("model_usage", 365),
 )
 """(table, days kept) for tables keyed by `day`; `plan_items` goes before its `day_plans`."""
 

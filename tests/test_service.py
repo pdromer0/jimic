@@ -16,7 +16,7 @@ import jimic.cli
 import jimic.service
 from jimic.channel.bot import ChannelError
 from jimic.logs import LOG_FILE
-from jimic.memory.database import open_database, schema_version
+from jimic.memory.database import load_migrations, open_database, schema_version
 from jimic.paths import resolve_paths
 
 NOW = datetime(2026, 11, 19, 9, 0, tzinfo=ZoneInfo("Europe/Madrid"))
@@ -101,7 +101,7 @@ def test_arranca_y_para_con_el_evento(opened):
     assert "started at 2026-11-19T09:00:00+01:00 (prod)" in log
     assert "stopped at 2026-11-19T09:00:00+01:00" in log
     conn = open_database(paths.database)
-    assert schema_version(conn) == 1
+    assert schema_version(conn) == len(load_migrations())
     conn.close()
 
 

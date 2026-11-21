@@ -22,7 +22,11 @@ TABLES = {
     "day_ratings",
     "plan_items",
     "deleted_tasks",
+    "model_usage",
+    "system_notices",
 }
+LATEST = 2
+"""La última migración del paquete (0002, la del contador de gasto)."""
 
 
 def table_names(conn: sqlite3.Connection) -> set[str]:
@@ -35,12 +39,12 @@ def db_path(tmp_path):
     return tmp_path / "datos" / "jimic.sqlite3"
 
 
-def test_una_base_vacia_sube_a_la_ultima_version_con_las_ocho_tablas(db_path):
+def test_una_base_vacia_sube_a_la_ultima_version_con_todas_las_tablas(db_path):
     """Pilla una tabla que falta o sobra y un migrador que no anota la versión."""
     conn = open_database(db_path)
     try:
         assert table_names(conn) == TABLES
-        assert schema_version(conn) == 1
+        assert schema_version(conn) == LATEST
     finally:
         conn.close()
 
@@ -51,7 +55,7 @@ def test_arrancar_dos_veces_no_repite_ninguna_migracion(db_path):
     conn = open_database(db_path)
     try:
         assert migrate(conn, load_migrations()) == 0
-        assert schema_version(conn) == 1
+        assert schema_version(conn) == LATEST
     finally:
         conn.close()
 
@@ -59,11 +63,13 @@ def test_arrancar_dos_veces_no_repite_ninguna_migracion(db_path):
 def test_una_migracion_que_falla_a_medias_no_deja_nada(db_path):
     """Pilla migraciones sin transacción: ni la tabla nueva ni la versión deben quedar."""
     conn = open_database(db_path)
-    broken = Migration(2, "0002_broken.sql", "CREATE TABLE extra (x);\nCREATE TABLE decisions (y);")
+    broken = Migration(
+        LATEST + 1, "0003_broken.sql", "CREATE TABLE extra (x);\nCREATE TABLE decisions (y);"
+    )
     try:
         with pytest.raises(sqlite3.OperationalError, match="already exists"):
             migrate(conn, [*load_migrations(), broken])
-        assert schema_version(conn) == 1
+        assert schema_version(conn) == LATEST
         assert "extra" not in table_names(conn)
         assert not conn.in_transaction
     finally:
