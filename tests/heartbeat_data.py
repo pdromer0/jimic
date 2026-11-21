@@ -22,6 +22,7 @@ from apex_data import invented_snapshot
 from calendar_data import SECRET_TITLE
 from todoist_data import FixedTodoistReader
 
+from jimic.channel.bot import SendError
 from jimic.clock import local_day_bounds, to_db
 from jimic.heartbeat.cycle import Decision
 from jimic.heartbeat.limits import Outgoing, WaitingNotices
@@ -366,3 +367,23 @@ class FakeMessages:
     @property
     def calls(self) -> int:
         return len(self.requests)
+
+
+MAX_SENT = 100
+"""Messages `FakeSender` accepts in one test."""
+
+
+class FakeSender:
+    """Stands in for the channel: records each text it sends; `fail` makes Telegram refuse."""
+
+    def __init__(self) -> None:
+        self.texts: list[str] = []
+        self.fail: str | None = None
+
+    async def send_text(self, text: str) -> int:
+        if self.fail is not None:
+            raise SendError(self.fail)
+        self.texts.append(text)
+        if len(self.texts) > MAX_SENT:
+            raise RunawayDouble(f"more than {MAX_SENT} messages sent")
+        return 1000 + len(self.texts)
