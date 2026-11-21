@@ -77,6 +77,15 @@ def price_of(model: str) -> Price:
         raise UnpricedError(f"el modelo {model} no tiene precio en jimic.memory.usage") from None
 
 
+def require_cache_prices(model: str) -> Price:
+    """The price of `model`, which must also price reading and writing (1 h) the cache: every
+    heartbeat call does both. Raises `UnpricedError` otherwise."""
+    price = price_of(model)
+    if price.cache_read is None or price.cache_write_1h is None:
+        raise UnpricedError(f"el modelo {model} no tiene precio de caché en jimic.memory.usage")
+    return price
+
+
 def _priced(price: Decimal | None, tokens: int, what: str) -> Decimal:
     if tokens == 0:
         return Decimal(0)

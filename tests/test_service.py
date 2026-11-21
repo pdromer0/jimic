@@ -314,6 +314,16 @@ def test_jimic_run_no_arranca_sin_los_yaml_pero_si_sin_los_markdown(capsys, monk
     assert "no se pudo arrancar Telegram" in capsys.readouterr().err
 
 
+def test_jimic_run_no_arranca_con_un_modelo_sin_precio_de_cache(capsys):
+    """Sonnet tiene precio, pero aún no el de su caché, y cada latido la usa (hallazgo 1 de la
+    revisión propia)."""
+    write_setup({**VALID_ENV, "MODELO_LATIDO": "claude-sonnet-5-5"})
+    assert jimic.cli.main(["run"]) == 2
+    assert capsys.readouterr().err == (
+        "jimic: el modelo claude-sonnet-5-5 no tiene precio de caché en jimic.memory.usage\n"
+    )
+
+
 def test_jimic_run_no_arranca_con_un_modelo_sin_precio(capsys):
     """Nada se gasta sin contarlo."""
     write_setup({**VALID_ENV, "MODELO_LATIDO": "modelo-sin-precio"})
