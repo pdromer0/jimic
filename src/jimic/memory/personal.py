@@ -244,13 +244,17 @@ def load_personal(config_dir: Path) -> tuple[Intentions, Limits]:
     """Load and validate `intenciones.yaml` and `limites.yaml`.
 
     Raises `PersonalFilesInvalid` with the whole report of `check` if either is missing or
-    invalid. The Markdown files do not stop the service.
+    invalid, also if one changes between the check and the load (an editor saving it). The
+    Markdown files do not stop the service.
     """
     reports = check(config_dir)
     if any(r.status != "ok" for r in reports if r.name in YAML_SCHEMAS):
         raise PersonalFilesInvalid(render_check(config_dir, reports))
-    intentions = Intentions.model_validate(_read_yaml(config_dir / INTENTIONS_FILE))
-    limits = Limits.model_validate(_read_yaml(config_dir / LIMITS_FILE))
+    try:
+        intentions = Intentions.model_validate(_read_yaml(config_dir / INTENTIONS_FILE))
+        limits = Limits.model_validate(_read_yaml(config_dir / LIMITS_FILE))
+    except OSError, UnicodeDecodeError, YamlSyntaxError, ValidationError:
+        raise PersonalFilesInvalid(render_check(config_dir, check(config_dir))) from None
     return intentions, limits
 
 
