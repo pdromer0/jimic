@@ -69,6 +69,20 @@ def fake_home(tmp_path, monkeypatch):
     return home
 
 
+@pytest.fixture(autouse=True)
+def no_real_telegram(monkeypatch):
+    """Ningún test habla con Telegram de verdad: el cliente HTTP real falla en voz alta.
+
+    Los tests del canal usan un `BaseRequest` falso (`tests/telegram_data.py`), que no pasa
+    por aquí; el que quiera el servicio completo parchea `jimic.service.build_channel`.
+    """
+
+    async def refuse(self, *args, **kwargs):
+        raise AssertionError("un test ha intentado hablar con Telegram de verdad")
+
+    monkeypatch.setattr("telegram.request.HTTPXRequest.do_request", refuse)
+
+
 @pytest.fixture
 def contract_env(monkeypatch) -> tuple[Paths, Settings]:
     """The real home and the configuration of the **test copy** (`dev`), for the contract tests.

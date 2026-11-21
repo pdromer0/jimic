@@ -29,6 +29,7 @@ from jimic.channel import store
 from jimic.channel.message import InteractiveMessage, View, parse_callback, render
 from jimic.channel.taps import TapHandler, process_tap
 from jimic.clock import Clock
+from jimic.config import Settings
 
 logger = logging.getLogger(__name__)
 
@@ -252,3 +253,22 @@ class TelegramChannel:
             "unhandled error in telegram handler (%s)",
             _code(context.error) if context.error else "unknown",
         )
+
+
+def build_channel(
+    settings: Settings,
+    conn: sqlite3.Connection,
+    clock: Clock,
+    handlers: Mapping[str, TapHandler] | None = None,
+    on_started: OnStarted | None = None,
+) -> TelegramChannel:
+    """The channel of the bot in `settings`, ready to `start` (nothing connects before that)."""
+    application = build_application(settings.telegram_token.get_secret_value())
+    return TelegramChannel(
+        application,
+        settings.telegram_chat_id,
+        conn,
+        clock,
+        handlers=handlers,
+        on_started=on_started,
+    )

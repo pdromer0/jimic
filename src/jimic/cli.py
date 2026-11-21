@@ -7,6 +7,7 @@ import sys
 from importlib.metadata import version
 
 from jimic import service
+from jimic.channel.bot import ChannelError
 from jimic.config import ConfigError
 from jimic.doctor import diagnose, render
 from jimic.memory import personal
@@ -88,7 +89,14 @@ def main(argv: list[str] | None = None) -> int:
     elif args.command == "run":
         try:
             service.run(os.environ)
-        except (PathsError, ConfigError, MigrationError, sqlite3.Error, OSError) as error:
+        except (
+            PathsError,
+            ConfigError,
+            MigrationError,
+            ChannelError,
+            sqlite3.Error,
+            OSError,
+        ) as error:
             print(f"jimic: {error}", file=sys.stderr)
             return SETUP_ERROR
     return 0
