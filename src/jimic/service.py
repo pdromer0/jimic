@@ -2,14 +2,18 @@
 
 `run` is what `jimic run` calls: it finds the folders, validates the `.env`, and runs the
 `asyncio` loop until SIGINT or SIGTERM. `serve` is the body, stopped by an event, which is how
-tests drive it. Stopping closes SQLite and flushes the logs.
+tests drive it. The channel (Telegram) starts after the database and stops before it closes,
+inside this same loop. Stopping closes SQLite and flushes the logs.
 """
 
 import asyncio
 import logging
 import signal
-from collections.abc import Mapping
+import sqlite3
+from collections.abc import Callable, Mapping
+from typing import Protocol
 
+from jimic.channel.bot import build_channel
 from jimic.clock import Clock, SystemClock
 from jimic.config import load_settings
 from jimic.logs import logging_to
@@ -21,10 +25,28 @@ logger = logging.getLogger(__name__)
 STOP_SIGNALS = (signal.SIGINT, signal.SIGTERM)
 
 
+class Channel(Protocol):
+    """What the service needs from the channel: start listening and stop (safe to repeat)."""
+
+    async def start(self) -> None: ...
+
+    async def stop(self) -> None: ...
+
+
+type ChannelFactory = Callable[[sqlite3.Connection], Channel]
+"""Builds the channel once the database is open; nothing connects until `start`."""
+
+
 async def serve(
-    paths: Paths, clock: Clock, stop: asyncio.Event, ready: asyncio.Event | None = None
+    paths: Paths,
+    clock: Clock,
+    stop: asyncio.Event,
+    ready: asyncio.Event | None = None,
+    channel_factory: ChannelFactory | None = None,
 ) -> None:
-    """Open the logs and the database, set `ready`, and wait for `stop`; then close both."""
+    """Open the logs and the database, start the channel, set `ready`, and wait for `stop`;
+    then stop the channel and close the database. A channel that cannot start raises
+    `ChannelError`."""
     # Created here, private: `mkdir(mode=...)` only applies the mode to the last folder it makes.
     paths.data_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
     with logging_to(paths.logs_dir):
@@ -34,17 +56,28 @@ async def serve(
         except Exception as error:
             logger.error("startup failed (%s)", type(error).__name__)
             raise
+        channel = None
         try:
+            if channel_factory is not None:
+                channel = channel_factory(conn)
+                await channel.start()
             if ready is not None:
                 ready.set()
             await stop.wait()
         finally:
-            conn.close()
-            logger.info("stopped at %s", clock.now().isoformat())
+            try:
+                if channel is not None:
+                    await channel.stop()
+            finally:
+                conn.close()
+                logger.info("stopped at %s", clock.now().isoformat())
 
 
 async def serve_until_signal(
-    paths: Paths, clock: Clock, ready: asyncio.Event | None = None
+    paths: Paths,
+    clock: Clock,
+    ready: asyncio.Event | None = None,
+    channel_factory: ChannelFactory | None = None,
 ) -> None:
     """Run `serve` until SIGINT or SIGTERM; the handlers are removed on the way out."""
     stop = asyncio.Event()
@@ -52,7 +85,7 @@ async def serve_until_signal(
     for sig in STOP_SIGNALS:
         loop.add_signal_handler(sig, stop.set)
     try:
-        await serve(paths, clock, stop, ready)
+        await serve(paths, clock, stop, ready, channel_factory)
     finally:
         for sig in STOP_SIGNALS:
             loop.remove_signal_handler(sig)
@@ -61,8 +94,14 @@ async def serve_until_signal(
 def run(environ: Mapping[str, str]) -> None:
     """Validate the setup and run the service until a stop signal.
 
-    Raises `PathsError`, `ConfigError` or `MigrationError` with a message for the user.
+    Raises `PathsError`, `ConfigError`, `MigrationError` or `ChannelError` with a message for
+    the user.
     """
     paths = resolve_paths(environ)
     settings = load_settings(paths)
-    asyncio.run(serve_until_signal(paths, SystemClock(settings.timezone)))
+    clock = SystemClock(settings.timezone)
+
+    def channel_factory(conn: sqlite3.Connection) -> Channel:
+        return build_channel(settings, conn, clock)
+
+    asyncio.run(serve_until_signal(paths, clock, channel_factory=channel_factory))

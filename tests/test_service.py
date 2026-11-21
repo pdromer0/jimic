@@ -14,6 +14,7 @@ from conftest import VALID_ENV, FixedClock, write_env
 
 import jimic.cli
 import jimic.service
+from jimic.channel.bot import ChannelError
 from jimic.logs import LOG_FILE
 from jimic.memory.database import open_database, schema_version
 from jimic.paths import resolve_paths
@@ -55,6 +56,25 @@ def opened(monkeypatch):
 
     monkeypatch.setattr(jimic.service, "open_database", recording_open)
     return connections
+
+
+class FakeChannel:
+    """A channel that records its events and checks that the database is still open on `stop`."""
+
+    def __init__(self, conn: sqlite3.Connection, events: list[str], fail_start=False) -> None:
+        self.conn = conn
+        self.events = events
+        self.fail_start = fail_start
+
+    async def start(self) -> None:
+        self.events.append("start")
+        self.conn.execute("SELECT 1")
+        if self.fail_start:
+            raise ChannelError("no se pudo arrancar Telegram (InvalidToken)")
+
+    async def stop(self) -> None:
+        self.conn.execute("SELECT 1")  # la base sigue abierta: el canal para antes de cerrarla
+        self.events.append("stop")
 
 
 def assert_closed(conn: sqlite3.Connection) -> None:
@@ -139,9 +159,76 @@ def test_jimic_run_sin_env_sale_con_2_y_dice_donde_lo_busca(capsys):
     assert not paths.data_dir.exists()
 
 
-def test_jimic_run_arranca_y_para_con_sigterm(guard_signals, capsys):
+def test_el_canal_arranca_tras_la_base_y_para_antes_de_cerrarla(opened):
+    """Pilla un canal que arranca sin base o que para con la base ya cerrada: `FakeChannel` la
+    usa en `start` y en `stop`. Con el bot de verdad no se prueba aquí: no se arranca."""
+    paths = resolve_paths(os.environ)
+    events: list[str] = []
+
+    async def scenario():
+        stop, ready = asyncio.Event(), asyncio.Event()
+        task = asyncio.create_task(
+            jimic.service.serve(
+                paths, FixedClock(NOW), stop, ready, lambda conn: FakeChannel(conn, events)
+            )
+        )
+        await asyncio.wait_for(ready.wait(), SIGNAL_WAIT)
+        assert events == ["start"]
+        stop.set()
+        await asyncio.wait_for(task, SIGNAL_WAIT)
+
+    asyncio.run(scenario())
+    assert events == ["start", "stop"]
+    assert_closed(opened[0])
+
+
+def test_un_canal_que_no_arranca_levanta_channel_error_y_deja_todo_cerrado(opened):
+    """Pilla un arranque fallido que deja la base abierta o `ready` puesto."""
+    paths = resolve_paths(os.environ)
+    events: list[str] = []
+    ready = asyncio.Event()
+
+    async def scenario():
+        with pytest.raises(ChannelError, match="InvalidToken"):
+            await jimic.service.serve(
+                paths,
+                FixedClock(NOW),
+                asyncio.Event(),
+                ready,
+                lambda conn: FakeChannel(conn, events, fail_start=True),
+            )
+
+    asyncio.run(scenario())
+    assert not ready.is_set()
+    assert events == ["start", "stop"]
+    assert_closed(opened[0])
+    assert "stopped at" in (paths.logs_dir / LOG_FILE).read_text()
+
+
+def test_jimic_run_con_un_canal_que_no_arranca_sale_con_2_sin_valores(
+    monkeypatch, capsys, guard_signals
+):
+    """De punta a punta: el mensaje nombra el tipo de fallo y nunca el token."""
+    write_env(VALID_ENV)
+    events: list[str] = []
+    monkeypatch.setattr(
+        jimic.service,
+        "build_channel",
+        lambda settings, conn, clock: FakeChannel(conn, events, fail_start=True),
+    )
+    assert jimic.cli.main(["run"]) == 2
+    err = capsys.readouterr().err
+    assert err.endswith("jimic: no se pudo arrancar Telegram (InvalidToken)\n")
+    assert VALID_ENV["TOKEN_TELEGRAM"] not in err
+
+
+def test_jimic_run_arranca_y_para_con_sigterm(guard_signals, capsys, monkeypatch):
     """De punta a punta: la CLI valida el `.env`, arranca y para con SIGTERM saliendo con 0."""
     write_env(VALID_ENV)
+    events: list[str] = []
+    monkeypatch.setattr(
+        jimic.service, "build_channel", lambda settings, conn, clock: FakeChannel(conn, events)
+    )
     paths = resolve_paths(os.environ)
     log_file = paths.logs_dir / LOG_FILE
 
@@ -162,6 +249,7 @@ def test_jimic_run_arranca_y_para_con_sigterm(guard_signals, capsys):
     log = log_file.read_text()
     assert "started at" in log
     assert "stopped at" in log
+    assert events == ["start", "stop"]
     assert VALID_ENV["TOKEN_TELEGRAM"] not in log + capsys.readouterr().err
 
 

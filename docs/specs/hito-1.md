@@ -1433,3 +1433,109 @@ Pendiente).
 - **1.16:** el hueco del cierre sigue guardado aunque su hora haya pasado sin salir (hallazgo 9);
   se revisa con la ventana del cierre que sale de la rutina.
 - **Límite conocido** (decisión 79): un reinicio pierde la cola de agrupar.
+
+### Tarea 1.4: Telegram
+
+**Qué se hizo.** Issue #17, rama `feat/h1-telegram`, aprobada a las 19:18 del 21-nov-2026.
+Commits: `chore(deps)` de `python-telegram-bot[job-queue]` 22.8 (e2f081d), `feat(channel)` del
+mensaje puro (a7952f3), del estado y los toques (d2e4242) y del bot (18ede12), `feat(service)`
+(a60e19e), `feat(cli)` de la demo (858887f), `docs(proceso)` (e5307fa), `docs(diseno)` (44b4b18) y,
+de la revisión propia, dos `fix` (6d30b83, aa91be1) y un `refactor` sin tocar tests (599531e). Este
+anexo es el último, `docs(hito-1)`.
+
+**Decisiones de la tarea** (las notas del issue, de Pedro, 21-nov-2026; ya en `diseno.md` como
+decisiones 81 a 83):
+- **1.4-a** · lo que llega de otro chat se ignora en silencio, también un toque de un mensaje en
+  línea (sin `message`); el log dice solo «unknown chat».
+- **1.4-b** · un toque quita su fila y el texto del elemento dice qué pasó; sin nada pendiente, sin
+  teclado; un segundo toque sobre lo resuelto no cambia el mensaje.
+- **1.4-c** · `jimic telegram demo`, solo con `dev`; la lanza Pedro.
+
+**Decisiones del diff** (lo que el plan interpretaba; se aprobó tal cual, sin `revisor-plan`):
+- Paquete `src/jimic/channel/`: `message.py` (puro: modelo Pydantic, `render`, `resolve`,
+  `expire`, topes), `store.py` (`approvals`), `taps.py` (qué hace un toque, sin Telegram), `bot.py`
+  (`TelegramChannel`, adaptador fino) y `demo.py`. `service.serve` abre el canal tras la base y lo
+  para antes de cerrarla; un `ChannelError` al arrancar sale con 2 y sin valores.
+- La fila global lleva la clave de opción que aplica; lo que no la ofrece sigue pendiente (así el
+  borrado «nunca incluido» de H1-1 lo decide quien crea el mensaje).
+- `approvals.status`: `approved` si alguna opción elegida aprueba (`Option.approves`), `rejected` si
+  no, `expired` al caducar. Un manejador inyectado por `kind` devuelve el texto del resultado (40
+  caracteres como mucho); si lanza, el elemento sigue pendiente.
+- El tope de 4096 se mide en UTF-16 sobre el HTML escapado y reserva el peor resultado de cada
+  elemento, así que ningún toque posterior puede pasarse.
+- Token y contenido: `httpx`, `httpcore` y `telegram` a `WARNING` (esta última escribe a `DEBUG`
+  los parámetros de cada llamada, con el texto: lo cazó el test del log) y un gestor de errores
+  propio que registra solo el tipo.
+- El teclado se quita enviando `{"inline_keyboard": []}` por `api_kwargs`: PTB escribe un
+  `InlineKeyboardMarkup` vacío como `{}`. **Pedro lo confirma en el móvil con la demo** (el doble no
+  puede saber qué hace Telegram con ello).
+- `concurrent_updates` vale 1 por defecto en PTB (comprobado): los toques van de uno en uno.
+- La biblioteca no se comportó distinto de lo que dicen las notas: no hubo que parar.
+
+**Valores a mano** (código independiente, antes de implementar): `callback_data` en el peor caso,
+`9223372036854775807:8:aaaaaaaa`, 30 bytes (límite 64), igual para el global; `&` se expande 5
+veces (`&amp;`); en UTF-16 `🏋` vale 2; 8 resultados de 40 `&` escapados, 1600; filas del teclado
+con N=3: 4, 3, 2, 0; N=1: 2, 0; N=8: 9, 8, …, 2, 0. El borde del tope, 8 + 2 + 3 + título + 3 +
+200 = 216 + título: título de 3880 cabe y de 3881 no (con `&`: 776 y 777; con 🏋: 1940 y 1941).
+Todos, comprobados por los tests.
+
+**Los tests.** Con la biblioteca de verdad y la red de mentira: `tests/telegram_data.py` tiene un
+`FakeRequest` (un `BaseRequest` que contesta como la Bot API y graba cada llamada, con tope de 50)
+y los `Update` de entrada; `async with application:` y `process_update`, **sin *polling***. Así se
+comprueba el método de la API (`editMessageText`, no `sendMessage`) y no solo el texto. El ciclo
+de `start` y `stop` usa un `Application` falso que graba el orden. Una guarda en `conftest.py`
+(`no_real_telegram`) hace fallar en voz alta cualquier test que intente el cliente HTTP real.
+
+**Un fallo mío, cazado a tiempo.** Al conectar el canal al servicio, el test ya existente de
+`jimic run` construyó el canal **real** y llegó a hacer una llamada de red de verdad a Telegram con
+el token falso de los tests (la respuesta fue `InvalidToken`; no salió ningún dato real). Lo vi en
+la salida, lo cerré con un doble en ese test y con la guarda de `conftest.py`, y está en el commit
+`feat(service)`.
+
+**Medidas.** La N3 (tras la revisión): 693 tests (2 de contrato saltados; eran 587 tras la 1.7),
+0:18 en total (pre-commit 0:09, pytest 0:08, gitleaks de la historia 0:01); este anexo se escribió
+mientras corría y solo es documentación.
+
+**Versiones incorrectas** (aplicadas y deshechas; ninguna se dejó en el árbol). Predicción antes,
+observado después:
+
+| # | Versión | Predicción | Observado |
+| --- | --- | --- | --- |
+| 1 | Sin filtro de chat en los toques | Rojos: toque de otro chat y toque en línea (2); verde el mensaje de otro chat | Igual (2) |
+| 2 | Enviar en vez de editar | Rojos: «un toque edita», «caducado» y «fallo al editar» (3) | Igual (3) |
+| 3 | Sin escapar | Rojos: el de escape y el caso `&`×777 del tope (2) | **4**: también los dos casos largos que no son de `&` (`x`×3881 y 🏋×1941): el tope reserva el peor resultado (`&`×40, 200 al escapar), y sin escapar esa reserva baja a 40 y esos títulos «caben». Es el mismo defecto desde otro sitio |
+| 4 | Demo permitida en `prod` | Rojos: los 3 de la negativa (prod, `.env` con dev y CLI); verde el de `dev` | Igual (3) |
+| 5 | Título en `callback_data` | Rojos: el de 64 bytes, la ida y vuelta y el de envío con la lista exacta (3) | Igual (3) |
+
+En el plan, las filas 1, 2 y 4 prometían menos (1 o 2 tests): las afiné al escribir los tests y
+antes de aplicarlas. Además, cada corrección de la revisión se comprobó deshaciendo el código: sus
+tests nuevos fallan sin ella (3 rojos).
+
+**Revisión** (`/code-review medium`). 10 hallazgos: 3 corregidos, 5 explicados y 2 con Pendiente.
+- Corregidos: (2) un fallo parcial de [Créalo todo] ahora sale como `partially_resolved` y el
+  toque avisa «No he podido hacerlo» (6d30b83); (6) `stop()` captura `Exception` para que cada
+  paso corra antes de cerrar la base (aa91be1); (10) tipos de la factoría de la demo (599531e).
+- Explicados (5): (4) el estado de la fila dice cómo acabó el mensaje (`expired`); lo decidido sigue en
+  `payload` y se ejecutó al tocar; (5) `create` lanza por errores de quien crea el mensaje, y la
+  demo es fija y válida; (6, `on_text`) lo recoge el gestor de errores, que registra el tipo; (7)
+  los niveles de log globales son deliberados, el proceso es el servicio; (8) `filters.ALL`: los
+  `/comandos` son texto de Pedro hasta la 1.10; (9) `job-queue` lo piden las notas y el diseño, y
+  el latido lo usa en la 1.8; (10, filas de la demo) solo en la base de `dev`, y `approvals` se
+  purga a 30 días.
+- Con Pendiente: (1) y (3).
+
+**Pendiente.**
+- **1.11:** el efecto del manejador va antes de guardar el estado (hallazgo 1): si el proceso muere
+  entre las dos cosas, un segundo toque repite el efecto. Los manejadores reales (crear, mover,
+  borrar) han de ser idempotentes o la guardia ha de «reclamar» la aprobación antes de ejecutar.
+- **1.8 o 1.11:** la caducidad solo se aplica cuando llega un toque (hallazgo 3); un mensaje que
+  nadie toca conserva sus botones. Una barrida con el `JobQueue` que edite los caducados.
+- **1.14:** el teclado de un mensaje cuya edición falló queda viejo hasta el siguiente cambio; un
+  toque sobre lo ya resuelto no lo repara (decisión de la nota: «no hace nada»).
+- **1.10:** el manejador de texto de verdad; hoy, la frase fija.
+- **Límite conocido:** `jimic run` y `jimic telegram demo` no pueden estar a la vez con el mismo
+  bot (dos *pollings* y Telegram devuelve un conflicto).
+
+**Pruebas contra servicios reales** (regla «los tests no dejan basura»): ninguna. Las pruebas de
+esta tarea no llaman a Telegram ni a Todoist ni a Calendar; no hay restos que comprobar, ni
+mensajes fijados ni comandos configurados en los bots.

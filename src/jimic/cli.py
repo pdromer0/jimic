@@ -4,9 +4,12 @@ import argparse
 import os
 import sqlite3
 import sys
+from collections.abc import Callable
 from importlib.metadata import version
 
 from jimic import service
+from jimic.channel import demo
+from jimic.channel.bot import ChannelError
 from jimic.config import ConfigError
 from jimic.doctor import diagnose, render
 from jimic.memory import personal
@@ -18,6 +21,17 @@ SETUP_ERROR = 2
 """Exit status when the service cannot start because of its folders, `.env` or database.
 
 The messages of these errors name keys, paths and SQLite failures, never values."""
+
+SETUP_ERRORS = (
+    PathsError,
+    ConfigError,
+    MigrationError,
+    ChannelError,
+    demo.DemoError,
+    sqlite3.Error,
+    OSError,
+)
+"""What `jimic run` and `jimic telegram demo` turn into a message and `SETUP_ERROR`."""
 
 CHECK_FAILED = 1
 """Exit status of `jimic config check` when a personal file is invalid or a YAML one is missing."""
@@ -37,6 +51,11 @@ def build_parser() -> argparse.ArgumentParser:
     google_commands = google.add_subparsers(dest="google_command", required=True)
     google_commands.add_parser(
         "autorizar", help="pide el permiso de solo lectura del calendario (una vez por copia)"
+    )
+    telegram = commands.add_parser("telegram", help="el bot de Telegram")
+    telegram_commands = telegram.add_subparsers(dest="telegram_command", required=True)
+    telegram_commands.add_parser(
+        "demo", help="plan inventado en el bot de pruebas (solo dev; Ctrl+C para parar)"
     )
     return parser
 
@@ -77,6 +96,16 @@ def config_command(command: str) -> int:
     return 0
 
 
+def setup_errors_as_exit(action: Callable[[], None]) -> int:
+    """Run `action`; a setup error is printed as `jimic: <message>` and gives `SETUP_ERROR`."""
+    try:
+        action()
+    except SETUP_ERRORS as error:
+        print(f"jimic: {error}", file=sys.stderr)
+        return SETUP_ERROR
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if args.command == "doctor":
@@ -85,12 +114,10 @@ def main(argv: list[str] | None = None) -> int:
         return config_command(args.config_command)
     elif args.command == "google":
         return google_command()
+    elif args.command == "telegram":
+        return setup_errors_as_exit(lambda: demo.run(os.environ))
     elif args.command == "run":
-        try:
-            service.run(os.environ)
-        except (PathsError, ConfigError, MigrationError, sqlite3.Error, OSError) as error:
-            print(f"jimic: {error}", file=sys.stderr)
-            return SETUP_ERROR
+        return setup_errors_as_exit(lambda: service.run(os.environ))
     return 0
 
 
