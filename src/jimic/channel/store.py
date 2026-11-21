@@ -86,3 +86,8 @@ def save(
         ),
     )
     return cursor.rowcount == 1
+
+
+def discard(conn: sqlite3.Connection, approval_id: int) -> None:
+    """Delete an approval that never reached Telegram (the send failed): nobody can tap it."""
+    conn.execute("DELETE FROM approvals WHERE id = ? AND status = 'pending'", (approval_id,))
