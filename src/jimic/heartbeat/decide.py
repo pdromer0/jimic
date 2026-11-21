@@ -22,6 +22,7 @@ import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from functools import cache
 from importlib.resources import files
 from typing import Any
 
@@ -73,7 +74,15 @@ class HeartbeatDecision(BaseModel):
     message: str | None
 
 
+@cache
+def decision_schema() -> dict[str, Any]:
+    """The JSON schema of `HeartbeatDecision`, as the API takes it; computed once."""
+    return anthropic.transform_schema(HeartbeatDecision)
+
+
+@cache
 def prompt_template() -> str:
+    """Read once per process: it is a file of the package."""
     return files("jimic.heartbeat").joinpath("prompt.md").read_text(encoding="utf-8")
 
 
@@ -123,10 +132,7 @@ def build_request(model: str, system: str, state: DayState) -> dict[str, Any]:
         "messages": [{"role": "user", "content": state.to_json()}],
         "output_config": {
             "effort": EFFORT,
-            "format": {
-                "type": "json_schema",
-                "schema": anthropic.transform_schema(HeartbeatDecision),
-            },
+            "format": {"type": "json_schema", "schema": decision_schema()},
         },
     }
 
