@@ -467,3 +467,16 @@ def test_una_clave_o_un_modelo_mal_puestos_no_se_avisan_como_api_caida(conn, sta
     assert template == "⏰ Mirar las ofertas"
     assert text in notice
     assert ("CLAVE_ANTHROPIC" in notice) is (status in (401, 404))
+
+
+def test_el_aviso_del_presupuesto_dice_el_porcentaje_de_verdad(conn):
+    """Revisión propia, hallazgo 6: una llamada puede saltar del 70 % al 130 %; el texto no
+    puede decir «el 80 %»."""
+    world = World(
+        conn, FakeMessages(api_message(answer(), {"input_tokens": 0, "output_tokens": 0}))
+    )
+    add_spend(conn, date(2030, 1, 1), 39.0)
+    world.at("2030-01-07T09:00")
+    assert world.sender.texts == [
+        "💸 Llevas 39.00 $ gastados este mes, el 130% del objetivo de 30.00 $."
+    ]

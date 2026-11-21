@@ -209,12 +209,11 @@ class Heartbeat:
             system_notices.detect(self._conn, "budget", now.date(), now)
 
     def _budget_text(self, day: date) -> str:
-        budget = self._limits.budget
+        """The spend of the month as it is now: it may be past the warning when it goes out."""
+        target = self._limits.budget.monthly_target_usd
         spent = usage.spent_in_month(self._conn, day)
-        return (
-            f"💸 Llevas {spent:.2f} $ gastados este mes, el {budget.warn_at:.0%} del objetivo de"
-            f" {budget.monthly_target_usd:.2f} $."
-        )
+        share = f", el {spent / target:.0%} del objetivo de {target:.2f} $" if target > 0 else ""
+        return f"💸 Llevas {spent:.2f} $ gastados este mes{share}."
 
     def _text_of(self, notice: system_notices.PendingNotice, day: date) -> str:
         if notice.kind == "api_down":
