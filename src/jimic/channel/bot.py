@@ -12,7 +12,8 @@ Rules (1.4-a): whatever comes from another chat is ignored in silence, with no r
 import logging
 import sqlite3
 from collections.abc import Awaitable, Callable, Mapping
-from datetime import datetime
+from datetime import datetime, time, timedelta
+from typing import Any
 
 from telegram import (
     InlineKeyboardButton,
@@ -22,7 +23,15 @@ from telegram import (
 )
 from telegram.constants import ParseMode
 from telegram.error import BadRequest, TelegramError
-from telegram.ext import Application, CallbackQueryHandler, ContextTypes, MessageHandler, filters
+from telegram.ext import (
+    Application,
+    CallbackQueryHandler,
+    ContextTypes,
+    Job,
+    JobQueue,
+    MessageHandler,
+    filters,
+)
 from telegram.request import BaseRequest
 
 from jimic.channel import store
@@ -43,6 +52,14 @@ NOT_MODIFIED = "message is not modified"
 type TextHandler = Callable[[str], Awaitable[str]]
 """Called with the text Pedro wrote; returns the reply, as plain text."""
 type OnStarted = Callable[["TelegramChannel"], Awaitable[None]]
+type Task = Callable[[], Awaitable[None]]
+"""What a scheduled job runs: the heartbeat, the purge."""
+
+JOB_KWARGS: dict[str, Any] = {"max_instances": 2, "coalesce": True, "misfire_grace_time": 60}
+"""For APScheduler. Never two runs piled up from a sleep (`coalesce`), and one that comes more
+than a minute late is skipped: no catching up. Two instances, so that a heartbeat that finds the
+previous one still running gets to say so (the heartbeat's own guard records it): with one,
+APScheduler would skip it without a word."""
 
 
 class ChannelError(Exception):
@@ -177,6 +194,46 @@ class TelegramChannel:
             raise SendError(_code(error)) from None
         logger.info("interactive message sent for approval %d", approval_id)
         return approval_id
+
+    async def send_text(self, text: str) -> int:
+        """Send `text` as plain text, without keyboard or preview; return its `message_id`.
+
+        Raises `SendError` if Telegram refuses it.
+        """
+        try:
+            sent = await self._app.bot.send_message(
+                chat_id=self._chat_id,
+                text=text,
+                link_preview_options=LinkPreviewOptions(is_disabled=True),
+            )
+        except TelegramError as error:
+            logger.error("telegram send failed (%s)", _code(error))
+            raise SendError(_code(error)) from None
+        logger.info("text message sent")
+        return sent.message_id
+
+    def _jobs(self) -> JobQueue:
+        job_queue = self._app.job_queue
+        assert job_queue is not None  # `python-telegram-bot[job-queue]` is a dependency
+        return job_queue
+
+    def schedule_every(self, task: Task, interval: timedelta, first: datetime, name: str) -> Job:
+        """Run `task` every `interval` from `first` (aware), with `JOB_KWARGS`."""
+
+        async def run(context: ContextTypes.DEFAULT_TYPE) -> None:
+            await task()
+
+        return self._jobs().run_repeating(
+            run, interval, first=first, name=name, job_kwargs=JOB_KWARGS
+        )
+
+    def schedule_daily(self, task: Task, at: time, name: str) -> Job:
+        """Run `task` once a day at `at` (aware: its zone decides), with `JOB_KWARGS`."""
+
+        async def run(context: ContextTypes.DEFAULT_TYPE) -> None:
+            await task()
+
+        return self._jobs().run_daily(run, at, name=name, job_kwargs=JOB_KWARGS)
 
     def _is_pedro(self, chat_id: int | None) -> bool:
         return chat_id == self._chat_id
