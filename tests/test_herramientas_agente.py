@@ -7,8 +7,6 @@ son dobles con datos inventados y el escritor de Todoist es un espía que no deb
 import asyncio
 import json
 import logging
-import os
-import stat
 
 import pytest
 from agent_data import (
@@ -23,6 +21,7 @@ from agent_data import (
 )
 from calendar_data import SECRET_TITLE
 from heartbeat_data import madrid, task
+from memory_data import QUIET_LINE, shas, write_personal
 
 from jimic.agent.tools import RunState, build_server, model_name
 from jimic.memory.conversations import read_external
@@ -279,77 +278,196 @@ def test_una_tarea_fuera_del_proyecto_de_pruebas_da_su_codigo(conn, config_dir):
     assert approvals(conn) == []
 
 
-# --- propose_change -----------------------------------------------------------------------------
+# --- propose_change (1.12-a) -------------------------------------------------------------------
 
 
-CHANGE = {"file": "preferencias.md", "operation": "add", "text": "Café a las 11", "reason": "r"}
+PEDRO = "No me escribas antes de las 8"
+CHANGE = {
+    "file": "limites.yaml",
+    "operation": "replace",
+    "before": QUIET_LINE,
+    "after": QUIET_LINE.replace('"07:00"', '"08:00"'),
+    "reason": "Pedro no quiere mensajes antes de las 8",
+}
 
 
-def test_propose_change_guarda_el_cambio_sin_tocar_el_fichero(conn, config_dir):
-    text, is_error = call(conn, config_dir, "propose_change", CHANGE)
-    assert not is_error
-    ((kind, payload, status, _),) = approvals(conn)
-    assert (kind, status) == ("memory_change", "pending")
-    assert payload == CHANGE | {"after_external_content": False}
-    assert list(config_dir.iterdir()) == []
+def clean_run() -> RunState:
+    return RunState(origin=PEDRO)
 
 
-def test_tras_leer_las_tareas_en_la_sesion_del_dia_el_cambio_lleva_la_marca(conn, config_dir):
-    """Ajuste 4 del chat: se mide por sesión del día, no por ejecución. Dos servidores (dos
-    mensajes de Pedro) del mismo día: el primero lee las tareas, el segundo propone."""
-    call(conn, config_dir, "read_tasks", {})
-    call(conn, config_dir, "propose_change", CHANGE, now="2030-01-07T17:00")
-    ((_, payload, _, _),) = approvals(conn)
-    assert payload["after_external_content"] is True
+def test_propose_change_en_una_ejecucion_limpia_se_anota_con_el_origen(conn, tmp_path):
+    """Se anota en la ejecución, con el texto de Pedro como origen; no escribe nada, ni el
+    fichero, ni `changes`, ni `approvals` (la aprobación la crea el canal al enviar)."""
+    config_dir = write_personal(tmp_path / "config")
+    before = shas(config_dir)
+    run = clean_run()
+    text, is_error = call(conn, config_dir, "propose_change", CHANGE, run=run)
+    assert not is_error and "No se ha guardado nada" in text
+    (entry,) = run.memory
+    assert entry == {"action": "change"} | CHANGE | {
+        "origin": PEDRO,
+        "after_external_content": False,
+    }
+    assert shas(config_dir) == before
+    assert conn.execute("SELECT COUNT(*) FROM changes").fetchone() == (0,)
+    assert approvals(conn) == []
 
 
-def test_al_dia_siguiente_la_marca_empieza_de_cero(conn, config_dir):
-    call(conn, config_dir, "read_tasks", {})
-    call(conn, config_dir, "propose_change", CHANGE, now="2030-01-08T09:00")
-    ((_, payload, _, _),) = approvals(conn)
-    assert payload["after_external_content"] is False
+def test_read_tasks_y_luego_propose_change_en_la_misma_ejecucion_se_rechaza(conn, tmp_path):
+    config_dir = write_personal(tmp_path / "config")
+    run = clean_run()
+    srv = server(conn, config_dir, run=run)
+    asyncio.run(call_tool(srv, "read_tasks", {}))
+    text, is_error = asyncio.run(call_tool(srv, "propose_change", CHANGE))
+    assert is_error and "otro mensaje" in text
+    assert run.memory == [] and approvals(conn) == []
+
+
+def test_fuera_de_una_conversacion_no_hay_cambio_posible(conn, tmp_path):
+    """Un latido o un plan que pasa el latido: la ejecución no tiene mensaje de Pedro."""
+    config_dir = write_personal(tmp_path / "config")
+    run = RunState()
+    for name, args in (("propose_change", CHANGE), ("log_idea", {"text": "una idea"})):
+        text, is_error = call(conn, config_dir, name, args, run=run)
+        assert is_error and "Fuera de una conversación" in text
+    assert run.memory == []
+
+
+def test_la_marca_del_dia_solo_informa(conn, tmp_path):
+    """La sesión del día leyó las tareas en otro mensaje: esta ejecución, limpia, sí propone, y
+    el dato `after_external_content` queda en el elemento."""
+    config_dir = write_personal(tmp_path / "config")
+    call(conn, config_dir, "read_tasks", {}, run=RunState(origin="otro"))
+    run = clean_run()
+    _, is_error = call(conn, config_dir, "propose_change", CHANGE, now="2030-01-07T17:00", run=run)
+    assert not is_error and run.memory[0]["after_external_content"] is True
+    tomorrow = clean_run()
+    call(conn, config_dir, "propose_change", CHANGE, now="2030-01-08T09:00", run=tomorrow)
+    assert tomorrow.memory[0]["after_external_content"] is False
 
 
 @pytest.mark.parametrize(
     "change",
-    [CHANGE | {"file": ".env"}, CHANGE | {"operation": "rewrite"}, CHANGE | {"text": "  "}],
+    [
+        CHANGE | {"file": ".env"},
+        CHANGE | {"operation": "rewrite"},
+        CHANGE | {"after": "  "},
+        CHANGE | {"after": CHANGE["before"]},
+        {k: v for k, v in CHANGE.items() if k != "before"},
+        CHANGE | {"operation": "add"},
+        {"file": "rutina.md", "operation": "remove", "before": "x", "after": "y", "reason": "r"},
+    ],
+    ids=[
+        "fichero",
+        "operacion",
+        "espacios",
+        "igual",
+        "sin-antes",
+        "add-con-antes",
+        "remove-con-despues",
+    ],
 )
-def test_un_cambio_no_valido_se_rechaza(conn, config_dir, change):
-    _, is_error = call(conn, config_dir, "propose_change", change)
-    assert is_error and approvals(conn) == []
+def test_unos_argumentos_que_no_cuadran_se_rechazan(conn, tmp_path, change):
+    config_dir = write_personal(tmp_path / "config")
+    run = clean_run()
+    _, is_error = call(conn, config_dir, "propose_change", change, run=run)
+    assert is_error and run.memory == []
 
 
-# --- log_idea -----------------------------------------------------------------------------------
+def test_un_cambio_que_no_valida_no_se_ofrece(conn, tmp_path):
+    config_dir = write_personal(tmp_path / "config")
+    run = clean_run()
+    broken = {"file": "rutina.md", "operation": "replace", "before": "## Comidas", "after": "## C"}
+    text, is_error = call(conn, config_dir, "propose_change", broken | {"reason": "r"}, run=run)
+    assert is_error and "Comidas" in text and run.memory == []
 
 
-def test_log_idea_anade_una_linea_con_fecha_y_no_reescribe(conn, config_dir):
-    ideas = config_dir / "ideas.md"
-    ideas.write_text("# Ideas\n- 2030-01-01 · una anterior\n", encoding="utf-8")
-    os.chmod(ideas, 0o600)
-    call(conn, config_dir, "log_idea", {"text": "  Probar   la app\nde notas  "})
-    call(conn, config_dir, "log_idea", {"text": "Otra 🎯"})
-    assert ideas.read_text(encoding="utf-8") == (
-        "# Ideas\n- 2030-01-01 · una anterior\n"
-        "- 2030-01-07 · Probar la app de notas\n"
-        "- 2030-01-07 · Otra 🎯\n"
+def test_escribeme_15_veces_al_dia_se_rechaza_con_su_explicacion(conn, tmp_path):
+    config_dir = write_personal(tmp_path / "config")
+    run = RunState(origin="Escríbeme 15 veces al día")
+    change = CHANGE | {
+        "before": "max_messages_per_day: 8",
+        "after": "max_messages_per_day: 15",
+    }
+    text, is_error = call(conn, config_dir, "propose_change", change, run=run)
+    assert is_error and "max_messages_per_day" in text and "a mano" in text
+    assert run.memory == []
+
+
+def test_un_cambio_que_no_cabe_entero_en_telegram_no_se_ofrece(conn, tmp_path):
+    """El tope de tamaño: nunca se recorta lo que se enseña."""
+    config_dir = write_personal(tmp_path / "config")
+    run = clean_run()
+    big = {"file": "preferencias.md", "operation": "add", "after": "&" * 2000, "reason": "r"}
+    text, is_error = call(conn, config_dir, "propose_change", big, run=run)
+    assert is_error and "demasiado largo" in text and run.memory == []
+
+
+def test_como_mucho_tres_propuestas_de_memoria_por_ejecucion(conn, tmp_path):
+    config_dir = write_personal(tmp_path / "config")
+    run = clean_run()
+    srv = server(conn, config_dir, run=run)
+    results = [asyncio.run(call_tool(srv, "log_idea", {"text": f"idea {n}"}))[1] for n in range(4)]
+    assert results == [False, False, False, True]
+    assert len(run.memory) == 3
+
+
+# --- log_idea (1.12-b) --------------------------------------------------------------------------
+
+
+def test_log_idea_limpio_da_una_propuesta_y_no_escribe(conn, tmp_path):
+    config_dir = write_personal(tmp_path / "config")
+    run = clean_run()
+    text, is_error = call(
+        conn, config_dir, "log_idea", {"text": "  Probar   la app\nde notas  "}, run=run
     )
+    assert not is_error and "Apuntar" in text
+    (entry,) = run.memory
+    assert entry["line"] == "- 2030-01-07 · Probar la app de notas"
+    assert entry["origin"] == PEDRO
+    assert not (config_dir / "ideas.md").exists()
 
 
-def test_log_idea_crea_el_fichero_privado(conn, config_dir):
-    call(conn, config_dir, "log_idea", {"text": "Primera"})
-    assert stat.S_IMODE((config_dir / "ideas.md").stat().st_mode) == 0o600
+def test_log_idea_contaminado_se_rechaza(conn, tmp_path):
+    config_dir = write_personal(tmp_path / "config")
+    run = clean_run()
+    srv = server(conn, config_dir, run=run)
+    asyncio.run(call_tool(srv, "read_calendar", {}))
+    text, is_error = asyncio.run(call_tool(srv, "log_idea", {"text": "una"}))
+    assert is_error and "otro mensaje" in text and run.memory == []
+
+
+def test_log_idea_ya_no_depende_de_la_marca_del_dia(conn, tmp_path):
+    """La decisión 100, revisada: la sesión leyó por la mañana; esta ejecución, limpia, sí."""
+    config_dir = write_personal(tmp_path / "config")
+    call(conn, config_dir, "read_tasks", {}, run=RunState(origin="otro"))
+    assert read_external(conn, madrid("2030-01-07T10:15").date())
+    run = clean_run()
+    _, is_error = call(conn, config_dir, "log_idea", {"text": "una"}, run=run)
+    assert not is_error and len(run.memory) == 1
 
 
 @pytest.mark.parametrize(("length", "ok"), [(500, True), (501, False)])
-def test_log_idea_tiene_tope_por_linea(conn, config_dir, length, ok):
-    _, is_error = call(conn, config_dir, "log_idea", {"text": "x" * length})
+def test_log_idea_tiene_tope_por_linea(conn, tmp_path, length, ok):
+    config_dir = write_personal(tmp_path / "config")
+    run = clean_run()
+    _, is_error = call(conn, config_dir, "log_idea", {"text": "x" * length}, run=run)
     assert is_error is not ok
-    assert (config_dir / "ideas.md").exists() is ok
+    assert len(run.memory) == int(ok)
 
 
 def test_log_idea_vacia_tras_juntar_espacios_se_rechaza(conn, config_dir):
-    _, is_error = call(conn, config_dir, "log_idea", {"text": " \n\t "})
-    assert is_error and not (config_dir / "ideas.md").exists()
+    run = clean_run()
+    _, is_error = call(conn, config_dir, "log_idea", {"text": " \n\t "}, run=run)
+    assert is_error and run.memory == []
+
+
+def test_log_idea_con_ideas_como_enlace_se_rechaza(conn, tmp_path):
+    config_dir = write_personal(tmp_path / "config")
+    (config_dir / "ideas.md").symlink_to(tmp_path / "fuera.md")
+    run = clean_run()
+    _, is_error = call(conn, config_dir, "log_idea", {"text": "una"}, run=run)
+    assert is_error and run.memory == []
 
 
 # --- Logs ---------------------------------------------------------------------------------------
@@ -359,9 +477,11 @@ def test_los_logs_de_las_herramientas_no_llevan_contenido(conn, config_dir, capl
     caplog.set_level(logging.DEBUG)
     srcs = agent_sources(TaskList(available=True, tasks=[task("t1", title=SECRET_TITLE)]))
     call(conn, config_dir, "read_tasks", {}, srcs=srcs)
-    call(conn, config_dir, "log_idea", {"text": SECRET_IDEA})
+    write_personal(config_dir)
+    call(conn, config_dir, "log_idea", {"text": SECRET_IDEA}, run=clean_run())
     call(conn, config_dir, "propose_plan", {"items": [CREATE | {"title": SECRET_ARG}]})
-    call(conn, config_dir, "propose_change", CHANGE | {"text": SECRET_ARG})
+    call(conn, config_dir, "propose_change", CHANGE | {"after": SECRET_ARG}, run=clean_run())
+    call(conn, config_dir, "propose_change", CHANGE | {"before": SECRET_ARG}, run=clean_run())
     call(conn, config_dir, "propose_plan", {"items": [CREATE | {"due": SECRET_ARG}]})
     for secret in (SECRET_TITLE, SECRET_IDEA, SECRET_ARG):
         assert secret not in caplog.text

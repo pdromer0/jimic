@@ -16,7 +16,7 @@ from jimic.channel.message import (
     Option,
     Tap,
 )
-from jimic.channel.taps import Failed, Renew, process_tap, sweep
+from jimic.channel.taps import Declined, Failed, Renew, process_tap, sweep
 from jimic.memory.database import open_database
 
 NOW = datetime(2026, 11, 21, 19, 0, tzinfo=ZoneInfo("Europe/Madrid"))
@@ -380,3 +380,35 @@ def test_el_barrido_solo_marca_lo_que_no_tiene_mensaje_o_no_es_un_mensaje(conn, 
     assert [(s.telegram_message_id, s.view) for s in swept] == [(None, None), (5, None)]
     statuses = [row[0] for row in conn.execute("SELECT status FROM approvals ORDER BY id")]
     assert statuses == ["expired", "expired"]
+
+
+# --- Declined (tarea 1.12) ----------------------------------------------------------------------
+
+
+def test_un_declined_resuelve_como_un_no_y_la_aprobacion_queda_rechazada(conn, clock):
+    """Ajuste 11: mirado y no hecho, para siempre ([Guardar] sobre un fichero que cambió)."""
+
+    async def declines(item, option, approval_id):
+        return Declined("ha cambiado: no lo guardo")
+
+    message = InteractiveMessage(header="H", items=(make_message().items[0],))
+    approval = store.create(conn, clock, "demo", message, EXPIRES)
+    result = run(conn, clock, declines, Tap(approval, 1, "y"))
+    assert result.code == "resolved"
+    item = stored(conn, approval).message.items[0]
+    assert (item.result, item.chosen) == ("ha cambiado: no lo guardo", "n")
+    assert stored(conn, approval).status == "rejected"
+
+
+def test_un_declined_sin_opcion_de_no_queda_pendiente_con_su_nota(conn, clock):
+    async def declines(item, option, approval_id):
+        return Declined("no se pudo")
+
+    only_yes = Item(title="Solo sí", options=(Option(key="y", label="Sí"),))
+    approval = store.create(
+        conn, clock, "demo", InteractiveMessage(header="H", items=(only_yes,)), EXPIRES
+    )
+    run(conn, clock, declines, Tap(approval, 1, "y"))
+    item = stored(conn, approval).message.items[0]
+    assert item.pending and item.note == "no se pudo"
+    assert stored(conn, approval).status == "pending"

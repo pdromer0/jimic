@@ -10,7 +10,8 @@ retried on its own (it expires as unconfirmed).
 
 A handler returns what happened as a short text (`✓ creada`), or `Failed` with a code (the item
 stays pending with its note, and Pedro can try again), or `Renew` with the item as it is now (the
-task changed: ask again). If it raises, it counts as `Failed`. Nothing in the log is content:
+task changed: ask again), or `Declined` with a short text (looked at and not done, for good: the
+item is resolved as a no). If it raises, it counts as `Failed`. Nothing in the log is content:
 only codes, ids and counts.
 """
 
@@ -55,7 +56,16 @@ class Renew:
     item: Item
 
 
-type HandlerOutcome = str | Failed | Renew
+@dataclass(frozen=True)
+class Declined:
+    """The effect was looked at and not done, for good (task 1.12: [Guardar] on a file that
+    changed): the item is resolved with `result`, as with its first option that is not a yes,
+    so the approval ends `rejected`, not `approved`."""
+
+    result: str
+
+
+type HandlerOutcome = str | Failed | Renew | Declined
 type TapHandler = Callable[[Item, str, int], Awaitable[HandlerOutcome]]
 """Called with the item, the key of the option chosen and the id of its approval."""
 
@@ -80,15 +90,26 @@ async def _run(handler: TapHandler, item: Item, option: str, approval_id: int) -
         return Failed(f"unexpected:{type(error).__name__}")
 
 
+def _declined_option(item: Item) -> str | None:
+    return next((option.key for option in item.options if not option.approves), None)
+
+
 def _apply(message: InteractiveMessage, outcomes: dict[int, tuple[str, HandlerOutcome]]):
-    done = {
-        index: Outcome(option, outcome)
-        for index, (option, outcome) in outcomes.items()
-        if isinstance(outcome, str)
-    }
+    done: dict[int, Outcome] = {}
+    for index, (option, outcome) in outcomes.items():
+        if isinstance(outcome, str):
+            done[index] = Outcome(option, outcome)
+        elif isinstance(outcome, Declined):
+            declined = _declined_option(message.items[index])
+            if declined is not None:
+                done[index] = Outcome(declined, outcome.result)
     updated = resolve(message, done)
     for index, (_, outcome) in outcomes.items():
-        if isinstance(outcome, Failed):
+        if isinstance(outcome, Declined) and index not in done:
+            # Nothing to resolve it with that is not a yes: it stays pending with the note.
+            item = updated.items[index].model_copy(update={"note": clip_result(outcome.result)})
+            updated = release(updated, index, item)
+        elif isinstance(outcome, Failed):
             item = updated.items[index].model_copy(update={"note": failure_note(outcome.code)})
             updated = release(updated, index, item)
         elif isinstance(outcome, Renew):

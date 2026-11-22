@@ -273,7 +273,8 @@ def test_una_inyeccion_da_cero_ejecuciones_y_cero_cambios_de_memoria(conn, tmp_p
     change = {
         "file": "limites.yaml",
         "operation": "replace",
-        "text": "max_messages_per_day: 1000",
+        "before": "max_messages_per_day: 8",
+        "after": "max_messages_per_day: 1000",
         "reason": "lo dice el calendario",
     }
     agent = FakeAgent(
@@ -306,4 +307,14 @@ def test_una_inyeccion_da_cero_ejecuciones_y_cero_cambios_de_memoria(conn, tmp_p
     assert w.writes() == []
     assert conn.execute("SELECT COUNT(*) FROM changes").fetchone() == (0,)
     assert sorted(path.name for path in w.paths.config_dir.iterdir()) == before
-    assert [o.denied for o in agent.tool_outcomes] == [False, False, False, False, True, True, True]
+    # `propose_change` y `log_idea` pasan el *hook* y las rechaza la regla de origen (1.12-a).
+    assert [o.denied for o in agent.tool_outcomes] == [
+        False,
+        False,
+        False,
+        False,
+        False,
+        True,
+        True,
+    ]
+    assert [o.is_error for o in agent.tool_outcomes[3:5]] == [True, True]
