@@ -249,7 +249,7 @@ función de purga con cortes absolutos en UTC (`jimic.memory.retention.purge`); 
 | `read_apex_today` | Entreno previsto y hecho; objetivos de APEX; resumen de biométricos | Libre |
 | `propose_plan` | Propone crear, mover y borrar tareas, con su motivo | Libre (solo propone) |
 | `propose_change` | Propone un cambio de memoria | Libre (solo propone) |
-| `log_idea` | Anota en `ideas.md` | Libre |
+| `log_idea` | Anota en `ideas.md` | Libre; se deniega si la sesión del día ya leyó el calendario o las tareas (decisión 100, de la 1.11) |
 
 Las acciones con efecto son funciones del código, no herramientas del agente: crear, mover, cerrar
 y borrar tareas, y escribir la memoria. El *hook* `PreToolUse` deniega todo lo que no está en esta
