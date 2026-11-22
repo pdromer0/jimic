@@ -8,7 +8,8 @@ the other way round.
 - `add` puts `after` at the end of the file, on a line of its own.
 - `replace` and `remove` need `before` to appear **exactly once**; `remove` of whole lines also
   takes their line break, so no blank line is left behind.
-- What goes in uses the line break of the file (`\\r\\n` if it has one).
+- What goes in, and the «antes» looked for, use the line break of the file (`\\r\\n` if it
+  has one).
 """
 
 from dataclasses import dataclass
@@ -74,6 +75,8 @@ def patch_for(text: str, operation: Operation, before: str | None, after: str | 
             inserted += newline
         return Patch(len(text), "", separator + inserted)
     assert before is not None
+    # The model copies the fragment from its prompt with `\n`: in a CRLF file it is `\r\n`.
+    before = _with_newline(before, newline)
     position = find_once(text, before)
     if operation == "replace":
         assert after is not None

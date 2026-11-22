@@ -80,3 +80,13 @@ def test_aplicar_sobre_otro_texto_falla():
 
 def test_find_once_da_la_posicion():
     assert find_once("abc", "b") == 1
+
+
+def test_un_antes_de_varias_lineas_se_encuentra_en_un_fichero_crlf():
+    """Hallazgo 3 de la revisión: el modelo copia el fragmento con `\n` y el fichero lleva
+    `\r\n`; replace y remove lo encuentran igual."""
+    text = "uno\r\ndos\r\ntres\r\n"
+    assert (
+        patch_for(text, "replace", "uno\ndos", "UNO\nDOS").apply(text) == "UNO\r\nDOS\r\ntres\r\n"
+    )
+    assert patch_for(text, "remove", "dos\ntres", None).apply(text) == "uno\r\n"
