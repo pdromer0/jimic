@@ -3,7 +3,8 @@
 - **Estado:** Aceptada
 - **Fecha:** 2026-11-22
 
-Recoge las decisiones 15, 27, 55, 56 y 96 a 100 del [registro](../diseno.md#14-registro-de-decisiones).
+Recoge las decisiones 15, 27, 55, 56 y 96 a 100 del [registro](../diseno.md#14-registro-de-decisiones)
+y, desde la tarea 1.12, la 102 y la 103 (esta última revisa la 100).
 
 ## Contexto
 
@@ -118,3 +119,22 @@ H1-2 (decisiones 55 y 56), y la tarea 1.11 las implementa.
     - el «sí» no vale si Pedro escribió después del último envío (a90b1a4);
     - al borrar, un 5xx es ambiguo como el timeout (8a921d2), y un 404 es «ya no existe», sin
       foto (1fca6a8).
+- **Tarea 1.12** (PR de `feat/h1-memoria`; decisiones 102 a 105):
+  - **La regla de origen pasa a ser por ejecución** (45ffcf8). `propose_change` y `log_idea` solo
+    se aceptan en una ejecución que no ha leído el calendario ni las tareas. El *hook* marca la
+    ejecución, además del día, antes de dejar pasar la lectura. Al acabar, se descarta lo
+    propuesto si la ejecución leyó después. La marca del día queda como dato informativo.
+  - **El *hook* ya no deniega `log_idea`** (la 103 revisa la 100): pasa a ser una propuesta con
+    [📝 Apuntar], como `propose_change` con [Guardar]. Desaparece la consecuencia de arriba (el
+    resto del día sin `log_idea`).
+  - **La memoria la escribe el código tras el botón** (894b470 y 45ffcf8): valida el fichero
+    resultante (esquema, estructura y regla asimétrica), lo vuelve a validar contra el fichero
+    actual al guardar, y escribe solo el fragmento. Un [Guardar] que ya no cuadra deja la
+    aprobación rechazada.
+  - **El agente ve los cinco ficheros en su prompt** (45ffcf8, decisión 104). Son datos de Pedro y
+    no contaminan; no tiene herramienta para leerlos ni escribirlos.
+  - **Una garantía más de la capa 4** (26161ad): con el doble del agente y cuatro estrategias
+    (leer y proponer, proponer y leer, las dos en un mensaje del modelo, y proponer en la
+    ejecución limpia siguiente), lo inyectado no cambia ningún fichero ni deja filas en `changes`.
+    En la cuarta, la propuesta se enseña con su origen y [Guardar] la vuelve a pasar por la regla
+    asimétrica.
