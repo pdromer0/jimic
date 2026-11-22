@@ -44,6 +44,8 @@ DURATION_LINE = re.compile(r"^Duración: ([0-9]{1,5}) min$", re.MULTILINE)
 """The line that carries the duration in the description: the free plan of Todoist does not
 keep the `duration` field (contract of 19-nov-2026), so it is written here too."""
 
+NO_DATE = "no date"
+"""The `due_string` that takes the date off a task (API v1)."""
 OUTSIDE_TEST_PROJECT = "outside_test_project"
 TASK_NOT_FOUND = "task_not_found"
 
@@ -64,6 +66,18 @@ class TodoistTask(BaseModel):
     is_recurring: bool
     has_subtasks: bool
     duration_minutes: int | None
+
+
+class TaskPhoto(BaseModel):
+    """Everything `deleted_tasks` keeps of a task (H1-2), for the code only: the model never
+    sees the description, the labels or the priority."""
+
+    model_config = ConfigDict(frozen=True)
+
+    task: TodoistTask
+    description: str = Field(repr=False)
+    labels: tuple[str, ...] = Field(repr=False)
+    priority: int
 
 
 class TaskList(BaseModel):
@@ -102,18 +116,24 @@ class TodoistReader(Protocol):
         the model, so it raises `ToolFailure` like the writer."""
         ...
 
+    async def get_photo(self, task_id: str) -> TaskPhoto | None:
+        """`get_task` with what a deletion keeps; for the code only. Raises like `get_task`."""
+        ...
+
 
 class TodoistWriter(Protocol):
     """What only the code may do. Each one raises `ToolFailure` if it fails."""
 
     async def create(
-        self, content: str, project_id: str, due: Due, duration_minutes: int | None = None
+        self, content: str, project_id: str | None, due: Due, duration_minutes: int | None = None
     ) -> TodoistTask:
-        """Create a task. `due` is a day or a moment with a zone."""
+        """Create a task; `project_id=None` is the inbox. `due` is a day or a moment with a
+        zone."""
         ...
 
-    async def move(self, task_id: str, due: Due) -> None:
-        """Change the day or the moment of a task."""
+    async def move(self, task_id: str, due: Due | None) -> None:
+        """Change the day or the moment of a task; `None` takes the date off (the [Deshacer]
+        of a move of an undated task)."""
         ...
 
     async def complete(self, task_id: str) -> None:
@@ -279,6 +299,10 @@ class ApiTodoistReader:
         return await self._read(project_id, today_only=False)
 
     async def get_task(self, task_id: str) -> TodoistTask | None:
+        photo = await self.get_photo(task_id)
+        return None if photo is None else photo.task
+
+    async def get_photo(self, task_id: str) -> TaskPhoto | None:
         try:
             raw = await _call(self._api.get_task(task_id))
         except ToolFailure as error:
@@ -286,7 +310,13 @@ class ApiTodoistReader:
                 return None
             raise
         children = await _call(self._api.get_tasks(parent_id=task_id, limit=1))
-        return _to_task(raw, self._timezone, has_subtasks=bool(await _next_page(children)))
+        task = _to_task(raw, self._timezone, has_subtasks=bool(await _next_page(children)))
+        return TaskPhoto(
+            task=task,
+            description=raw.description,
+            labels=tuple(raw.labels or ()),
+            priority=raw.priority,
+        )
 
     async def _read(self, project_id: str | None, today_only: bool) -> TaskList:
         try:
@@ -321,7 +351,7 @@ class ApiTodoistWriter:
         self._timezone = timezone
 
     async def create(
-        self, content: str, project_id: str, due: Due, duration_minutes: int | None = None
+        self, content: str, project_id: str | None, due: Due, duration_minutes: int | None = None
     ) -> TodoistTask:
         if duration_minutes is not None and duration_minutes < 1:
             raise ToolFailure("invalid_duration")
@@ -341,12 +371,12 @@ class ApiTodoistWriter:
         )
         return _to_task(raw, self._timezone, has_subtasks=False)
 
-    async def move(self, task_id: str, due: Due) -> None:
+    async def move(self, task_id: str, due: Due | None) -> None:
+        if due is None:
+            await self._clear_due(task_id)
+            return
         due_date, due_datetime = _split_due(due)
-        try:
-            current = await _call(self._api.get_task(task_id))
-        except ToolFailure as error:
-            raise ToolFailure(TASK_NOT_FOUND if error.code == "http_404" else error.code) from None
+        current = await self._current(task_id)
         # A new date alone turns a recurring task into a plain one (contract of 19-nov-2026):
         # with the text of its recurrence next to the date it stays recurring. The text is in the
         # language it was written in (a task made in the app can be in Spanish), so it goes
@@ -361,6 +391,19 @@ class ApiTodoistWriter:
                 due_datetime=due_datetime,
             )
         )
+
+    async def _current(self, task_id: str) -> Task:
+        try:
+            return await _call(self._api.get_task(task_id))
+        except ToolFailure as error:
+            raise ToolFailure(TASK_NOT_FOUND if error.code == "http_404" else error.code) from None
+
+    async def _clear_due(self, task_id: str) -> None:
+        """Take the date off. Never on a recurring task: it would lose its recurrence."""
+        current = await self._current(task_id)
+        if current.due is not None and current.due.is_recurring:
+            raise ToolFailure("invalid_due")
+        await _call(self._api.update_task(task_id, due_string=NO_DATE, due_lang="en"))
 
     async def complete(self, task_id: str) -> None:
         if not await _call(self._api.complete_task(task_id)):
@@ -389,10 +432,14 @@ class GuardedReader:
         return self._only_the_project(await self._inner.read_project(self._project_id))
 
     async def get_task(self, task_id: str) -> TodoistTask | None:
-        task = await self._inner.get_task(task_id)
-        if task is not None and task.project_id != self._project_id:
+        photo = await self.get_photo(task_id)
+        return None if photo is None else photo.task
+
+    async def get_photo(self, task_id: str) -> TaskPhoto | None:
+        photo = await self._inner.get_photo(task_id)
+        if photo is not None and photo.task.project_id != self._project_id:
             raise ToolFailure(OUTSIDE_TEST_PROJECT)  # the code only, not the title
-        return task
+        return photo
 
     def _only_the_project(self, result: TaskList) -> TaskList:
         """A second barrier: the request was already limited, so nothing should be left to drop."""
@@ -418,11 +465,11 @@ class GuardedWriter:
         self._project_id = project_id
 
     async def create(
-        self, content: str, project_id: str, due: Due, duration_minutes: int | None = None
+        self, content: str, project_id: str | None, due: Due, duration_minutes: int | None = None
     ) -> TodoistTask:
         return await self._inner.create(content, self._project_id, due, duration_minutes)
 
-    async def move(self, task_id: str, due: Due) -> None:
+    async def move(self, task_id: str, due: Due | None) -> None:
         await self._check(task_id)
         await self._inner.move(task_id, due)
 

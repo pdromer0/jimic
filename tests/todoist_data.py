@@ -15,7 +15,7 @@ from typing import Any, Literal
 import httpx
 from todoist_api_python.models import Task
 
-from jimic.tools.todoist import TaskList
+from jimic.tools.todoist import TaskList, TaskPhoto
 
 PRIVATE_TITLE = "Llamar-al-abogado-inventado-5528"
 """A title that must never reach a log, a code or a `repr`."""
@@ -233,6 +233,9 @@ class FakeTodoistApi:
         raw = self.find(task_id)
         if raw is None:
             raise http_status_error(404)
+        if due_string == "no date" and due_date is None and due_datetime is None:
+            raw["due"] = None  # what API v1 does with «no date»
+            return Task.from_dict(raw)
         when = due_date or due_datetime
         assert when is not None
         if due_datetime is not None:  # as the API stores it: UTC, with a `Z`
@@ -286,3 +289,9 @@ class FixedTodoistReader:
 
     async def get_task(self, task_id: str):
         return next((t for t in self._tasks.tasks if t.id == task_id), None)
+
+    async def get_photo(self, task_id: str):
+        task = await self.get_task(task_id)
+        if task is None:
+            return None
+        return TaskPhoto(task=task, description="", labels=(), priority=1)
