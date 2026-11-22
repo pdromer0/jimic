@@ -37,6 +37,7 @@ from jimic.config import Settings
 from jimic.heartbeat.cycle import Decision
 from jimic.heartbeat.limits import HANDOVER_TASK, Outgoing, applies_on
 from jimic.heartbeat.state import DayState
+from jimic.memory.live import LiveConfig
 from jimic.memory.schemas import DailyPlan, DayClose, Intention, Intentions, KeyTask, Notice
 from jimic.memory.usage import TokenUsage
 
@@ -262,10 +263,22 @@ def templates(intentions: Intentions, state: DayState) -> tuple[Outgoing, ...]:
 class HaikuDecider:
     """The `decide` of `run_cycle`: one call to the model, never retried by us."""
 
-    def __init__(self, create: CreateMessage, model: str, intentions: Intentions) -> None:
+    def __init__(
+        self,
+        create: CreateMessage,
+        model: str,
+        intentions: Intentions,
+        config: LiveConfig | None = None,
+    ) -> None:
+        """`config` is the live configuration; without it, `intentions` is a fixed one."""
         self._create = create
         self._model = model
-        self._intentions = intentions
+        self._config = config
+        self._fixed = intentions
+
+    @property
+    def _intentions(self) -> Intentions:
+        return self._config.intentions if self._config is not None else self._fixed
 
     @property
     def model(self) -> str:

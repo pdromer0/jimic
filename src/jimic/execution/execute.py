@@ -26,6 +26,7 @@ from jimic.channel.taps import Failed, HandlerOutcome, TapHandler
 from jimic.clock import Clock
 from jimic.execution import deletion
 from jimic.execution.plan_message import PLAN_KIND, UNDO_KIND, item_title, proposed_due
+from jimic.memory.live import LiveConfig
 from jimic.memory.schemas import Limits
 from jimic.tools.failures import ToolFailure
 from jimic.tools.todoist import TASK_NOT_FOUND, TodoistTask, TodoistTools
@@ -58,12 +59,20 @@ class Executor:
         timezone: ZoneInfo,
         limits: Limits,
         todoist: TodoistTools,
+        config: LiveConfig | None = None,
     ) -> None:
+        """`config` is the live configuration; without it, `limits` is a fixed one."""
         self._conn = conn
         self._clock = clock
         self._timezone = timezone
+        self._config = config
         self._limits = limits
         self._todoist = todoist
+
+    @property
+    def _active_limits(self) -> Limits:
+        """The limits now: the live ones, or the fixed ones."""
+        return self._config.limits if self._config is not None else self._limits
 
     @property
     def handlers(self) -> dict[str, TapHandler]:
@@ -86,7 +95,7 @@ class Executor:
                 conn=self._conn,
                 clock=self._clock,
                 timezone=self._timezone,
-                limits=self._limits,
+                limits=self._active_limits,
                 todoist=self._todoist,
                 item=item,
                 approval_id=approval_id,

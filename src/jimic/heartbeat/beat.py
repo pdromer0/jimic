@@ -29,6 +29,7 @@ from jimic.heartbeat.limits import HANDOVER_TASK, SEPARATOR, Verdict, WaitingNot
 from jimic.heartbeat.sources import Sources
 from jimic.heartbeat.state import DayState
 from jimic.memory import system_notices, usage
+from jimic.memory.live import LiveConfig
 from jimic.memory.notices import record_handover
 from jimic.memory.schemas import Intentions, Limits
 
@@ -107,11 +108,13 @@ class Heartbeat:
         decider: Decider,
         sender: Sender,
         on_handover: OnHandover = log_handover,
+        config: LiveConfig | None = None,
     ) -> None:
+        """`config` is the live configuration of the service; without it, `limits` and
+        `intentions` are a fixed one."""
         self._clock = clock
         self._timezone = timezone
-        self._limits = limits
-        self._intentions = intentions
+        self._config = config if config is not None else LiveConfig.fixed(intentions, limits)
         self._sources = sources
         self._conn = conn
         self._decider = decider
@@ -119,6 +122,14 @@ class Heartbeat:
         self._on_handover = on_handover
         self.queue = WaitingNotices()
         self._running = False
+
+    @property
+    def _limits(self) -> Limits:
+        return self._config.limits
+
+    @property
+    def _intentions(self) -> Intentions:
+        return self._config.intentions
 
     def _now(self) -> datetime:
         return self._clock.now().astimezone(self._timezone)
