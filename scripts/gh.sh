@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Todo lo que los agentes hacen con GitHub, por REST (funciona en local y en la nube, donde
-# GraphQL da 403). Valida sus argumentos y solo hace lecturas, abrir un PR y editar su
-# descripción: es lo único que .claude/settings.json deja pasar sin preguntar. Cualquier otro
-# `gh api` que escriba el modelo pide permiso.
+# GraphQL da 403). Valida sus argumentos y solo hace lecturas, abrir un PR, editar su
+# descripción y crear una Release en borrador: es lo único que .claude/settings.json deja pasar
+# sin preguntar. Cualquier otro `gh api` que escriba el modelo pide permiso.
 #
 #   gh.sh issue N             cuerpo, estado, etiquetas y milestone del issue N
 #   gh.sh comentarios N       comentarios del issue o PR N
@@ -12,13 +12,14 @@
 #   gh.sh revisiones N        revisiones y comentarios de línea del PR N
 #   gh.sh abrir-pr RAMA TITULO FICHERO    abre el PR de RAMA contra main
 #   gh.sh editar-pr N FICHERO             cambia la descripción del PR N
+#   gh.sh crear-release ETIQUETA TITULO docs/releases/ETIQUETA.md   Release en borrador (v0.N-hitoN)
 set -u
 raiz=$(git rev-parse --show-toplevel) || exit 1
 cd "$raiz" || exit 1
 # shellcheck source=scripts/comun.sh
 source scripts/comun.sh
 
-uso() { sed -n '7,14p' "$0" >&2; exit 64; }
+uso() { sed -n '7,15p' "$0" >&2; exit 64; }
 numero() { [[ "$1" =~ ^[1-9][0-9]{0,6}$ ]] || { echo "gh.sh: «$1» no es un número de issue o PR" >&2; exit 64; }; }
 fichero() { [ -f "$1" ] || { echo "gh.sh: no existe el fichero «$1»" >&2; exit 64; }; }
 
@@ -56,5 +57,20 @@ case "$orden" in
   editar-pr)
     [ $# -eq 2 ] || uso; numero "$1"; fichero "$2"
     exec gh api -X PATCH "repos/$R/pulls/$1" -F body=@"$2" --jq .html_url ;;
+  crear-release)
+    # Solo en borrador, y solo si la etiqueta ya está en GitHub (la crea Pedro tras la fusión del
+    # cierre): nada se publica sin que Pedro lo revise y lo publique desde la web.
+    [ $# -eq 3 ] || uso
+    [[ "$1" =~ ^v0\.(0|[1-9][0-9]?)-hito(0|[1-9][0-9]?)$ ]] && [ "${BASH_REMATCH[1]}" = "${BASH_REMATCH[2]}" ] \
+      || { echo "gh.sh: «$1» no es una etiqueta v0.N-hitoN" >&2; exit 64; }
+    [ -n "$2" ] || { echo "gh.sh: falta el título" >&2; exit 64; }
+    [ "$3" = "docs/releases/$1.md" ] || { echo "gh.sh: las notas de $1 son docs/releases/$1.md, no «$3»" >&2; exit 64; }
+    fichero "$3"
+    gh api "repos/$R/git/ref/tags/$1" --jq .ref >/dev/null \
+      || { echo "gh.sh: la etiqueta $1 no está en GitHub o no se pudo comprobar (arriba, el error de gh); no se crea nada" >&2; exit 1; }
+    ya=$(gh api "repos/$R/releases" --paginate --jq '.[] | select(.tag_name == "'"$1"'") | .id') \
+      || { echo "gh.sh: no se pudo listar las Releases; no se crea nada" >&2; exit 1; }
+    [ -z "$ya" ] || { echo "gh.sh: ya hay una Release con la etiqueta $1 (id $ya); no se crea otra" >&2; exit 1; }
+    exec gh api -X POST "repos/$R/releases" -f tag_name="$1" -f name="$2" -F body=@"$3" -F draft=true --jq '{id,html_url,draft}' ;;
   *) uso ;;
 esac

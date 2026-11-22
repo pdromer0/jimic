@@ -10,8 +10,9 @@ empezar: cada uno añade los pasos de un módulo activo y dice en qué punto del
 ## Reglas de toda la tarea
 
 - **GitHub, solo con `scripts/gh.sh`** (REST, igual en local y en la nube): `issue`,
-  `comentarios`, `bloqueado-por`, `pr`, `checks`, `revisiones`, `abrir-pr` y `editar-pr`. Si
-  hace falta algo que no hace, se pide permiso y se dice por qué.
+  `comentarios`, `bloqueado-por`, `pr`, `checks`, `revisiones`, `abrir-pr`, `editar-pr` y
+  `crear-release` (en borrador, al cerrar un hito). Si hace falta algo que no hace, se pide
+  permiso y se dice por qué.
 - **Niveles de tests.** N1: antes de cada commit, `uv run pre-commit run --files <tocados>`
   (ruff, pyright, gitleaks sobre lo preparado y los hooks básicos) y los ficheros de test del
   área tocada. N2: el hook `Stop`, al final de cada turno. N3: `scripts/n3.sh` (pre-commit en

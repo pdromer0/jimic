@@ -17,3 +17,6 @@ número y estás en una rama, pregúntalo a Pedro.
    - 2 (árbol sucio), 3 (sin fusionar), 4 (la fusión no está en main) o 5 (la rama tiene commits
      que no entraron): para y enseña el mensaje. No intentes arreglarlo.
 3. Si el script avisa de que arrancaste en otra rama, recuérdaselo a Pedro.
+4. Si el PR cierra un hito (rama `docs/hN-cierre`, la de `/cerrar-hito`), al terminar recuerda a
+   Pedro: «crea la etiqueta v0.N-hitoN en GitHub y después pídeme la Release en borrador
+   (`scripts/gh.sh crear-release`)». Solo el recordatorio: no crees nada.
