@@ -25,7 +25,7 @@ from zoneinfo import ZoneInfo
 from jimic.channel.bot import SendError
 from jimic.clock import Clock, to_db
 from jimic.heartbeat.cycle import CycleResult, Decision, run_cycle
-from jimic.heartbeat.limits import SEPARATOR, Verdict, WaitingNotices, in_window
+from jimic.heartbeat.limits import HANDOVER_TASK, SEPARATOR, Verdict, WaitingNotices, in_window
 from jimic.heartbeat.sources import Sources
 from jimic.heartbeat.state import DayState
 from jimic.memory import system_notices, usage
@@ -53,8 +53,6 @@ class Sender(Protocol):
 type OnHandover = Callable[[str, DayState], Awaitable[None]]
 """Called with the id of a plan or a close and the state of the day when the heartbeat hands it
 over to the agent. Tasks 1.14 and 1.16 fill it in; if it raises, the intention is not attended."""
-
-HANDOVER_TASK = {"daily_plan": "1.14", "day_close": "1.16"}
 
 
 async def log_handover(intent: str, state: DayState) -> None:
@@ -182,7 +180,7 @@ class Heartbeat:
         day = now.date()
         if decision.usage is not None:
             usage.record(self._conn, day, self._decider.model, decision.usage)
-            self._check_budget(now)
+            system_notices.check_budget(self._conn, self._limits.budget, now)
         if decision.api_error is not None:
             system_notices.detect(self._conn, "api_down", day, now, decision.api_error)
         if result.state is not None:
@@ -240,9 +238,6 @@ class Heartbeat:
         )
 
     # --- System notices ------------------------------------------------------------------------
-
-    def _check_budget(self, now: datetime) -> None:
-        system_notices.check_budget(self._conn, self._limits.budget, now)
 
     def _budget_text(self, day: date) -> str:
         """The spend of the month as it is now: it may be past the warning when it goes out."""

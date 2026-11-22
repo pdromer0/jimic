@@ -27,7 +27,9 @@ logger = logging.getLogger(__name__)
 URGENT_TYPES = frozenset({"daily_plan", "day_close", "key_task"})
 """They never wait in the group window. A `notice` is the only kind that does (1.7-b)."""
 
-HANDOVER_TYPES = frozenset({"daily_plan", "day_close"})
+HANDOVER_TASK = {"daily_plan": "1.14", "day_close": "1.16"}
+"""The types the heartbeat hands over to the agent, and the task that will send them."""
+HANDOVER_TYPES = frozenset(HANDOVER_TASK)
 """They are not sent: the heartbeat hands them over to the agent (decision 1.8-b), and that counts
 as attended today, not as a message."""
 

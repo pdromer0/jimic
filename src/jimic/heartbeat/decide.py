@@ -35,7 +35,7 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 from jimic.channel.message import telegram_length
 from jimic.config import Settings
 from jimic.heartbeat.cycle import Decision
-from jimic.heartbeat.limits import Outgoing, applies_on
+from jimic.heartbeat.limits import HANDOVER_TASK, Outgoing, applies_on
 from jimic.heartbeat.state import DayState
 from jimic.memory.schemas import DailyPlan, DayClose, Intention, Intentions, KeyTask, Notice
 from jimic.memory.usage import TokenUsage
@@ -59,7 +59,7 @@ MAX_PICKS = 3
 """Intentions the model may pick in one heartbeat (decision 1.8-d)."""
 SLOT = timedelta(minutes=15)
 """A heartbeat's slot for the default times: `default_time <= now < default_time + SLOT`."""
-PENDING_TASK = {"daily_plan": "1.14", "day_close": "1.16"}
+PENDING_TASK = HANDOVER_TASK
 """The intentions decided but not sent yet (decision 1.8-b), and the task that brings them."""
 INTENTIONS_MARK = "<<INTENCIONES>>"
 
@@ -289,12 +289,16 @@ class HaikuDecider:
 RETRYABLE_STATUS = frozenset({408, 409, 429})
 
 
-def api_error_code(error: anthropic.APIError) -> str:
-    """`rejected:<Type>` for a 4xx that will not go away by waiting (a wrong key or model id,
-    a bad request); `down:<Type>` for everything else."""
-    status = getattr(error, "status_code", None)
+def status_kind(status: object) -> str:
+    """`rejected` for a 4xx that will not go away by waiting (a wrong key or model id, a bad
+    request); `down` for everything else, an unknown status included."""
     rejected = isinstance(status, int) and 400 <= status < 500 and status not in RETRYABLE_STATUS
-    return f"{'rejected' if rejected else 'down'}:{type(error).__name__}"
+    return "rejected" if rejected else "down"
+
+
+def api_error_code(error: anthropic.APIError) -> str:
+    """`rejected:<Type>` or `down:<Type>`, by `status_kind`."""
+    return f"{status_kind(getattr(error, 'status_code', None))}:{type(error).__name__}"
 
 
 def build_client(settings: Settings) -> anthropic.AsyncAnthropic:

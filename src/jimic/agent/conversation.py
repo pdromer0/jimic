@@ -29,7 +29,7 @@ from jimic.agent.options import build_options
 from jimic.agent.tools import ToolContext, build_server
 from jimic.clock import Clock
 from jimic.config import Settings
-from jimic.heartbeat.decide import RETRYABLE_STATUS
+from jimic.heartbeat.decide import status_kind
 from jimic.heartbeat.sources import Sources
 from jimic.memory import conversations, system_notices, usage
 from jimic.memory.schemas import Limits
@@ -79,7 +79,8 @@ class Outcome:
 
 
 def usage_of(data: dict[str, Any] | None) -> TokenUsage:
-    """The tokens of a result, as the SDK reports them (cache writes split by TTL if it can)."""
+    """The tokens of a result, as the SDK reports them. Cache writes without their split by TTL
+    count as 5 minutes, the SDK's default (the heartbeat asks for 1 h, hence its opposite rule)."""
     data = data or {}
     split = data.get("cache_creation") or {}
     five, hour = split.get("ephemeral_5m_input_tokens"), split.get("ephemeral_1h_input_tokens")
@@ -155,12 +156,10 @@ async def run_once(run_agent: RunAgent, prompt: str, options: ClaudeAgentOptions
 
 
 def api_notice_detail(status: int | None) -> str:
-    """`rejected:` for a 4xx that will not go away by waiting, `down:` otherwise (as the
-    heartbeat says it, decision 1.8-c)."""
+    """`rejected:` or `down:`, with the same rule as the heartbeat (`status_kind`)."""
     if status is None:
         return "down:agent_unknown"
-    rejected = 400 <= status < 500 and status not in RETRYABLE_STATUS
-    return f"{'rejected' if rejected else 'down'}:agent_http_{status}"
+    return f"{status_kind(status)}:agent_http_{status}"
 
 
 class Conversation:
