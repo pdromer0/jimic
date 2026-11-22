@@ -65,7 +65,17 @@ class Declined:
     result: str
 
 
-type HandlerOutcome = str | Failed | Renew | Declined
+@dataclass(frozen=True)
+class Show:
+    """A text to send after the tap (task 1.12: a section of `/memoria`, or the notice of a task
+    recreated by `/deshacer`). With `result` the item is resolved with it; without, it goes back
+    to pending, so its button can be pressed again."""
+
+    text: str
+    result: str | None = None
+
+
+type HandlerOutcome = str | Failed | Renew | Declined | Show
 type TapHandler = Callable[[Item, str, int], Awaitable[HandlerOutcome]]
 """Called with the item, the key of the option chosen and the id of its approval."""
 
@@ -76,6 +86,8 @@ class TapResult:
 
     code: str
     view: View | None = None
+    send: tuple[str, ...] = ()
+    """Texts to send after editing the message (`Show`), in the order of the items."""
 
 
 def failure_note(code: str) -> str:
@@ -99,13 +111,17 @@ def _apply(message: InteractiveMessage, outcomes: dict[int, tuple[str, HandlerOu
     for index, (option, outcome) in outcomes.items():
         if isinstance(outcome, str):
             done[index] = Outcome(option, outcome)
+        elif isinstance(outcome, Show) and outcome.result is not None:
+            done[index] = Outcome(option, outcome.result)
         elif isinstance(outcome, Declined):
             declined = _declined_option(message.items[index])
             if declined is not None:
                 done[index] = Outcome(declined, outcome.result)
     updated = resolve(message, done)
     for index, (_, outcome) in outcomes.items():
-        if isinstance(outcome, Declined) and index not in done:
+        if isinstance(outcome, Show) and index not in done:
+            updated = release(updated, index, updated.items[index])
+        elif isinstance(outcome, Declined) and index not in done:
             # Nothing to resolve it with that is not a yes: it stays pending with the note.
             item = updated.items[index].model_copy(update={"note": clip_result(outcome.result)})
             updated = release(updated, index, item)
@@ -164,13 +180,20 @@ async def process_tap(
     if not store.save(conn, approval.id, updated, final_status(updated), now):
         return TapResult("not_pending")
     logger.info("approval %d: %d of %d item(s) done", approval.id, done, len(chosen))
-    if done == len(chosen):
+    texts = tuple(
+        outcome.text for _, (_, outcome) in sorted(outcomes.items()) if isinstance(outcome, Show)
+    )
+    if any(
+        isinstance(outcome, Show) and outcome.result is None for _, outcome in outcomes.values()
+    ):
+        code = "shown"
+    elif done == len(chosen):
         code = "resolved"
     elif any(isinstance(outcome, Failed) for _, outcome in outcomes.values()):
         code = "partially_resolved" if done else "handler_failed"
     else:
         code = "renewed"
-    return TapResult(code, render(updated, approval.id))
+    return TapResult(code, render(updated, approval.id), texts)
 
 
 def _expire(

@@ -1,5 +1,6 @@
 """What the Telegram channel calls with Pedro's text (task 1.11).
 
+0. `/memoria` and `/deshacer` are answered by the code (`commands.py`), never by the agent.
 1. A written «sí» that confirms a deletion (`confirm.py`) is executed by the code, through the
    same path as its button, and never reaches the agent.
 2. Anything else goes to the conversation. If the run proposed something, the answer goes as one
@@ -27,6 +28,7 @@ from jimic.channel.message import Tap
 from jimic.channel.taps import Failed, failure_note, process_tap
 from jimic.clock import Clock
 from jimic.execution import confirm
+from jimic.execution.commands import Commands, command_of
 from jimic.execution.execute import Executor
 from jimic.execution.immediate import runs_now
 from jimic.execution.memory_message import DROPPED_TEXT, MEMORY_KIND, memory_message
@@ -52,7 +54,9 @@ class Assistant:
         conn: sqlite3.Connection,
         clock: Clock,
         timezone: ZoneInfo,
+        commands: Commands | None = None,
     ) -> None:
+        self._commands = commands
         self._conversation = conversation
         self._executor = executor
         self._conn = conn
@@ -60,6 +64,9 @@ class Assistant:
         self._timezone = timezone
 
     async def reply(self, incoming: Incoming) -> str | Reply:
+        command = command_of(incoming.text)
+        if command is not None and self._commands is not None:
+            return await self._commands.reply(command)
         found = confirm.target(self._conn, self._clock.now(), incoming)
         if found is not None:
             return await self._confirm(found)

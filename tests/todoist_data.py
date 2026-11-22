@@ -185,7 +185,13 @@ class FakeTodoistApi:
         due_datetime: datetime | None = None,
         duration: int | None = None,
         duration_unit: Literal["minute", "day"] | None = None,
+        labels: list[str] | None = None,
+        priority: int | None = None,
+        auto_parse_labels: bool | None = None,
     ) -> Task:
+        extra: dict[str, Any] = {}
+        if labels is not None or priority is not None or auto_parse_labels is not None:
+            extra = {"labels": labels, "priority": priority, "auto_parse_labels": auto_parse_labels}
         self.record(
             "add_task",
             content=content,
@@ -195,6 +201,7 @@ class FakeTodoistApi:
             due_datetime=due_datetime,
             duration=duration,
             duration_unit=duration_unit,
+            **extra,
         )
         await self.wait()
         self._next_id += 1
@@ -209,6 +216,8 @@ class FakeTodoistApi:
             duration=None if self.free_plan else duration,
             description=description or "",
         )
+        raw["labels"] = list(labels or [])
+        raw["priority"] = priority or 1
         self.tasks.append(raw)
         return Task.from_dict(raw)
 

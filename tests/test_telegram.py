@@ -44,6 +44,7 @@ from jimic.channel.message import (
     Option,
     claim,
 )
+from jimic.channel.taps import Show
 from jimic.memory.database import open_database
 
 NOW = datetime(2026, 11, 21, 19, 0, tzinfo=ZoneInfo("Europe/Madrid"))
@@ -783,6 +784,22 @@ def test_los_mensajes_de_mas_salen_despues_sin_cuerpo(make_channel, request_doub
     assert second["text"].startswith("<b>Plan de prueba</b>")
     kinds = conn.execute("SELECT kind FROM approvals ORDER BY id").fetchall()
     assert kinds == [("demo",), ("memory",)]
+
+
+def test_un_toque_que_muestra_envia_su_texto_tras_editar(conn, clock, request_double, make_channel):
+    """`Show` (tarea 1.12): el despliegue de `/memoria` o el aviso de una tarea recreada."""
+
+    async def shows(item, option, approval_id):
+        return Show("El texto de <rutina.md>")
+
+    application = build_application(TOKEN, request_double)
+    channel = TelegramChannel(application, CHAT_ID, conn, clock, handlers={"demo": shows})
+    approval_id = send_and_drive(channel, application)
+    request_double.calls.clear()
+    drive(application, callback_update(f"{approval_id}:1:y", message_id=77))
+    assert request_double.methods() == ["editMessageText", "answerCallbackQuery", "sendMessage"]
+    (params,) = request_double.params("sendMessage")
+    assert params["text"] == "El texto de &lt;rutina.md&gt;"
 
 
 def test_si_no_caben_juntos_el_texto_sale_antes_y_la_propuesta_sin_cuerpo(

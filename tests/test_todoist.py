@@ -37,7 +37,8 @@ LOGGER = "jimic.tools.todoist"
 NOW = madrid("2030-01-07 09:00")
 
 READ_MEMBERS = {"read_today", "read_project", "get_task", "get_photo"}
-WRITE_MEMBERS = {"create", "move", "complete", "delete"}
+WRITE_MEMBERS = {"create", "move", "complete", "delete", "recreate"}
+"""Las cuatro de la 1.5 y `recreate`, el /deshacer de un borrado (tarea 1.12)."""
 
 
 def make_reader(api: FakeTodoistApi) -> ApiTodoistReader:
@@ -69,7 +70,7 @@ def test_el_lector_no_tiene_ninguna_funcion_que_escriba():
         assert public_members(cls) == READ_MEMBERS, cls
 
 
-def test_el_escritor_tiene_las_cuatro_funciones_y_ninguna_de_lectura():
+def test_el_escritor_tiene_sus_cinco_funciones_y_ninguna_de_lectura():
     for cls in (TodoistWriter, ApiTodoistWriter, todoist.GuardedWriter):
         assert public_members(cls) == WRITE_MEMBERS, cls
 

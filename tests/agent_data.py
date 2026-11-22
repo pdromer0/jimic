@@ -53,6 +53,9 @@ class SpyWriter:
     async def delete(self, *args: Any, **kwargs: Any) -> None:
         self._record("delete")
 
+    async def recreate(self, *args: Any, **kwargs: Any) -> Any:
+        self._record("recreate")
+
 
 def agent_sources(tasks: TaskList | None = None, writer: SpyWriter | None = None) -> Sources:
     """The fixed sources of the heartbeat, with a spy as the writer of Todoist."""

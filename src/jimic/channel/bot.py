@@ -361,6 +361,8 @@ class TelegramChannel:
         if result.view is not None:
             await self._edit(query.message.message_id, result.view)
         await self._answer(query.id, self._toast(result.code))
+        for text in result.send:
+            await self._send_chunks(text)
 
     @staticmethod
     def _toast(code: str) -> str | None:
