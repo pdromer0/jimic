@@ -627,12 +627,15 @@ Los nodos morados son los únicos que razonan; todo lo demás es código determi
    falla, el ciclo acaba aquí **sin llamar al modelo** ni leer las tareas y APEX.
 3. **Estado del día** (código): hora, agenda, tareas, entreno previsto, avisos de hoy, mensajes que
    quedan e intenciones activas.
-4. **Decisión** (Haiku): `{hablar, intención, motivo, mensaje, botones}`. Si hace falta razonar o
-   usar herramientas, pasa el turno al agente.
+4. **Decisión** (Haiku): `{hablar, motivo, elegidas}`, hasta 3 intenciones, cada una con su mensaje
+   (decisión 92). Si hace falta razonar o usar herramientas (el plan, el cierre), pasa el turno al
+   agente (decisión 94).
 5. **Límites, segunda pasada** (código): tope por intención (el plan y el cierre, uno al día; cada
    aviso, uno al día y en sus días; una tarea clave, `min(max_per_day, max_insist_per_task)`), no
-   repetir lo que agotó su tope, el hueco del cierre (decisión 78) y agrupar (decisión 79). Esta
-   pasada **garantiza** los límites, decida lo que decida el modelo, y da siempre un motivo en código.
+   repetir lo que agotó su tope, el hueco del cierre (decisión 78), agrupar (decisiones 79 y 93) y
+   esperar mientras Pedro conversa (decisión 91). Lo elegido en un latido sale en un solo mensaje
+   (decisión 92). Esta pasada **garantiza** los límites, decida lo que decida el modelo, y da siempre
+   un motivo en código.
 6. **Guardia**: libre, con botón o bloqueado (6.5).
 7. **Salida**: Telegram; se registran la decisión con su motivo y el aviso.
 8. **Pulsaciones**: un botón con acción predefinida («A las 11:00») lo resuelve el código, sin
@@ -888,6 +891,7 @@ max_messages_per_day: 8        # tope de mensajes proactivos al día
 quiet_hours: {from: "23:00", to: "07:00"}   # horas de silencio
 silent_during_events: true     # nada proactivo durante eventos del calendario
 group_window: 30m              # agrupa los avisos que caen a menos de 30 min
+quiet_while_chatting: 10m      # mientras Pedro conversa, los avisos esperan (decisión 91)
 max_insist_per_task: 3         # avisos por tarea clave y día
 max_deletions_per_day: 5       # borrados de tareas al día (decisión 56)
 budget:                        # presupuesto en dólares (sección 10.3)
@@ -921,6 +925,10 @@ del agente (decisión 55).
 | `day_ratings` | La valoración del 1 al 5 | Revisión semanal | 1 año |
 | `plan_items` | Cada tarea del plan confirmado: hecha, «la haré», pendiente o movida, y si se marcó antes de su hora (decisiones 62 y 68) | Cierre del día; «plan cumplido», calculado a la mañana siguiente | 1 año |
 | `deleted_tasks` | La foto de cada tarea borrada (contenido, fecha, proyecto, etiquetas, motivo, aprobación) | `/deshacer` de un borrado (decisión 56) | 30 días |
+| `model_usage` | Cada llamada al modelo: día, modelo, tokens y dólares (tarea 1.8) | El contador de gasto (10.3) | 1 año |
+| `system_notices` | Cada aviso del sistema: tipo, periodo, un código y los momentos (decisión 86) | Uno por tipo y día (el del presupuesto, al mes) | 1 año |
+| `handovers` | Cada plan o cierre que el latido pasa al agente: intención y momento (decisión 94) | Que cuente como atendido hoy | 90 días |
+| `conversations` | La conversación de cada día: el identificador de la sesión del SDK, la hora del último mensaje de Pedro y si la sesión leyó contenido externo (decisiones 89 a 91) | Reanudar la sesión del día; esperar mientras Pedro conversa; la regla de origen | 7 días |
 
 La **conversación** la guarda el Agent SDK como sesión; JimiC solo anota el identificador de la
 sesión de cada día. Sus transcripciones locales se borran a los 7 días (decisión 23).
@@ -1014,7 +1022,7 @@ ni instalar Claude Code aparte (salvo en Windows ARM64). Eso obliga a cuatro aju
 | `setting_sources=[]` | Que JimiC herede los ajustes, el `CLAUDE.md`, los permisos o los hooks del Claude Code de Pedro si comparten máquina |
 | Solo las herramientas de JimiC, como servidor MCP dentro del proceso; las de serie, fuera | Que el agente pueda ejecutar comandos o escribir ficheros (decisión 15, regla 2) |
 | La guardia en un hook `PreToolUse` que consulta la tabla de niveles de `limites.yaml` | `allowed_tools` no limita el agente a esas herramientas y `can_use_tool` solo se llama cuando una llamada acaba en «preguntar»; el hook ve **todas** las llamadas |
-| `ANTHROPIC_API_KEY` en el entorno del proceso | El SDK no admite el login de claude.ai en productos propios; con la clave, el cerebro va bajo condiciones comerciales (decisión 21) |
+| `ANTHROPIC_API_KEY` en el `env` de las opciones (no en el del proceso, que JimiC no toca: solo lee su `.env`), con `ANTHROPIC_BASE_URL` explícita | El SDK no admite el login de claude.ai en productos propios; con la clave, el cerebro va bajo condiciones comerciales (decisión 21) |
 
 Dos ajustes más, para que el agente no cargue nada que no sea suyo (decisión 30):
 
@@ -1022,6 +1030,16 @@ Dos ajustes más, para que el agente no cargue nada que no sea suyo (decisión 3
 | --- | --- |
 | `CLAUDE_CONFIG_DIR` propio de JimiC y `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` en `env` | La memoria automática de Claude Code se carga aunque `setting_sources=[]`; y las transcripciones quedan en una carpeta de JimiC, donde se aplica el plazo de 7 días (decisión 23) |
 | `max_turns` en cada sesión | Una sesión no caduca sola: el tope de vueltas acota un bucle de herramientas y su coste |
+
+Y, de la tarea 1.10, cuatro más con su test (la orden que construye el SDK instalado lleva
+`--tools ""` y `--setting-sources=`; el contrato del 22-nov-2026 vio solo las seis herramientas):
+
+| Ajuste | Qué evita |
+| --- | --- |
+| `tools=[]` | Las herramientas de serie (Bash, Read, Edit…): el agente solo tiene las seis de JimiC |
+| `allowed_tools` con las seis y `permission_mode="dontAsk"` | Que algo no aprobado se ejecute: se deniega sin preguntar, hasta el hook de la 1.11 |
+| `strict_mcp_config=True` | Cargar otros servidores MCP de la máquina |
+| `stderr` con un manejador que descarta, `max_turns=12` y `max_budget_usd=max_session_usd` en cada ejecución | Que la salida de error del motor, que puede llevar contenido, acabe en la del servicio; un bucle o un gasto sin tope |
 
 ### 9.3 Despliegue
 
@@ -1124,7 +1142,7 @@ Estimación con los precios del 17-nov-2026 (anexo B) y la caché donde aplica (
 | Latido | Haiku | 64 decisiones al día; 3.000 tokens fijos en caché de 1 h y 1.500 del estado del día. Medido en la 1.8 (contrato del 21-nov-2026): 1.668 fijos, ~800 de estado y ~500 de salida con el pensamiento, unos 0,00035 $ por llamada con la caché leída; unos 0,022 $ el día de ejemplo de 60 llamadas | ~0,5–0,7 (~1 sin caché) |
 | Plan del día | Sonnet | 6 vueltas con herramientas; ~0,08 $ cada uno | ~2,5 |
 | Cierre del día | Haiku | 1 al día | < 0,1 |
-| Conversación | Sonnet | ~0,04 $ por mensaje (contexto de unos 15.000 tokens, caché de 5 min) | 6,4 / 12,8 / 25,7 con 5 / 10 / 20 mensajes al día |
+| Conversación | Sonnet | ~0,04 $ por mensaje (contexto de unos 15.000 tokens, caché de 5 min). Medido en la 1.10 (contrato del 22-nov-2026): ~0,010 $ por mensaje corto al empezar la sesión, con ~3.800 tokens fijos (prompt y herramientas); crece con la conversación del día | 6,4 / 12,8 / 25,7 con 5 / 10 / 20 mensajes al día |
 | **Total** | | uso ligero / normal / intenso | **~9 / ~16 / ~29** |
 | Puesta en marcha | Sonnet | Una sola vez, unos 40 turnos | ~1,7 |
 | Desarrollo y evaluaciones | Ambos | Mientras dure el H1, en `jimic-dev` | ~5–15 |
@@ -1453,6 +1471,13 @@ cuando haya casos reales de sobra y si Pedro lo considera necesario; exige evalu
 | 86 | Avisos del sistema fuera del cupo, con freno (1.8-c): API de Anthropic caída, fuente no disponible (con el comando si es `auth` del calendario) y el aviso del presupuesto (`warn_at` de `monthly_target_usd`). Texto fijo del código, sin Haiku; como mucho uno por tipo y día local, el del presupuesto uno al mes; respetan `quiet_hours` y, si caen en silencio, esperan al primer latido fuera de él ese mismo día (uno diario que sigue esperando al día siguiente ya no sale). No van a `notices`: su registro es `system_notices`, sin texto | Que Pedro sepa que JimiC va a medio gas sin que eso le quite mensajes ni le despierte. Decisión de Pedro del 21-nov-2026; la caducidad al cambiar de día, del plan aprobado de la tarea 1.8 | — |
 | 87 | La caché del bloque fijo del latido es de 1 h, no de 5 min | Con latidos cada 15 min, la de 5 min caduca antes de cada llamada: todas escriben (1,25×) y ninguna lee, y sale más cara que sin caché (0,033 $/día frente a 0,030). Con 1 h, unos 0,02 $/día. Del plan aprobado de la tarea 1.8 | — |
 | 88 | La salida estructurada del latido usa `messages.create` con el esquema de Pydantic (`anthropic.transform_schema`) en `output_config.format` y se valida en el código, no con `messages.parse` | En `anthropic` 2.12.0, `messages.parse` valida dentro de la llamada y, si la respuesta no encaja (una negativa, un corte por `max_tokens`), lanza y pierde el uso: el contador dejaría de sumar cada llamada. Decisión de Pedro del 21-nov-2026, en la tarea 1.8 | — |
+| 89 | Una conversación por día (1.10-a): todo lo que Pedro habla con JimiC un día local va en la misma sesión del Agent SDK, que cada mensaje **reanuda**; al día siguiente empieza otra. JimiC anota el identificador de la sesión del día en `conversations` (7 días). `max_session_usd` y `max_turns` se aplican a cada ejecución (cada mensaje); el día lo limita `daily_cap_usd`. Lo que deba durar más irá a la memoria (1.12) | Una conversación con el contexto del día, sin arrastrar la de ayer. Decisión de Pedro del 22-nov-2026, en la tarea 1.10 | — |
+| 90 | Una propuesta del agente se enseña como texto y se guarda, sin botones (1.10-b): `propose_plan` y `propose_change` la guardan como datos en `approvals` (`kind` `plan` o `memory_change`, caduca al acabar el día) y no ejecutan nada; el agente la cuenta como lista numerada. Un plan lleva de 1 a 8 elementos (una fila de botones cada uno en la 1.11); mover y borrar guardan la foto de la tarea (título, fecha y proyecto) que lee el código al guardar, para la regla de H1-2; crear va a la bandeja de entrada (en `dev`, la guardia lo manda al proyecto de pruebas). `propose_change` guarda si la sesión del día ya leyó el calendario o las tareas (`after_external_content`), para la regla de origen de la 1.12 | Las mismas aprobaciones ganan botones y ejecución en la 1.11. Decisión de Pedro del 22-nov-2026; el tope de 8, la foto y la marca por sesión, de la revisión del plan de la 1.10 | — |
+| 91 | Mientras Pedro conversa, el latido espera (1.10-c): si escribió hace menos de `quiet_while_chatting` (`limites.yaml`, 10m de serie, `0m` lo apaga), un `notice` espera como en la ventana de agrupar y la cola no se suelta; lo urgente (`key_task`, plan, cierre) sale solo, sin arrastrar la cola. Subir el valor es más discreto | No interrumpir una conversación con un aviso que puede esperar. Decisión de Pedro del 22-nov-2026 | — |
+| 92 | Hasta 3 intenciones por latido, en un solo mensaje (1.8-d; revisa la 9): la decisión de Haiku lleva `picks` (de 0 a 3, cada uno con `intent` y `message`); un elemento repetido, inactivo, sin mensaje o demasiado largo cae solo, con su código; más de 3, o ninguno válido, es `invalid_decision`. `decisions` sigue con una fila por latido y la lista de intenciones separada por comas. Lo que sale en un latido va en **un mensaje**, un bloque por intención, que cuenta 1 en el cupo; lo que no cabe en 4096 (UTF-16) vuelve a la cola. Las plantillas de la API caída siguen la misma regla | Varias intenciones a la misma hora salían escalonadas. Decisión de Pedro del 22-nov-2026, en la tarea 1.10 | — |
+| 93 | Revisa la 79: con la ventana de agrupar cumplida, lo que espera sale con el urgente del latido en un solo mensaje, en vez de seguir esperando; con la ventana sin cumplir, o mientras Pedro conversa (91), sale el urgente solo y la cola espera | Un latido, un mensaje (92). Aceptada por Pedro en la revisión del plan de la 1.10 (22-nov-2026) | — |
+| 94 | El plan y el cierre que Haiku elige cuentan como atendidos hoy aunque aún no se envíen (1.8-b): la segunda pasada los pasa al agente (veredicto `handover`, con su tope por intención y el cupo, que no gastan), el latido llama a un enganche inyectado (en la 1.10 solo escribe en el log; lo rellenan la 1.14 y la 1.16) y los anota en `handovers` (90 días). El tope por intención cuenta la **unión** de `notices` y `handovers`, nunca su suma; el cupo y el hueco del cierre miran solo lo enviado | En la prueba real de la 1.8, el plan, que seguía «sin enviar», tapaba a los demás avisos en cada latido de su ventana. Primer añadido de la 1.10 (22-nov-2026); la unión, de la revisión del plan | — |
+| 95 | El aviso del presupuesto que se detecta al llegar al tope diario (o tras una ejecución del agente) lo manda el latido siguiente, como el resto de avisos del sistema; Pedro recibe al momento la frase fija del tope | Un solo sitio que envía los avisos del sistema y respeta el silencio. Aceptada por Pedro en la revisión del plan de la 1.10 (22-nov-2026) | — |
 
 ### Correspondencia con las decisiones candidatas de la referencia
 
@@ -1522,7 +1547,8 @@ P1, P2 y P6 (decisión 42), P3 (decisión 43), P4 (decisión 44), P5 (decisión 
 | --- | --- | --- |
 | La API de WhatsApp Business prohíbe a los proveedores de IA distribuir asistentes de propósito general; en vigor desde el 15/01/2026. Los bots de atención al cliente no se ven afectados | 16-nov-2026 | TechCrunch (18/10/2025, actualizado el 15/01/2026); 9to5Mac (20/10/2025) |
 | Precios por millón de tokens. Haiku 5.5 (prompts ≤ 100.000 tokens): 0,10 $ entrada, 0,50 $ salida, 0,01 $ lectura de caché. Sonnet 5.5: 2 $ / 10 $, caché 0,10 $. Opus 5.5: 4 $ / 20 $. Batch: 50 % | 16-nov-2026 | platform.claude.com/docs/en/about-claude/pricing |
-| Precios de Haiku 5.5 y Sonnet 5.5, publicados el 7-oct-2026. Haiku 5.5, por millón de tokens y con prompts de hasta 100.000 tokens: entrada 0,10 $, salida 0,50 $, escritura de caché 0,125 $ (5 min) y 0,20 $ (1 h), lectura de caché 0,01 $; por encima de 100.000 tokens de prompt (entrada más caché), todo ×5, salida incluida. Sonnet 5.5: 2 $ y 10 $ (su caché la confirma la 1.10). Están en `jimic.memory.usage.PRICES` con su fecha | 19-nov-2026 | Página de precios de Anthropic |
+| Precios de Haiku 5.5 y Sonnet 5.5, publicados el 7-oct-2026. Haiku 5.5, por millón de tokens y con prompts de hasta 100.000 tokens: entrada 0,10 $, salida 0,50 $, escritura de caché 0,125 $ (5 min) y 0,20 $ (1 h), lectura de caché 0,01 $; por encima de 100.000 tokens de prompt (entrada más caché), todo ×5, salida incluida. Sonnet 5.5: 2 $ y 10 $. Están en `jimic.memory.usage.PRICES` con su fecha | 19-nov-2026 | Página de precios de Anthropic |
+| Sonnet 5.5, caché: escritura 2,50 $ (5 min) y 4 $ (1 h), lectura 0,10 $ (0,05× la entrada); sin recargo por prompts largos (el contexto de 1M va a precio normal). En `PRICES` | 22-nov-2026 | platform.claude.com/docs/en/about-claude/pricing |
 | Agent SDK (Python): herramientas propias dentro del proceso con `@tool` y `create_sdk_mcp_server`; hooks como `PreToolUse`; control de permisos de herramientas | 16-nov-2026 | Repositorio y README de `claude-agent-sdk-python`; code.claude.com/docs/en/agent-sdk/custom-tools |
 | Anthropic: bajo condiciones comerciales (API, Team, Enterprise) no entrena con los datos salvo que el cliente lo autorice; retención estándar de 30 días. Consumo (Free, Pro, Max): con la mejora de modelos activada, entrenamiento y 5 años; desactivada, 30 días | 16-nov-2026 | code.claude.com/docs/en/data-usage |
 | Claude Code guarda las transcripciones de sesión en texto plano en `~/.claude/projects/` durante 30 días por defecto (`cleanupPeriodDays`); métricas desactivables con `DISABLE_TELEMETRY=1` o `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` | 16-nov-2026 | code.claude.com/docs/en/data-usage |
@@ -1557,6 +1583,7 @@ P1, P2 y P6 (decisión 42), P3 (decisión 43), P4 (decisión 44), P5 (decisión 
 | Dependabot: actualizaciones de versión con uv desde marzo de 2025 y de seguridad desde diciembre de 2025; hooks de pre-commit desde el 10-mar-2026; actualizaciones agrupadas y `cooldown` | 17-nov-2026 | github.blog (changelog); docs.astral.sh/uv (Dependabot); pydevtools.com |
 | GitHub Actions: por defecto, los PR desde *forks* de quien contribuye por primera vez exigen aprobación; tras un PR fusionado, ya no. Opción «Require approval for all external contributors» | 17-nov-2026 | docs.github.com (ajustes de Actions del repositorio y aprobación de workflows desde *forks*) |
 | `claude-agent-sdk`: licencia MIT; su uso se rige además por las condiciones comerciales de Anthropic; trae el binario de Claude Code dentro | 17-nov-2026 | PyPI |
+| `claude-agent-sdk` 0.2.187 (20-nov-2026), con `mcp` 2.3.0: `tools=[]` pasa `--tools ""` (fuera todas las de serie); `setting_sources=[]` pasa `--setting-sources=`; `permission_mode` admite `dontAsk`; `env` se fusiona sobre el entorno del proceso; sin un `stderr` propio, la salida de error del motor va a la del proceso; `ResultMessage` trae `session_id`, `total_cost_usd`, `usage` y `api_error_status`, y un resultado fallido acaba en `ResultError`; `resume` reanuda la misma sesión. En su carpeta (`CLAUDE_CONFIG_DIR`) escribe la transcripción en `projects/`, `.claude.json` (identificadores y contadores), sus copias en `backups/`, `policy-limits.json*`, `remote-settings.json*` y `plugins/store/` | 22-nov-2026 | Código instalado y contrato de la tarea 1.10 |
 | API de Todoist v1: `DELETE /api/v1/tasks/{id}` borra la tarea para siempre, sin papelera; cerrar (`/close`) una tarea con fecha recurrente la pasa a la siguiente vez en lugar de completarla. Confirmado en el contrato de la tarea 1.5 (19-nov-2026): cerrar una recurrente la deja activa en la fecha siguiente, y borrar una tarea padre borra también sus subtareas | 18-nov-2026 (confirmado el 19-nov-2026) | Fuentes secundarias: kestra.io (plugin de Todoist), withone.ai (referencia de la API v1); contrato de la tarea 1.5 con el proyecto de pruebas |
 | Gmail API: con el permiso `gmail.metadata`, `messages.get` solo devuelve ID, etiquetas y cabeceras, y los formatos `full` y `raw` dan error; según una guía de terceros, tampoco permite la búsqueda (`q`). Las apps sin verificar con menos de 100 usuarios no tienen restricciones de acceso a Gmail | 18-nov-2026 | Referencia de `google-api-python-client` (gmail v1); Stack Overflow; medium.com (Nat); support.google.com/a/answer/9352843 |
 | Versiones: `pydantic-settings` 2.16.3 (13-nov-2026; `Requires-Python >=3.11`; depende de `pydantic>=2.7.0` y `python-dotenv>=1.2.2`), `pydantic` 2.14.3 (4-nov-2026), `python-dotenv` 1.2.4 (1-oct-2026) | 19-nov-2026 | Páginas de PyPI de cada paquete |
