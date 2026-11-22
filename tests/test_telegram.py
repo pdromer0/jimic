@@ -800,7 +800,7 @@ def test_si_telegram_rechaza_lo_hecho_sale_su_texto_sin_boton(make_channel, requ
     channel, application = make_channel(on_text=on_text)
     drive(application, text_update("hola"))
     texts = [params["text"] for params in request_double.params("sendMessage")]
-    assert texts[-1] == "✅ Hecho: x"
+    assert texts == ["Hecho", "✅ Hecho: x"]  # el primero lo rechazó Telegram
     assert conn.execute("SELECT COUNT(*) FROM approvals").fetchone() == (0,)
 
 
@@ -871,3 +871,29 @@ def test_si_pedro_escribio_despues_del_ultimo_envio_el_si_no_responde_a_ese(make
 
     asyncio.run(scenario())
     assert [incoming.last_sent for incoming in seen] == [10, None]
+
+
+def test_si_telegram_rechaza_la_propuesta_la_respuesta_del_agente_llega_igual(
+    make_channel, request_double, conn
+):
+    """Hallazgo 6 de la revisión: la respuesta iba solo en el cuerpo de la propuesta; si
+    Telegram la rechaza, Pedro no recibía nada."""
+    original = request_double.do_request
+    state = {"first": True}
+
+    async def first_fails(url, method, request_data=None, **timeouts):
+        if url.endswith("/sendMessage") and state["first"]:
+            state["first"] = False
+            body = {"ok": False, "error_code": 400, "description": "Bad Request: inventado"}
+            return 400, json.dumps(body).encode()
+        return await original(url, method, request_data, **timeouts)
+
+    request_double.do_request = first_fails
+
+    async def on_text(incoming: Incoming) -> Reply:
+        return Reply("Te propongo esto", Outgoing("demo", make_message(), EXPIRES))
+
+    channel, application = make_channel(on_text=on_text)
+    drive(application, text_update("hola"))
+    texts = [params["text"] for params in request_double.params("sendMessage")]
+    assert texts[-1] == "Te propongo esto"

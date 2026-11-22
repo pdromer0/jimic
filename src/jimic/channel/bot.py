@@ -437,13 +437,17 @@ class TelegramChannel:
 
     async def _send_outgoing(self, text: str | None, outgoing: Outgoing) -> None:
         """The answer as the body of the interactive message; if together they do not fit, the
-        answer goes first on its own and the message after it, without a body."""
+        answer goes first on its own and the message after it, without a body. If Telegram
+        refuses the message, the answer still goes as plain text (it was only in the body), and
+        then `if_unsent`, if any."""
         message = outgoing.message
+        answer_in_body = False
         if text is not None and text.strip():
             with_body = message.model_copy(update={"body": text.strip()})
             try:
                 ensure_fits(with_body)
                 message = with_body
+                answer_in_body = True
             except MessageTooLong:
                 if not await self._send_chunks(text):
                     return
@@ -451,6 +455,8 @@ class TelegramChannel:
             await self.send(outgoing.kind, message, outgoing.expires_at)
         except (SendError, MessageTooLong) as error:
             logger.error("interactive reply not sent (%s)", _code(error))
+            if answer_in_body and text is not None:
+                await self._send_chunks(text)
             if outgoing.if_unsent is not None:
                 await self._send_chunks(outgoing.if_unsent)
 
