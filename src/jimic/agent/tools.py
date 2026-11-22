@@ -6,8 +6,13 @@ memory files (H1-1). The context has the readers, never the writer of Todoist.
 
 A tool never raises: a source that is down gives its code, a wrong argument a message for the
 agent and anything unexpected `unexpected:<Type>`, all as an error result the agent reads.
-Reading the calendar or the tasks marks today's session as having read external content, which
-the origin rule of task 1.12 needs.
+Reading the calendar or the tasks marks today's session as having read external content (the
+origin rule of task 1.12, and the guard of `log_idea`) and marks this run (`RunState`), which
+decides whether a proposal may run at once (decision 1.11-b).
+
+`propose_plan` does not save anything: it adds its items to the run, and the code shows them
+under the agent's answer when the run ends (decision 1.11-a). Several calls in one run add up,
+eight items at most and each task once.
 
 What the tools get and return (titles, ideas, proposals) never reaches a log: only the name of
 the tool and a code.
@@ -19,7 +24,7 @@ import logging
 import os
 import sqlite3
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
 from typing import Any
@@ -30,7 +35,7 @@ from pydantic import BaseModel, ValidationError
 
 from jimic.agent.proposals import (
     CHANGE_KIND,
-    PLAN_KIND,
+    MAX_PLAN_ITEMS,
     DeleteItem,
     MemoryChange,
     MoveItem,
@@ -39,6 +44,7 @@ from jimic.agent.proposals import (
     save_proposal,
 )
 from jimic.clock import Clock
+from jimic.execution.rules import FOR_THE_AGENT, refusal
 from jimic.heartbeat.sources import Sources
 from jimic.memory import conversations
 from jimic.tools.apex import ApexReader
@@ -64,9 +70,22 @@ def model_name(name: str) -> str:
     return f"mcp__{SERVER_NAME}__{name}"
 
 
+@dataclass
+class RunState:
+    """One run of the agent (one message of Pedro): what it read and what it proposed."""
+
+    contaminated: bool = False
+    """It called `read_calendar` or `read_tasks` (condition 2 of decision 1.11-b)."""
+    items: list[dict[str, Any]] = field(default_factory=list)
+    """The items proposed with `propose_plan`, as data, with their snapshot."""
+    requested_by_pedro: bool = True
+    """Every `propose_plan` of the run said Pedro asked for it; meaningless without items."""
+
+
 @dataclass(frozen=True)
 class ToolContext:
-    """What the tools may use. `day` is the local day of the session they serve."""
+    """What the tools may use. `day` is the local day of the session they serve; `run` is the
+    state of the run they serve (one per message of Pedro)."""
 
     calendar: CalendarReader
     tasks: TodoistReader
@@ -76,6 +95,7 @@ class ToolContext:
     timezone: ZoneInfo
     config_dir: Path
     day: date
+    run: RunState = field(default_factory=RunState)
 
     @classmethod
     def of(
@@ -86,6 +106,7 @@ class ToolContext:
         timezone: ZoneInfo,
         config_dir: Path,
         day: date,
+        run: RunState | None = None,
     ) -> ToolContext:
         """Only the reader of Todoist goes in: the writer stays out of the agent's reach."""
         return cls(
@@ -97,6 +118,7 @@ class ToolContext:
             timezone,
             config_dir,
             day,
+            run if run is not None else RunState(),
         )
 
 
@@ -162,6 +184,7 @@ def build_tools(ctx: ToolContext) -> list[SdkMcpTool[Any]]:
     """The tools of the table, exactly: nothing more."""
 
     def contaminated() -> None:
+        ctx.run.contaminated = True
         conversations.mark_external(ctx.conn, ctx.day)
 
     def today() -> date:
@@ -188,25 +211,48 @@ def build_tools(ctx: ToolContext) -> list[SdkMcpTool[Any]]:
 
     async def propose_plan(args: dict[str, Any]) -> Result:
         proposal = _validated(PlanProposal, args)
-        stored = []
+        run = ctx.run
+        if len(run.items) + len(proposal.items) > MAX_PLAN_ITEMS:
+            raise AgentInputError(
+                f"En esta respuesta ya hay {len(run.items)} elementos propuestos y el tope es"
+                f" {MAX_PLAN_ITEMS}: no se ha añadido nada"
+            )
+        already = {entry["task_id"] for entry in run.items if "task_id" in entry}
+        entries = []
         counts = {"create": 0, "move": 0, "delete": 0}
         for number, item in enumerate(proposal.items, start=1):
             entry = item.model_dump()
             if isinstance(item, MoveItem | DeleteItem):
+                if item.task_id in already:
+                    raise AgentInputError(
+                        f"El elemento {number}: esa tarea ya está propuesta en esta respuesta"
+                    )
                 task = await ctx.tasks.get_task(item.task_id)
                 if task is None:
                     raise AgentInputError(
                         f"El elemento {number}: la tarea {item.task_id} no existe"
                     )
+                if isinstance(item, DeleteItem):
+                    refused = refusal(task, today())
+                    if refused is not None:
+                        raise AgentInputError(f"El elemento {number}: {FOR_THE_AGENT[refused]}")
                 entry["snapshot"] = TaskSnapshot.of(task).model_dump()
-            stored.append(entry)
+            entries.append(entry)
             counts[item.action] += 1
-        approval = save_proposal(ctx.conn, ctx.clock, ctx.timezone, PLAN_KIND, {"items": stored})
-        logger.info("proposal %d saved (%s)", approval, PLAN_KIND)
+        run.items.extend(entries)
+        run.requested_by_pedro = run.requested_by_pedro and proposal.requested_by_pedro
+        logger.info(
+            "proposal noted: create %d, move %d, delete %d",
+            counts["create"],
+            counts["move"],
+            counts["delete"],
+        )
         return text_result(
-            f"Propuesta {approval} guardada: crear {counts['create']}, mover {counts['move']},"
-            f" borrar {counts['delete']}. No se ha ejecutado nada: cuéntasela a Pedro como"
-            " lista numerada."
+            f"Anotado: crear {counts['create']}, mover {counts['move']}, borrar"
+            f" {counts['delete']}. No se ha ejecutado nada. Debajo de tu respuesta el código"
+            " pondrá la lista exacta con sus botones, o «✅ Hecho» con [Deshacer] si Pedro lo"
+            " pidió y se puede hacer al momento. No repitas la lista ni anuncies resultados"
+            " («hecho», «creado», «te lo creo»): di solo lo que propones y por qué."
         )
 
     async def propose_change(args: dict[str, Any]) -> Result:

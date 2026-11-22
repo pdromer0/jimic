@@ -3,8 +3,9 @@
 The SDK runs the engine of Claude Code as a subprocess. These options keep out everything that
 is not JimiC's: the built-in tools (`tools=[]`), Pedro's settings, `CLAUDE.md`, permissions and
 hooks (`setting_sources=[]`), any other MCP configuration (`strict_mcp_config`), the automatic
-memory and the non-essential traffic. Only our six tools are allowed, and `dontAsk` denies
-whatever is not (a layer until the `PreToolUse` hook of task 1.11).
+memory and the non-essential traffic. Two layers decide each call: the `PreToolUse` hook of
+`guard.py` (task 1.11), which sees every call and denies what is not in the table or not `free`
+in `tool_levels`, and `allowed_tools` with only the `free` ones, where `dontAsk` denies the rest.
 
 The key goes in the `env` of the options, never in `os.environ`: JimiC only reads its `.env`.
 The options hold it, so they are never logged.
@@ -13,8 +14,9 @@ The options hold it, so they are never logged.
 from functools import cache
 from importlib.resources import files
 from pathlib import Path
+from typing import Any
 
-from claude_agent_sdk import ClaudeAgentOptions, McpSdkServerConfig
+from claude_agent_sdk import ClaudeAgentOptions, HookMatcher, McpSdkServerConfig
 
 from jimic.agent.tools import SERVER_NAME, model_name
 from jimic.config import Settings
@@ -48,17 +50,26 @@ def _discard(line: str) -> None:
     """The engine's stderr may carry content: it is read and dropped, never shown or logged."""
 
 
+def free_tools(limits: Limits) -> list[str]:
+    """The names the model sees of the tools that are `free` in `tool_levels`, in table order."""
+    levels = {str(name): level for name, level in limits.tool_levels.items()}
+    return [model_name(name) for name in TOOL_NAMES if levels.get(name) == "free"]
+
+
 def build_options(
     settings: Settings,
     limits: Limits,
     agent_dir: Path,
     server: McpSdkServerConfig,
     resume: str | None,
+    hooks: dict[Any, list[HookMatcher]],
 ) -> ClaudeAgentOptions:
-    """The options of one run; `resume` is today's session, if there is one."""
+    """The options of one run; `resume` is today's session, if there is one, and `hooks` the
+    guard of this run (`guard.guard_hooks`)."""
     return ClaudeAgentOptions(
         tools=[],
-        allowed_tools=[model_name(name) for name in TOOL_NAMES],
+        allowed_tools=free_tools(limits),
+        hooks=hooks,
         permission_mode="dontAsk",
         mcp_servers={SERVER_NAME: server},
         strict_mcp_config=True,

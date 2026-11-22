@@ -9,6 +9,7 @@ import asyncio
 import json
 import sqlite3
 from collections.abc import AsyncIterator
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -19,7 +20,7 @@ from claude_agent_sdk._internal.sdk_mcp_bridge import SdkMcpBridge
 from conftest import FixedClock
 from heartbeat_data import MADRID, calendar_with, event, madrid, sources, task
 
-from jimic.agent.tools import ToolContext
+from jimic.agent.tools import RunState, ToolContext
 from jimic.heartbeat.sources import Sources
 from jimic.memory.conversations import note_message
 from jimic.tools.todoist import TaskList, TodoistTools
@@ -68,6 +69,7 @@ def context(
     config_dir: Path,
     srcs: Sources | None = None,
     now: str = "2030-01-07T10:15",
+    run: RunState | None = None,
 ) -> ToolContext:
     """The tools of Monday's session; the day has its row, as the conversation writes it."""
     moment = madrid(now)
@@ -79,6 +81,7 @@ def context(
         MADRID,
         config_dir,
         moment.date(),
+        run,
     )
 
 
@@ -173,13 +176,58 @@ def result_message(
     )
 
 
+@dataclass(frozen=True)
+class ToolCall:
+    """A step of a script: the model calls a tool. `name` is ours (`read_tasks`) unless
+    `model_name` gives the exact name the model would send (one outside the table)."""
+
+    name: str
+    args: dict[str, Any] = field(default_factory=dict)
+    model_name: str | None = None
+
+
+@dataclass(frozen=True)
+class ToolOutcome:
+    name: str
+    denied: bool
+    text: str = ""
+    is_error: bool = False
+
+
 type Script = list[Any] | BaseException
+
+
+async def engine_call(options: ClaudeAgentOptions, call: ToolCall) -> ToolOutcome:
+    """What the engine does with a tool call: every `PreToolUse` hook of the options first, and
+    the tool through the MCP bridge only if none denies it."""
+    name = call.model_name or f"mcp__jimic__{call.name}"
+    data = {
+        "hook_event_name": "PreToolUse",
+        "session_id": "s",
+        "transcript_path": "/dev/null",
+        "cwd": "/",
+        "tool_name": name,
+        "tool_input": call.args,
+        "tool_use_id": "u1",
+    }
+    for matcher in (options.hooks or {}).get("PreToolUse", []):
+        for hook in matcher.hooks:
+            answer = await hook(data, "u1", {"signal": None})  # pyright: ignore[reportArgumentType] - the input as the engine sends it
+            specific = answer.get("hookSpecificOutput") or {}
+            if specific.get("permissionDecision") == "deny":
+                return ToolOutcome(name, denied=True)
+    if not name.startswith("mcp__jimic__") or not isinstance(options.mcp_servers, dict):
+        return ToolOutcome(name, denied=True)  # the engine has no such tool
+    server = options.mcp_servers["jimic"]
+    text, is_error = await call_tool(server, name.removeprefix("mcp__jimic__"), call.args)  # pyright: ignore[reportArgumentType] - an SDK server
+    return ToolOutcome(name, denied=False, text=text, is_error=is_error)
 
 
 class FakeAgent:
     """Stands in for `claude_agent_sdk.query`: records each run and yields its script (a list
-    of messages, or an error to raise after them). It has a cap, and a gate to keep a run
-    thinking."""
+    of messages, or an error to raise after them). A `ToolCall` in the script goes through the
+    hooks and the server of the options, as the engine would (`tool_outcomes` records it). It has
+    a cap, and a gate to keep a run thinking."""
 
     def __init__(self, *scripts: Script) -> None:
         self.scripts = list(scripts) or [[result_message()]]
@@ -187,6 +235,7 @@ class FakeAgent:
         self.gate: asyncio.Event | None = None
         self.active = 0
         self.most_active = 0
+        self.tool_outcomes: list[ToolOutcome] = []
 
     async def _run(self, prompt: str, options: ClaudeAgentOptions) -> AsyncIterator[Any]:
         self.runs.append((prompt, options))
@@ -203,6 +252,9 @@ class FakeAgent:
             for message in script:
                 if isinstance(message, BaseException):
                     raise message
+                if isinstance(message, ToolCall):
+                    self.tool_outcomes.append(await engine_call(options, message))
+                    continue
                 yield message
         finally:
             self.active -= 1

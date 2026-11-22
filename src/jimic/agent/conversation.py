@@ -1,6 +1,8 @@
 """The conversation with Pedro: one session of the Agent SDK per local day (decision 1.10-a).
 
-`Conversation.reply` takes what Pedro wrote and returns the answer. It notes the moment at once
+`Conversation.respond` takes what Pedro wrote and returns the answer with what the run proposed
+and whether it read external content (`Turn`); `reply` returns only the text. It notes the
+moment at once
 (decision 1.10-c, also while the message waits for its turn), then runs **one turn at a time**:
 a lock keeps the order in which the messages arrived. Each run resumes today's session, or
 starts one if there is none; tomorrow is another one.
@@ -25,8 +27,9 @@ from typing import Any
 from claude_agent_sdk import ClaudeAgentOptions, ClaudeSDKError, ResultError, ResultMessage, query
 from claude_agent_sdk.types import Message
 
+from jimic.agent.guard import guard_hooks
 from jimic.agent.options import build_options
-from jimic.agent.tools import ToolContext, build_server
+from jimic.agent.tools import RunState, ToolContext, build_server
 from jimic.clock import Clock
 from jimic.config import Settings
 from jimic.heartbeat.decide import status_kind
@@ -155,6 +158,15 @@ async def run_once(run_agent: RunAgent, prompt: str, options: ClaudeAgentOptions
     return outcome_of_result(result)
 
 
+@dataclass(frozen=True)
+class Turn:
+    """What a turn gives: the text for Pedro and, if the run ended well, its state (what it
+    proposed and whether it read external content). A run that fails proposes nothing."""
+
+    text: str
+    run: RunState | None = None
+
+
 def api_notice_detail(status: int | None) -> str:
     """`rejected:` or `down:`, with the same rule as the heartbeat (`status_kind`)."""
     if status is None:
@@ -190,6 +202,10 @@ class Conversation:
 
     async def reply(self, text: str) -> str:
         """The answer to `text`, which Pedro wrote just now."""
+        return (await self.respond(text)).text
+
+    async def respond(self, text: str) -> Turn:
+        """The turn for `text`, which Pedro wrote just now."""
         received = self._now()
         conversations.note_message(self._conn, received.date(), received)
         async with self._lock:
@@ -197,17 +213,18 @@ class Conversation:
                 return await self._turn(text, received)
             except Exception as error:
                 logger.error("agent turn failed (%s)", type(error).__name__)
-                return FAILED_TEXT
+                return Turn(FAILED_TEXT)
 
-    async def _turn(self, text: str, received: datetime) -> str:
+    async def _turn(self, text: str, received: datetime) -> Turn:
         day = received.date()
         if usage.spent_on(self._conn, day) >= self._limits.budget.daily_cap_usd:
             logger.info("agent: daily_cap")
             system_notices.check_budget(self._conn, self._limits.budget, self._now())
-            return DAILY_CAP_TEXT
+            return Turn(DAILY_CAP_TEXT)
         agent_dir = self._paths.agent_dir
         agent_dir.mkdir(mode=0o700, exist_ok=True)
         session = conversations.session_of(self._conn, day)
+        run = RunState()
         context = ToolContext.of(
             self._sources,
             self._conn,
@@ -215,13 +232,19 @@ class Conversation:
             self._settings.timezone,
             self._paths.config_dir,
             day,
+            run,
         )
         options = build_options(
-            self._settings, self._limits, agent_dir, build_server(context), session
+            self._settings,
+            self._limits,
+            agent_dir,
+            build_server(context),
+            session,
+            guard_hooks(self._limits, self._conn, day),
         )
         outcome = await run_once(self._run_agent, f"{stamp(received)} {text}", options)
         self._bookkeeping(day, outcome, resumed=session is not None)
-        return self._answer(outcome)
+        return Turn(self._answer(outcome), run if outcome.code == "ok" else None)
 
     def _bookkeeping(self, day: date, outcome: Outcome, resumed: bool) -> None:
         now = self._now()

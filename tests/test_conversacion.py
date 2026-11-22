@@ -14,6 +14,7 @@ from agent_data import (
     AGENT_ANSWER,
     PEDRO_MESSAGE,
     FakeAgent,
+    ToolCall,
     agent_sources,
     result_message,
 )
@@ -384,3 +385,51 @@ def test_una_api_caida_no_olvida_la_sesion(conn, tmp_path):
     world.say(at="2030-01-07T10:20")
     world.say(at="2030-01-07T10:25")
     assert world.agent.resumed == [None, "sesion-1", "sesion-1"]
+
+
+# --- El turno: lo que propuso la ejecución y si leyó contenido externo (1.11) ----------------
+
+
+def test_respond_devuelve_lo_que_propuso_la_ejecucion(conn, tmp_path):
+    """El doble del agente llama a `read_tasks` y a `propose_plan` por el servidor de las
+    opciones, como el motor: el turno trae los elementos y la marca de contaminado."""
+    create = {"action": "create", "title": "Tarea", "due": "2030-01-07T18:00", "reason": "r"}
+    agent = FakeAgent(
+        [
+            ToolCall("read_tasks", {}),
+            ToolCall("propose_plan", {"items": [create], "requested_by_pedro": True}),
+            result_message(),
+        ]
+    )
+    turn = asyncio.run(World(conn, tmp_path, agent).conversation.respond(PEDRO_MESSAGE))
+    assert turn.text == AGENT_ANSWER
+    assert turn.run is not None
+    assert turn.run.contaminated and turn.run.requested_by_pedro
+    assert [item["title"] for item in turn.run.items] == ["Tarea"]
+
+
+def test_una_ejecucion_que_falla_no_trae_propuesta(conn, tmp_path):
+    create = {"action": "create", "title": "Tarea", "due": "2030-01-07T18:00", "reason": "r"}
+    agent = FakeAgent(
+        [
+            ToolCall("propose_plan", {"items": [create]}),
+            result_message(subtype="error_max_turns", is_error=True),
+        ]
+    )
+    turn = asyncio.run(World(conn, tmp_path, agent).conversation.respond(PEDRO_MESSAGE))
+    assert turn.run is None
+
+
+def test_la_guardia_de_la_ejecucion_para_lo_bloqueado_antes_de_la_herramienta(conn, tmp_path):
+    """El doble pasa por los *hooks* de las opciones, como el motor: con `read_tasks` bloqueada,
+    la fuente no se lee y la ejecución no queda contaminada."""
+    agent = FakeAgent([ToolCall("read_tasks", {}), result_message()])
+    world = World(conn, tmp_path, agent)
+    base = limits()
+    world.conversation._limits = base.model_copy(
+        update={"tool_levels": dict(base.tool_levels) | {"read_tasks": "blocked"}}
+    )
+    turn = asyncio.run(world.conversation.respond(PEDRO_MESSAGE))
+    assert [outcome.denied for outcome in agent.tool_outcomes] == [True]
+    assert turn.run is not None and not turn.run.contaminated
+    assert not conversations.read_external(conn, date(2030, 1, 7))

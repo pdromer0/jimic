@@ -22,9 +22,9 @@ from agent_data import (
     listed_tools,
 )
 from calendar_data import SECRET_TITLE
-from heartbeat_data import task
+from heartbeat_data import madrid, task
 
-from jimic.agent.tools import build_server, model_name
+from jimic.agent.tools import RunState, build_server, model_name
 from jimic.memory.conversations import read_external
 from jimic.memory.database import open_database
 from jimic.memory.schemas import TOOL_NAMES
@@ -132,31 +132,98 @@ def test_un_fallo_inesperado_da_su_tipo_y_no_lanza(conn, config_dir):
 # --- propose_plan -------------------------------------------------------------------------------
 
 
-def test_propose_plan_guarda_la_aprobacion_y_no_llama_al_escritor(conn, config_dir):
-    """Pilla `propose_plan` que llama al escritor (versión incorrecta 5): el espía no debe ver
-    ni una llamada, y la propuesta queda como datos, pendiente, con la foto de lo que mueve o
-    borra y caducidad al acabar el día."""
+def test_propose_plan_anota_en_la_ejecucion_y_no_llama_al_escritor(conn, config_dir):
+    """Pilla `propose_plan` que llama al escritor (versión incorrecta 5 de la 1.10) o que guarda
+    la propuesta en `approvals` por su cuenta (1.11: el código la guarda al acabar la ejecución,
+    con sus botones). Mover y borrar llevan la foto de la tarea."""
     spy = SpyWriter()
+    run = RunState()
     items = [
         CREATE | {"duration_minutes": 30},
         {"action": "move", "task_id": "t1", "due": "2030-01-08", "reason": "r"},
         {"action": "delete", "task_id": "t2", "reason": "r"},
     ]
     text, is_error = call(
-        conn, config_dir, "propose_plan", {"items": items}, srcs=agent_sources(writer=spy)
+        conn, config_dir, "propose_plan", {"items": items}, srcs=agent_sources(writer=spy), run=run
     )
     assert not is_error
     assert spy.calls == []
-    ((kind, payload, status, expires),) = approvals(conn)
-    assert (kind, status, expires) == ("plan", "pending", "2030-01-07T23:00:00+00:00")
-    assert [item["action"] for item in payload["items"]] == ["create", "move", "delete"]
-    assert "snapshot" not in payload["items"][0]
-    assert payload["items"][1]["snapshot"] == {
+    assert approvals(conn) == []
+    assert [item["action"] for item in run.items] == ["create", "move", "delete"]
+    assert "snapshot" not in run.items[0]
+    assert run.items[1]["snapshot"] == {
         "title": SECRET_TITLE,
         "due": "2030-01-07",
         "project_id": "proyecto-inventado",
+        "is_recurring": False,
     }
-    assert text.startswith("Propuesta 1 guardada: crear 1, mover 1, borrar 1. No se ha ejecutado")
+    assert run.requested_by_pedro is False
+    assert text.startswith("Anotado: crear 1, mover 1, borrar 1. No se ha ejecutado nada.")
+    assert "No repitas la lista ni anuncies resultados" in text
+
+
+def test_requested_by_pedro_cuenta_si_todas_las_llamadas_lo_marcan(conn, config_dir):
+    run = RunState()
+    move = {"action": "move", "task_id": "t1", "due": "2030-01-08", "reason": "r"}
+    call(conn, config_dir, "propose_plan", {"items": [move], "requested_by_pedro": True}, run=run)
+    assert run.requested_by_pedro is True
+    call(conn, config_dir, "propose_plan", {"items": [CREATE]}, run=run)
+    assert run.requested_by_pedro is False
+    assert len(run.items) == 2
+
+
+def test_varias_llamadas_suman_hasta_ocho_y_la_que_se_pasa_no_anade_nada(conn, config_dir):
+    """Decisión de la 1.11: un solo teclado por respuesta, de 8 elementos como mucho."""
+    run = RunState()
+    call(conn, config_dir, "propose_plan", {"items": [CREATE] * 5}, run=run)
+    text, is_error = call(conn, config_dir, "propose_plan", {"items": [CREATE] * 4}, run=run)
+    assert is_error and "ya hay 5" in text
+    assert len(run.items) == 5
+    _, is_error = call(conn, config_dir, "propose_plan", {"items": [CREATE] * 3}, run=run)
+    assert not is_error and len(run.items) == 8
+
+
+def test_una_tarea_ya_propuesta_en_la_ejecucion_se_rechaza(conn, config_dir):
+    run = RunState()
+    move = {"action": "move", "task_id": "t1", "due": "2030-01-08", "reason": "r"}
+    call(conn, config_dir, "propose_plan", {"items": [move]}, run=run)
+    delete = {"action": "delete", "task_id": "t1", "reason": "r"}
+    text, is_error = call(conn, config_dir, "propose_plan", {"items": [CREATE, delete]}, run=run)
+    assert is_error and "elemento 2" in text and "ya está propuesta" in text
+    assert len(run.items) == 1
+
+
+@pytest.mark.parametrize(
+    ("changes", "words"),
+    [
+        ({"is_recurring": True}, "recurrente"),
+        ({"has_subtasks": True}, "subtareas"),
+        ({"due": madrid("2030-01-08T09:00")}, "de hoy o vencidas"),
+        ({"due": None}, "de hoy o vencidas"),
+    ],
+)
+def test_un_borrado_que_no_se_podra_hacer_se_rechaza_al_proponer(conn, config_dir, changes, words):
+    """Las reglas de H1-2 que dependen de la tarea, ya al proponer: Pedro nunca ve un botón que
+    se va a negar, y el agente le remite a Todoist."""
+    run = RunState()
+    target = task("t9").model_copy(update=changes)
+    srcs = agent_sources(tasks=TaskList(available=True, tasks=[target]))
+    delete = {"action": "delete", "task_id": "t9", "reason": "r"}
+    text, is_error = call(conn, config_dir, "propose_plan", {"items": [delete]}, srcs=srcs, run=run)
+    assert is_error and words in text
+    assert run.items == []
+
+
+def test_un_borrado_vencido_o_de_hoy_con_hora_se_puede_proponer(conn, config_dir):
+    for due in (madrid("2030-01-06T09:00"), madrid("2030-01-07T23:30")):
+        run = RunState()
+        target = task("t9").model_copy(update={"due": due})
+        srcs = agent_sources(tasks=TaskList(available=True, tasks=[target]))
+        delete = {"action": "delete", "task_id": "t9", "reason": "r"}
+        _, is_error = call(
+            conn, config_dir, "propose_plan", {"items": [delete]}, srcs=srcs, run=run
+        )
+        assert not is_error and len(run.items) == 1
 
 
 @pytest.mark.parametrize(
@@ -186,9 +253,10 @@ def test_propose_plan_guarda_la_aprobacion_y_no_llama_al_escritor(conn, config_d
 def test_una_propuesta_no_valida_se_rechaza_con_un_mensaje_y_no_guarda_nada(
     conn, config_dir, items
 ):
-    text, is_error = call(conn, config_dir, "propose_plan", {"items": items})
+    run = RunState()
+    text, is_error = call(conn, config_dir, "propose_plan", {"items": items}, run=run)
     assert is_error and text
-    assert approvals(conn) == []
+    assert approvals(conn) == [] and run.items == []
 
 
 def test_mover_una_tarea_que_no_existe_se_rechaza(conn, config_dir):
@@ -305,3 +373,14 @@ def test_un_calendario_caido_no_es_un_error_del_agente(conn, config_dir):
     srcs.calendar.day = CalendarDay.unavailable("auth")  # pyright: ignore[reportAttributeAccessIssue] - the double's day
     text, is_error = call(conn, config_dir, "read_calendar", {}, srcs=srcs)
     assert json.loads(text)["unavailable_reason"] == "auth" and not is_error
+
+
+@pytest.mark.parametrize(
+    ("name", "contaminates"),
+    [("read_calendar", True), ("read_tasks", True), ("read_apex_today", False)],
+)
+def test_leer_marca_la_ejecucion_que_lee(conn, config_dir, name, contaminates):
+    """La marca por ejecución que decide la ejecución inmediata (condición 2 de 1.11-b)."""
+    run = RunState()
+    call(conn, config_dir, name, {}, run=run)
+    assert run.contaminated is contaminates

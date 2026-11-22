@@ -1,9 +1,10 @@
 """What the agent proposes, as data (H1-1): a plan of tasks or a change of memory.
 
-`propose_plan` and `propose_change` validate here and save a pending row in `approvals`; nothing
-is executed. Task 1.11 executes a plan after Pedro's button or message, and task 1.12 a change
-of memory. A move or a delete carries the snapshot of the task as the code read it when the
-proposal was saved (title, due and project), which the rule of H1-2 compares before deleting.
+`propose_plan` validates here and adds its items to the run (task 1.11): when the run ends, the
+code shows them under the agent's answer with their buttons, or executes one at once (decision
+1.11-b). `propose_change` saves a pending row in `approvals`, without buttons until task 1.12.
+Nothing is executed by the tools. A move or a delete carries the snapshot of the task as the
+code read it (title, due and project), which the rule of H1-2 compares before deleting.
 
 An approval expires at the end of the local day (RF-07). What a proposal says never reaches a
 log: only the kind, the id and the counts.
@@ -93,6 +94,15 @@ class PlanProposal(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     items: Annotated[list[PlanItem], Field(min_length=1, max_length=MAX_PLAN_ITEMS)]
+    requested_by_pedro: Annotated[
+        bool,
+        Field(
+            description=(
+                "true solo si Pedro ha pedido en este mensaje exactamente esta acción"
+                " («crea…», «mueve…»); false si la propones tú"
+            )
+        ),
+    ] = False
 
     @model_validator(mode="after")
     def _one_action_per_task(self) -> Self:
@@ -112,11 +122,38 @@ class TaskSnapshot(BaseModel):
     title: str
     due: str | None
     project_id: str
+    is_recurring: bool = False
+    """Not compared (H1-2 compares title, due and project): it decides 1.11-b."""
 
     @classmethod
     def of(cls, task: TodoistTask) -> TaskSnapshot:
         due = None if task.due is None else task.due.isoformat()
-        return cls(title=task.title, due=due, project_id=task.project_id)
+        return cls(
+            title=task.title, due=due, project_id=task.project_id, is_recurring=task.is_recurring
+        )
+
+    def matches(self, other: TaskSnapshot) -> bool:
+        """Same title, due and project (H1-2): the due compared as moments, not as text."""
+        return (
+            self.title == other.title
+            and self.project_id == other.project_id
+            and same_due(self.due, other.due)
+        )
+
+
+def due_value(text: str | None) -> date | datetime | None:
+    """A snapshot's due back as a value: a day, or an aware moment."""
+    if text is None:
+        return None
+    return datetime.fromisoformat(text) if "T" in text else date.fromisoformat(text)
+
+
+def same_due(a: str | None, b: str | None) -> bool:
+    """`2030-01-07T18:00:00+01:00` and `2030-01-07T17:00:00+00:00` are the same moment."""
+    first, second = due_value(a), due_value(b)
+    if isinstance(first, datetime) != isinstance(second, datetime):
+        return False
+    return first == second
 
 
 class MemoryChange(BaseModel):

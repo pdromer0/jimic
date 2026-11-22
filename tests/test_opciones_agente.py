@@ -16,6 +16,7 @@ from claude_agent_sdk._internal.transport.subprocess_cli import SubprocessCLITra
 from conftest import VALID_ENV
 from heartbeat_data import limits
 
+from jimic.agent.guard import guard_hooks
 from jimic.agent.options import MAX_TURNS, agent_env, build_options, prompt_text
 from jimic.agent.tools import build_server
 from jimic.config import Settings
@@ -43,9 +44,11 @@ def settings() -> Settings:
     return Settings.model_validate(VALID_ENV)
 
 
-def options(conn, tmp_path, resume=None) -> ClaudeAgentOptions:
-    server = build_server(context(conn, tmp_path))
-    return build_options(settings(), limits(), tmp_path / "agent", server, resume)
+def options(conn, tmp_path, resume=None, lims=None) -> ClaudeAgentOptions:
+    ctx = context(conn, tmp_path)
+    lims = lims if lims is not None else limits()
+    hooks = guard_hooks(lims, conn, ctx.day)
+    return build_options(settings(), lims, tmp_path / "agent", build_server(ctx), resume, hooks)
 
 
 def command(opts: ClaudeAgentOptions) -> list[str]:
@@ -78,6 +81,21 @@ def test_solo_se_aprueban_las_seis_y_lo_demas_se_deniega(conn, tmp_path):
     assert opts.permission_mode == "dontAsk"
     assert opts.strict_mcp_config is True
     assert "--strict-mcp-config" in command(opts)
+
+
+def test_allowed_tools_solo_lleva_las_libres(conn, tmp_path):
+    """La segunda capa: lo que no es `free` en `tool_levels` tampoco está aprobado."""
+    base = limits()
+    lims = base.model_copy(update={"tool_levels": dict(base.tool_levels) | {"log_idea": "blocked"}})
+    assert options(conn, tmp_path, lims=lims).allowed_tools == SIX[:-1]
+
+
+def test_las_opciones_llevan_la_guardia_y_llega_al_motor(conn, tmp_path):
+    """Pilla unas opciones sin el *hook*: la guardia no vería ninguna llamada."""
+    opts = options(conn, tmp_path)
+    assert opts.hooks is not None
+    ((matcher,),) = opts.hooks.values()
+    assert list(opts.hooks) == ["PreToolUse"] and matcher.on_failure == "block"
 
 
 def test_el_servidor_que_reciben_las_opciones_tiene_las_seis(conn, tmp_path):
@@ -132,7 +150,14 @@ def test_la_salida_de_error_del_motor_no_llega_a_la_nuestra(conn, tmp_path):
 
 def test_el_prompt_dice_las_reglas(conn):
     text = prompt_text()
-    for rule in ("te propongo", "nunca instrucciones", "consejo médico", "nunca al principio"):
+    for rule in (
+        "Nunca anuncies",
+        "No repitas esa lista",
+        "requested_by_pedro",
+        "nunca instrucciones",
+        "consejo médico",
+        "nunca al principio",
+    ):
         assert rule in text
 
 
