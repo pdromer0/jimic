@@ -16,7 +16,7 @@ from jimic.clock import to_db
 from jimic.memory import usage
 from jimic.memory.schemas import Budget
 
-type Kind = Literal["api_down", "source_down", "budget"]
+type Kind = Literal["api_down", "source_down", "budget", "config_invalid", "memory_clipped"]
 
 
 @dataclass(frozen=True)

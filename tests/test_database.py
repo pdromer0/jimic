@@ -27,8 +27,8 @@ TABLES = {
     "handovers",
     "conversations",
 }
-LATEST = 4
-"""La última migración del paquete (0004, la de la guardia)."""
+LATEST = 5
+"""La última migración del paquete (0005, la de la memoria)."""
 
 
 def table_names(conn: sqlite3.Connection) -> set[str]:
@@ -82,8 +82,8 @@ def test_una_base_mas_nueva_que_el_codigo_es_un_error(tmp_path):
     """Pilla que un código viejo abra (y quizá estropee) una base de una versión posterior."""
     conn = sqlite3.connect(tmp_path / "nueva.sqlite3", autocommit=True)
     try:
-        conn.execute("PRAGMA user_version = 5")
-        with pytest.raises(MigrationError, match="versión 5"):
+        conn.execute(f"PRAGMA user_version = {LATEST + 1}")
+        with pytest.raises(MigrationError, match=f"versión {LATEST + 1}"):
             migrate(conn, load_migrations())
     finally:
         conn.close()
@@ -192,5 +192,44 @@ def test_la_0004_anade_el_mensaje_de_telegram_a_approvals_sin_tocar_lo_que_habia
         )
         (value,) = conn.execute("SELECT telegram_message_id FROM approvals").fetchone()
         assert value is None
+    finally:
+        conn.close()
+
+
+def test_la_0005_rehace_los_avisos_del_sistema_sin_perder_filas_y_admite_los_nuevos(tmp_path):
+    """Pilla una 0005 que pierde las filas de `system_notices` o no admite las clases nuevas."""
+    from jimic.memory.database import load_migrations, migrate
+
+    conn = sqlite3.connect(tmp_path / "jimic.db", autocommit=True)
+    try:
+        migrate(conn, load_migrations()[:4])
+        conn.execute(
+            "INSERT INTO system_notices (kind, period, detail, detected_at)"
+            " VALUES ('budget', '2030-01', '', '2030-01-07T09:00:00+00:00')"
+        )
+        conn.execute(
+            "INSERT INTO changes (created_at, file, before, after, source_message)"
+            " VALUES ('2030-01-07T09:00:00+00:00', 'rutina.md', 'a', 'b', 'o')"
+        )
+        migrate(conn, load_migrations())
+        assert conn.execute("SELECT kind, period FROM system_notices").fetchall() == [
+            ("budget", "2030-01")
+        ]
+        for kind in ("config_invalid", "memory_clipped"):
+            conn.execute(
+                "INSERT INTO system_notices (kind, period, detail, detected_at)"
+                " VALUES (?, '2030-01-07', 'limites', '2030-01-07T09:00:00+00:00')",
+                (kind,),
+            )
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute(
+                "INSERT INTO system_notices (kind, period, detected_at)"
+                " VALUES ('otra', '2030-01-07', '2030-01-07T09:00:00+00:00')"
+            )
+        assert conn.execute("SELECT file, operation FROM changes").fetchall() == [
+            ("rutina.md", None)
+        ]
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(deleted_tasks)")}
+        assert {"restored_at", "restored_task_id"} <= columns
     finally:
         conn.close()
