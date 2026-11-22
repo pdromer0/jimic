@@ -242,10 +242,7 @@ class Heartbeat:
     # --- System notices ------------------------------------------------------------------------
 
     def _check_budget(self, now: datetime) -> None:
-        budget = self._limits.budget
-        spent = usage.spent_in_month(self._conn, now.date())
-        if spent > 0 and spent >= budget.warn_at * budget.monthly_target_usd:
-            system_notices.detect(self._conn, "budget", now.date(), now)
+        system_notices.check_budget(self._conn, self._limits.budget, now)
 
     def _budget_text(self, day: date) -> str:
         """The spend of the month as it is now: it may be past the warning when it goes out."""
