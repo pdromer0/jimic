@@ -41,8 +41,13 @@ def save_session(conn: sqlite3.Connection, day: date, session_id: str | None) ->
 
 
 def mark_external(conn: sqlite3.Connection, day: date) -> None:
-    """The session of `day` has read the calendar or the tasks."""
-    conn.execute("UPDATE conversations SET read_external = 1 WHERE day = ?", (day.isoformat(),))
+    """The session of `day` has read the calendar or the tasks. Raises `LookupError` if the day
+    has no row: a read that cannot be marked must not happen."""
+    cursor = conn.execute(
+        "UPDATE conversations SET read_external = 1 WHERE day = ?", (day.isoformat(),)
+    )
+    if cursor.rowcount != 1:
+        raise LookupError("no conversation for that day")
 
 
 def read_external(conn: sqlite3.Connection, day: date) -> bool:
