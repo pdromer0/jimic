@@ -9,9 +9,10 @@ Rules (1.4-a): whatever comes from another chat is ignored in silence, with no r
 `answerCallbackQuery`; the log says only «unknown chat».
 
 Pedro's text goes to the injected `on_text` (the conversation of task 1.10) as a task of its
-own: the handler returns at once, so taps and the next messages are not held while the agent
-thinks. The order of the turns is the conversation's. While it thinks, the chat shows
-«escribiendo…»; the answer goes as escaped HTML, without previews.
+own, started as the message arrives: the handler returns at once, so taps and the next messages
+are not held while the agent thinks. The order of the turns is the conversation's, and the
+replies go out in the order the messages came. While it thinks, the chat shows «escribiendo…»;
+the answer goes as escaped HTML, without previews.
 """
 
 import asyncio
@@ -141,7 +142,8 @@ class TelegramChannel:
         self._on_text = on_text
         self._on_started = on_started
         self._typing_every = typing_every
-        self._turns: set[asyncio.Task[None]] = set()
+        self._turns: set[asyncio.Future[Any]] = set()
+        self._last_turn: asyncio.Task[None] | None = None
         self._stopping = False
         self._running = False
         application.add_handler(CallbackQueryHandler(self._handle_tap))
@@ -294,21 +296,30 @@ class TelegramChannel:
         if self._stopping:
             logger.info("message ignored (stopping)")
             return
-        turn = asyncio.create_task(self._converse(message.text))
-        self._turns.add(turn)
-        turn.add_done_callback(self._turns.discard)
+        # `on_text` starts here, before any wait on the network: the conversation notes the
+        # moment and takes its place in the order of the turns as the message arrives.
+        answer = asyncio.ensure_future(self._on_text(message.text))
+        turn = asyncio.create_task(self._converse(answer, self._last_turn))
+        self._last_turn = turn
+        for task in (answer, turn):
+            self._turns.add(task)
+            task.add_done_callback(self._turns.discard)
 
-    async def _converse(self, text: str) -> None:
-        """One answer: «escribiendo…» while `on_text` thinks, then the answer."""
-        await self._typing()
+    async def _converse(
+        self, answer: asyncio.Future[str], previous: asyncio.Task[None] | None
+    ) -> None:
+        """One answer: «escribiendo…» while `answer` is thinking, then the answer, after the
+        answer to the message before (the replies go out in the order the messages came)."""
         typing = asyncio.create_task(self._keep_typing())
         try:
-            reply = await self._on_text(text)
+            reply = await answer
         except Exception as error:
             logger.error("text handler failed (%s)", _code(error))
             reply = COULD_NOT_REPLY
         finally:
             typing.cancel()
+        if previous is not None:
+            await asyncio.wait([previous])
         for chunk in reply_chunks(reply):
             try:
                 await self._app.bot.send_message(
@@ -328,10 +339,11 @@ class TelegramChannel:
             logger.debug("telegram typing failed (%s)", _code(error))
 
     async def _keep_typing(self) -> None:
-        """Again every `typing_every` seconds, the first one already sent; with a cap."""
-        for _ in range(TYPING_TIMES - 1):
-            await asyncio.sleep(self._typing_every)
+        """«escribiendo…» now and every `typing_every` seconds, with a cap. It runs beside the
+        answer and never holds it back; an answer that comes at once has none."""
+        for _ in range(TYPING_TIMES):
             await self._typing()
+            await asyncio.sleep(self._typing_every)
 
     async def _cancel_turns(self) -> None:
         """A turn still thinking when the service stops is dropped: nobody would get it."""

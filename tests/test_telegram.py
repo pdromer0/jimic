@@ -213,10 +213,11 @@ def test_un_mensaje_de_otro_chat_se_ignora_sin_responder(make_channel, request_d
 
 @pytest.mark.parametrize("text", [SECRET_TEXT, "/plan", "/start"])
 def test_sin_conversacion_un_texto_recibe_la_frase_fija(make_channel, request_double, text):
-    """La demo: también un `/comando` recibe lo mismo, mientras sale «escribiendo…»."""
+    """La demo: también un `/comando` recibe lo mismo. La respuesta es inmediata: sin
+    «escribiendo…», que no hace falta."""
     channel, application = make_channel()
     drive(application, text_update(text))
-    assert request_double.methods() == ["sendChatAction", "sendMessage"]
+    assert request_double.methods() == ["sendMessage"]
     (params,) = request_double.params("sendMessage")
     assert params["text"] == NOT_YET
     assert params["chat_id"] == CHAT_ID
@@ -237,8 +238,6 @@ def test_el_texto_de_pedro_va_al_manejador_inyectado(make_channel, request_doubl
     assert params["text"] == "respuesta &lt;inventada&gt; &amp; sin escapar"
     assert params["parse_mode"] == "HTML"
     assert params["link_preview_options"] == {"is_disabled": True}
-    (typing,) = request_double.params("sendChatAction")
-    assert (typing["chat_id"], typing["action"]) == (CHAT_ID, "typing")
 
 
 def test_algo_que_no_es_texto_no_recibe_respuesta(make_channel, request_double):
@@ -381,7 +380,8 @@ def test_mientras_el_agente_piensa_un_toque_se_atiende_y_el_texto_sale_despues(
     asyncio.run(scenario())
     assert order == ["toque", "respuesta"]
     assert request_double.params("sendMessage")[-1]["text"] == "hecho"
-    assert "sendChatAction" in request_double.methods()
+    typing = request_double.params("sendChatAction")[0]
+    assert (typing["chat_id"], typing["action"]) == (CHAT_ID, "typing")
 
 
 def test_una_respuesta_larga_se_parte_en_mensajes_que_caben(make_channel, request_double):
@@ -648,3 +648,41 @@ def test_un_mensaje_que_llega_mientras_para_no_abre_un_turno(make_channel, reque
     asyncio.run(scenario())
     assert received == []
     assert request_double.params("sendMessage") == []
+
+
+def test_dos_mensajes_seguidos_se_contestan_en_el_orden_de_llegada(make_channel, request_double):
+    """Ajuste de la revisión del chat: el «escribiendo…» del primero tarda más que el del
+    segundo. Pilla un turno que espera a esa llamada de red antes de ponerse en la cola: el
+    segundo se colaría, y su hora de llegada se retrasaría."""
+    lock = asyncio.Lock()
+    arrived: list[str] = []
+
+    async def on_text(text: str) -> str:
+        arrived.append(text)  # lo que anota la conversación al llegar
+        async with lock:  # el turno, como en la conversación
+            await asyncio.sleep(0)
+            return f"respuesta a {text}"
+
+    slow = asyncio.Event()
+    request_double.chat_action_gates[0] = slow
+    channel, application = make_channel(on_text=on_text)
+
+    async def scenario():
+        async with application:
+            await application.process_update(to_update(text_update("uno"), application.bot))
+            await application.process_update(
+                to_update(text_update("dos", update_id=2), application.bot)
+            )
+            for _ in range(MAX_SPINS):
+                if len(request_double.params("sendMessage")) == 2:
+                    break
+                await asyncio.sleep(0)
+            slow.set()
+            await settle()
+
+    asyncio.run(scenario())
+    assert arrived == ["uno", "dos"]
+    assert [p["text"] for p in request_double.params("sendMessage")] == [
+        "respuesta a uno",
+        "respuesta a dos",
+    ]
