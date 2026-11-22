@@ -188,7 +188,8 @@ def test_con_7_enviados_solo_cabe_el_cierre(conn):
     gym = cycle(conn, "2030-01-07T20:00", spy=SpyDecide(outgoing("insistir_gimnasio")))
     close = cycle(conn, "2030-01-07T21:30", spy=SpyDecide(outgoing("cierre_del_dia")))
     assert [(v.action, v.reason) for v in gym.verdicts] == [("block", "close_slot")]
-    assert [(v.action, v.reason) for v in close.verdicts] == [("send", "ok")]
+    # El cierre cabe: se pasa al agente (1.8-b), que lo enviará en la 1.16.
+    assert [(v.action, v.reason) for v in close.verdicts] == [("handover", "ok")]
 
 
 def test_un_aviso_repetido_se_para_en_la_segunda_pasada(conn):

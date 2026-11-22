@@ -165,9 +165,10 @@ def test_con_tope_8_el_octavo_que_no_es_cierre_se_bloquea(conn):
 
 
 def test_el_cierre_como_octavo_entra(conn):
+    """El cierre cabe y se pasa al agente (1.8-b); lo atendido no gasta cupo hasta la 1.16."""
     fill(conn, 7)
     assert only(run(conn, "2030-01-07T21:30", outgoing("cierre_del_dia"))) == (
-        "send",
+        "handover",
         "ok",
         ("cierre_del_dia",),
     )

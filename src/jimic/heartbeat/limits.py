@@ -27,6 +27,10 @@ logger = logging.getLogger(__name__)
 URGENT_TYPES = frozenset({"daily_plan", "day_close", "key_task"})
 """They never wait in the group window. A `notice` is the only kind that does (1.7-b)."""
 
+HANDOVER_TYPES = frozenset({"daily_plan", "day_close"})
+"""They are not sent: the heartbeat hands them over to the agent (decision 1.8-b), and that counts
+as attended today, not as a message."""
+
 SEPARATOR = "\n\n"
 """Between the blocks of one message: a blank line (decision 1.8-d)."""
 
@@ -34,7 +38,7 @@ WEEKDAYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
 """`date.weekday()` order, as `Notice.days` writes them."""
 
 type StopReason = Literal["quiet_hours", "daily_cap", "in_event"]
-type Action = Literal["send", "wait", "block"]
+type Action = Literal["send", "wait", "block", "handover"]
 
 
 class Outgoing(BaseModel):
@@ -48,7 +52,8 @@ class Outgoing(BaseModel):
 
 @dataclass(frozen=True)
 class Verdict:
-    """What the second pass says: send, wait or block, always with a code."""
+    """What the second pass says: send, wait, block or hand over to the agent, always with a
+    code."""
 
     action: Action
     reason: str
@@ -102,7 +107,9 @@ class Quota:
     @classmethod
     def of(cls, limits: Limits, intentions: Intentions, sent: SentToday) -> Quota:
         close_pending = any(
-            intention.type == "day_close" and intention.enabled and sent.count(intention.id) == 0
+            intention.type == "day_close"
+            and intention.enabled
+            and sent.sent_count(intention.id) == 0
             for intention in intentions.intentions
         )
         return cls(limits.max_messages_per_day, sent.message_count, close_pending)
@@ -292,7 +299,12 @@ class _Pass:
                 continue
             taken.add(item.intent)
             kind = self.by_id[item.intent].type
-            (urgent if kind in URGENT_TYPES else notices).append(item)
+            if kind in HANDOVER_TYPES:
+                # What 1.14 and 1.16 will send must fit; handing over spends nothing yet.
+                refusal = self.quota.refusal(is_close=kind == "day_close")
+                self.decide("block" if refusal else "handover", refusal or "ok", item)
+            else:
+                (urgent if kind in URGENT_TYPES else notices).append(item)
         released: list[Outgoing] = []
         if self.window_open():
             for item in self.queue.take_all():

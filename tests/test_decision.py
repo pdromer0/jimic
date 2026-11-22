@@ -164,7 +164,8 @@ def test_el_plan_y_el_cierre_se_deciden_sin_enviar_nada(conn, intent, task, mess
     decision, _ = decide(conn, "2030-01-07T08:00", fake)
     assert (decision.speak, decision.intent) == (True, intent)
     assert decision.reason == f"{SECRET_REASON} (pendiente: {task})"
-    assert decision.proposals == ()
+    # Sin texto: la segunda pasada lo pasa al agente.
+    assert [(p.intent, p.text) for p in decision.proposals] == [(intent, "")]
 
 
 # --- Varias intenciones en un latido (decisión 1.8-d) -----------------------------------------
@@ -216,12 +217,15 @@ def test_no_hablar_con_elementos_es_silencio(conn):
     assert (decision.speak, decision.intent, decision.proposals) == (False, None, ())
 
 
-def test_el_plan_dentro_de_un_lote_no_se_propone_y_los_demas_si(conn):
+def test_el_plan_dentro_de_un_lote_va_sin_texto_y_los_demas_con_el_suyo(conn):
     """El plan sigue la 1.8-b dentro de un lote; el aviso que va con él, no."""
     fake = FakeMessages(api_message(picks(("plan_del_dia", None), ("basura", SECRET_TEXT))))
     decision, _ = decide(conn, "2030-01-07T08:00", fake)
     assert decision.intent == "plan_del_dia,basura"
-    assert [p.intent for p in decision.proposals] == ["basura"]
+    assert [(p.intent, p.text) for p in decision.proposals] == [
+        ("plan_del_dia", ""),
+        ("basura", SECRET_TEXT),
+    ]
     assert decision.reason == f"{SECRET_REASON} (pendiente: 1.14)"
 
 

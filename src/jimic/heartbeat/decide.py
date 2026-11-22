@@ -12,7 +12,7 @@ something invalid still has its usage counted (`messages.parse` would raise and 
   fit as a whole (more than `MAX_PICKS`, no valid pick, or no valid JSON) is
   `invalid_decision:<why>`: nobody speaks and it is not retried.
 - The plan and the close (decision 1.8-b) are decided and recorded, but nothing goes out until
-  tasks 1.14 and 1.16 bring them.
+  tasks 1.14 and 1.16 bring them: the second pass hands them over to the agent.
 - If the API fails (RF-04), each `notice` and `key_task` whose default time falls in this
   heartbeat's slot and has not gone out today goes out with a fixed template of the code.
 
@@ -221,7 +221,9 @@ def judge(message: Message, state: DayState) -> Decision:
         intents.append(pick.intent)
         task = PENDING_TASK.get(active[pick.intent])
         if task is not None:
+            # Handed over to the agent by the second pass: it has no text of its own.
             pending.append(task)
+            proposals.append(Outgoing(intent=pick.intent, text=""))
         else:
             proposals.append(Outgoing(intent=pick.intent, text=(pick.message or "").strip()))
     notes = "".join(

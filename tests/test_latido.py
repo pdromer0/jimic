@@ -5,6 +5,7 @@ El modelo es `FakeMessages` (con tope) detrás del `HaikuDecider` de verdad; Tel
 """
 
 import asyncio
+import json
 import logging
 from datetime import UTC, date, datetime, time, timedelta
 
@@ -42,8 +43,9 @@ from heartbeat_data import (
 from jimic.clock import local_day_bounds
 from jimic.heartbeat.beat import API_DOWN_TEXT, Heartbeat, next_beat
 from jimic.heartbeat.decide import HaikuDecider
+from jimic.heartbeat.limits import Quota
 from jimic.memory.database import open_database
-from jimic.memory.notices import sent_between
+from jimic.memory.notices import record_handover, sent_between
 from jimic.tools.calendar import CalendarDay
 from jimic.tools.todoist import TaskList
 
@@ -78,7 +80,15 @@ class World:
             conn=conn,
             decider=HaikuDecider(self.fake.create, MODEL, its),
             sender=self.sender,
+            on_handover=self.hand_over,
         )
+        self.handed: list[str] = []
+        self.handover_error: Exception | None = None
+
+    async def hand_over(self, intent: str, state) -> None:
+        if self.handover_error is not None:
+            raise self.handover_error
+        self.handed.append(intent)
 
     def at(self, moment: str | datetime) -> None:
         self.clock.moment = moment if isinstance(moment, datetime) else madrid(moment)
@@ -91,6 +101,9 @@ class World:
 
     def reasons(self) -> list[str]:
         return [row[3] for row in self.rows()]
+
+    def handovers(self) -> list[str]:
+        return [row[0] for row in self.conn.execute("SELECT intent FROM handovers ORDER BY id")]
 
     def notices(self) -> list[tuple]:
         return self.conn.execute(
@@ -195,7 +208,85 @@ def test_el_plan_y_el_cierre_de_haiku_no_salen_ni_van_a_notices(conn, intent, ta
     world.at("2030-01-07T08:00")
     assert world.sender.texts == []
     assert world.notices() == []
-    assert world.rows()[0][1:] == (1, intent, f"{SECRET_REASON} (pendiente: {task_id})")
+    assert world.rows()[0][1:] == (
+        1,
+        intent,
+        f"{SECRET_REASON} (pendiente: {task_id}) [handover ok]",
+    )
+    assert world.handovers() == [intent]
+    assert world.handed == [intent]
+
+
+def plan_json(request) -> dict:
+    """The active intention `plan_del_dia` as the model got it in `request`."""
+    state = json.loads(request["messages"][0]["content"])
+    return next(item for item in state["intentions"] if item["id"] == "plan_del_dia")
+
+
+def test_el_plan_elegido_a_las_830_no_se_ofrece_a_las_845_y_un_aviso_si_sale(conn):
+    """Primer añadido de la 1.10: lo atendido cuenta como hecho hoy. A las 8:45 el plan llega
+    con `left_today` 0 y, si Haiku lo elige otra vez, la segunda pasada lo para como repetido;
+    el aviso del mismo lote sale. Pilla el plan que se puede elegir dos veces (versión
+    incorrecta 7)."""
+    world = World(conn, FakeMessages(api_message(answer(True, "plan_del_dia", None))))
+    world.at("2030-01-07T08:30")
+    assert plan_json(world.fake.requests[0])["left_today"] == 1
+    world.fake.reply = api_message(picks(("plan_del_dia", None), ("basura", "Fuera")))
+    world.at("2030-01-07T08:45")
+    assert plan_json(world.fake.requests[1])["left_today"] == 0
+    assert world.handed == ["plan_del_dia"]
+    assert world.handovers() == ["plan_del_dia"]
+    assert world.sender.texts == ["Fuera"]
+    assert world.rows()[1][3].endswith("[block repeated; send ok]")
+
+
+def test_atendido_y_enviado_el_mismo_dia_cuenta_una_vez(conn):
+    """La unión, no la suma: cuando la 1.14 envíe el plan habrá una fila en `handovers` y otra en
+    `notices`. `left_today` sigue en 0, no en -1, y el cupo cuenta un mensaje."""
+    record_handover(conn, "plan_del_dia", madrid("2030-01-07T08:00"))
+    add_notice(conn, "plan_del_dia", madrid("2030-01-07T08:01"), 7)
+    sent = sent_between(conn, *local_day_bounds(MONDAY, MADRID))
+    assert sent.count("plan_del_dia") == 1
+    assert sent.message_count == 1
+    world = World(conn)
+    world.at("2030-01-07T09:00")
+    assert plan_json(world.fake.requests[0])["left_today"] == 0
+
+
+def test_un_cierre_atendido_sin_enviar_guarda_su_hueco(conn):
+    """La 78 al pie de la letra: el hueco del cierre se guarda mientras no se haya enviado."""
+    record_handover(conn, "cierre_del_dia", madrid("2030-01-07T21:00"))
+    sent = sent_between(conn, *local_day_bounds(MONDAY, MADRID))
+    assert sent.count("cierre_del_dia") == 1
+    assert Quota.of(limits(), intentions(*ALL), sent).close_pending
+
+
+def test_si_el_enganche_falla_el_plan_no_queda_atendido(conn):
+    world = World(conn, FakeMessages(api_message(answer(True, "plan_del_dia", None))))
+    world.handover_error = RuntimeError("roto")
+    world.at("2030-01-07T08:30")
+    assert world.handovers() == []
+    assert world.rows()[0][3].endswith("[handover ok handover_failed:RuntimeError]")
+
+
+def test_el_enganche_de_serie_solo_escribe_en_el_log(conn, caplog):
+    caplog.set_level(logging.INFO)
+    its = intentions(*ALL)
+    heartbeat = Heartbeat(
+        clock=FixedClock(madrid("2030-01-07T08:30")),
+        timezone=MADRID,
+        limits=limits(),
+        intentions=its,
+        sources=sources(),
+        conn=conn,
+        decider=HaikuDecider(
+            FakeMessages(api_message(answer(True, "plan_del_dia", None))).create, MODEL, its
+        ),
+        sender=FakeSender(),
+    )
+    asyncio.run(heartbeat.beat())
+    assert "handover plan_del_dia (pending 1.14)" in caplog.text
+    assert [row[0] for row in conn.execute("SELECT intent FROM handovers")] == ["plan_del_dia"]
 
 
 # --- La API caída ------------------------------------------------------------------------------
