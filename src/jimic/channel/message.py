@@ -352,12 +352,19 @@ def claim(message: InteractiveMessage, indexes: Collection[int]) -> InteractiveM
 def release(message: InteractiveMessage, index: int, item: Item) -> InteractiveMessage:
     """The message with the unresolved item at `index` replaced by `item`, pending again: a
     try that failed (with its `note`) or a task that changed (renewed). The titles are fitted
-    again, since a renewed one may be longer."""
-    if not message.items[index].unresolved:
+    again, since a renewed one may be longer; if even that cannot fit, the item keeps the title
+    it had (which fitted). It never raises: it runs after the effects of a tap."""
+    old = message.items[index]
+    if not old.unresolved:
         return message
+    pending = {"running": False, "result": None, "chosen": None}
     items = list(message.items)
-    items[index] = item.model_copy(update={"running": False, "result": None, "chosen": None})
-    return fit_titles(message.model_copy(update={"items": tuple(items)}))
+    items[index] = item.model_copy(update=pending)
+    try:
+        return fit_titles(message.model_copy(update={"items": tuple(items)}))
+    except MessageTooLong:
+        items[index] = item.model_copy(update=pending | {"title": old.title})
+        return message.model_copy(update={"items": tuple(items)})
 
 
 def expire(message: InteractiveMessage) -> InteractiveMessage:

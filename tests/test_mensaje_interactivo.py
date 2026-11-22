@@ -369,3 +369,33 @@ def test_release_vuelve_a_dejar_pendiente_y_reajusta_el_titulo():
     item = released.items[0]
     assert item.pending and item.note == "ha cambiado" and item.title.endswith("…")
     ensure_fits(released)
+
+
+def test_release_nunca_lanza_si_el_titulo_nuevo_no_cabe_se_queda_el_anterior():
+    """Hallazgo 5 de la revisión: `release` corre tras los efectos de un toque; si lanzara, lo
+    ya hecho quedaría «en curso». Un cuerpo al límite y ocho títulos cortos no dejan sitio a un
+    título renovado, que no se recorta por debajo de 20: se queda el que había, con su nota y lo
+    nuevo en `data`."""
+    items = tuple(Item(title="t" * 5, options=(YES, NO)) for _ in range(MAX_ITEMS))
+    body = "b" * 1
+    message = InteractiveMessage(header="Plan", body=body, items=items)
+    for step in (50, 1):  # el cuerpo más largo que aún cabe, al carácter
+        while True:
+            try:
+                ensure_fits(message.model_copy(update={"body": body + "b" * step}))
+            except MessageTooLong:
+                break
+            body += "b" * step
+    message = claim(message.model_copy(update={"body": body}), {0})
+    renewed = message.items[0].model_copy(
+        update={"title": "n" * 200, "note": "ha cambiado", "data": {"x": 1}}
+    )
+    released = release(message, 0, renewed)
+    item = released.items[0]
+    assert (item.title, item.note, item.data, item.pending) == (
+        "t" * 5,
+        "ha cambiado",
+        {"x": 1},
+        True,
+    )
+    ensure_fits(released)
