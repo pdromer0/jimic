@@ -32,6 +32,7 @@ from jimic.channel.message import (
 from jimic.channel.taps import Failed, HandlerOutcome, Show, TapHandler
 from jimic.clock import Clock
 from jimic.execution import restore
+from jimic.execution.memory_message import OPERATIONS
 from jimic.memory import changes, conversations, system_notices, usage
 from jimic.memory.changes import ChangeRefused, ChangeRow
 from jimic.memory.live import LiveConfig
@@ -66,7 +67,6 @@ SECTIONS = (
     ("limites.yaml", "Límites"),
 )
 CHANGES_SECTION = "changes"
-OPERATIONS = {"add": "añadir", "replace": "cambiar", "remove": "quitar", "undo": "deshacer"}
 UNDO_RESULTS = {
     "undone": "↩️ deshecho",
     "already": "ya estaba deshecho",

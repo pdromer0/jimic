@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from jimic.memory.changes import MEMORY_FILES, ChangeRefused, read_text
+from jimic.memory.changes import stem as stem
 
 MAX_FILE_CHARS = 6000
 """Characters of one file in the prompt: some 1500 to 2000 tokens each."""
@@ -39,11 +40,6 @@ class MemoryBlock:
     text: str
     clipped: tuple[str, ...]
     """The files that went cut, in table order."""
-
-
-def stem(name: str) -> str:
-    """`limites.yaml` → `limites`: what the system notices keep (no dots there)."""
-    return name.split(".", 1)[0]
 
 
 def memory_block(config_dir: Path) -> MemoryBlock:

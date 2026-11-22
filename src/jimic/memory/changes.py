@@ -50,6 +50,15 @@ logger = logging.getLogger(__name__)
 
 IDEAS_FILE = "ideas.md"
 MEMORY_FILES: tuple[str, ...] = (*MARKDOWN_CHECKS, *YAML_SCHEMAS)
+
+
+def stem(name: str) -> str:
+    """`limites.yaml` → `limites`: what the system notices keep (no dots there)."""
+    return name.split(".", 1)[0]
+
+
+FILE_OF_STEM = {stem(name): name for name in MEMORY_FILES}
+"""Back from a stem to the name of the file."""
 UNDO_ORIGIN = "[Deshacer]"
 """The origin of a reversal: Pedro's button, not a message."""
 BOM = "\ufeff"

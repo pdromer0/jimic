@@ -40,7 +40,8 @@ HEADER = "Para tu memoria"
 MAX_MEMORY_ITEMS = 3
 """Changes and ideas of one run: one message of Pedro rarely asks for more."""
 NOTHING = "(nada)"
-OPERATIONS = {"add": "añadir", "replace": "cambiar", "remove": "quitar"}
+OPERATIONS = {"add": "añadir", "replace": "cambiar", "remove": "quitar", "undo": "deshacer"}
+"""How an operation is named to Pedro (`undo` only in `/deshacer`)."""
 
 SAVE = Option(key="save", label="💾 Guardar")
 EDIT = Option(key="edit", label="✏️ Cambiar", approves=False)

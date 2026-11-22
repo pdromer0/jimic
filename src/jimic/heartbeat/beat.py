@@ -29,6 +29,7 @@ from jimic.heartbeat.limits import HANDOVER_TASK, SEPARATOR, Verdict, WaitingNot
 from jimic.heartbeat.sources import Sources
 from jimic.heartbeat.state import DayState
 from jimic.memory import system_notices, usage
+from jimic.memory.changes import FILE_OF_STEM, stem
 from jimic.memory.live import LiveConfig
 from jimic.memory.notices import record_handover
 from jimic.memory.schemas import Intentions, Limits
@@ -54,19 +55,11 @@ MEMORY_CLIPPED_TEXT = (
     "⚠️ {files} es muy largo y solo le paso a JimiC el principio: acórtalo a mano para que lo"
     " vea entero."
 )
-FILE_NAMES = {
-    "rutina": "rutina.md",
-    "objetivos": "objetivos.md",
-    "preferencias": "preferencias.md",
-    "intenciones": "intenciones.yaml",
-    "limites": "limites.yaml",
-}
-"""The system notices keep the stem of a name (no dots there): back to the name."""
 
 
-def _files(detail: str, default_suffix: str = "") -> str:
-    names = [FILE_NAMES.get(stem, stem + default_suffix) for stem in detail.split(",") if stem]
-    return " y ".join(names)
+def _files(detail: str) -> str:
+    """The system notices keep the stem of a name (no dots there): back to the names."""
+    return " y ".join(FILE_OF_STEM.get(part, part) for part in detail.split(",") if part)
 
 
 class Sender(Protocol):
@@ -178,7 +171,7 @@ class Heartbeat:
         validate leaves the last good version in use, and registers `config_invalid`."""
         invalid = self._config.refresh()
         if invalid:
-            detail = ",".join(name.split(".", 1)[0] for name in invalid)
+            detail = ",".join(stem(name) for name in invalid)
             system_notices.detect(self._conn, "config_invalid", now.date(), now, detail)
 
     async def _beat(self, now: datetime) -> None:
@@ -298,7 +291,7 @@ class Heartbeat:
         if notice.kind == "budget":
             return self._budget_text(day)
         if notice.kind == "config_invalid":
-            return CONFIG_INVALID_TEXT.format(files=_files(notice.detail, ".yaml"))
+            return CONFIG_INVALID_TEXT.format(files=_files(notice.detail))
         if notice.kind == "memory_clipped":
             return MEMORY_CLIPPED_TEXT.format(files=_files(notice.detail))
         parts = [entry.split(":", 1)[0] for entry in notice.detail.split(",")]
