@@ -36,7 +36,7 @@ from jimic.tools.todoist import (
 LOGGER = "jimic.tools.todoist"
 NOW = madrid("2030-01-07 09:00")
 
-READ_MEMBERS = {"read_today", "read_project", "get_task"}
+READ_MEMBERS = {"read_today", "read_project", "get_task", "get_photo"}
 WRITE_MEMBERS = {"create", "move", "complete", "delete"}
 
 
@@ -586,3 +586,75 @@ def test_si_falla_la_lectura_previa_al_mover_no_se_escribe():
         run(make_writer(api).move("a", date(2030, 1, 9)))
     assert caught.value.code == "http_503"
     assert api.calls_of("update_task") == []
+
+
+# --- La foto, la bandeja de entrada y quitar la fecha (tarea 1.11) ----------------------------
+
+
+def test_la_foto_lleva_descripcion_etiquetas_y_prioridad_y_la_tarea_igual_que_get_task():
+    """Pilla una foto sin lo que `deleted_tasks` guarda, o con otra tarea que la de `get_task`."""
+    raw = raw_task("t1", due="2030-01-07", description="Notas inventadas")
+    raw["labels"] = ["casa", "rápido"]
+    raw["priority"] = 3
+    api = FakeTodoistApi([raw, raw_task("hija", parent_id="t1")])
+    reader = make_reader(api)
+    photo = run(reader.get_photo("t1"))
+    assert photo is not None
+    assert (photo.description, photo.labels, photo.priority) == (
+        "Notas inventadas",
+        ("casa", "rápido"),
+        3,
+    )
+    assert photo.task == run(reader.get_task("t1"))
+    assert photo.task.has_subtasks
+
+
+def test_la_foto_de_una_tarea_que_no_existe_es_none():
+    assert run(make_reader(FakeTodoistApi()).get_photo("nada")) is None
+
+
+def test_la_foto_no_ensena_la_descripcion_en_su_repr():
+    raw = raw_task("t1", title=PRIVATE_TITLE, description=PRIVATE_TITLE)
+    photo = run(make_reader(FakeTodoistApi([raw])).get_photo("t1"))
+    assert PRIVATE_TITLE not in repr(photo)
+
+
+def test_crear_sin_proyecto_va_a_la_bandeja_de_entrada():
+    """Pilla un proyecto inventado cuando se pide la bandeja (`project_id` ausente en la API)."""
+    api = FakeTodoistApi()
+    run(make_writer(api).create("Tarea nueva", None, date(2030, 1, 7)))
+    assert api.calls_of("add_task")[0]["project_id"] is None
+
+
+def test_mover_a_none_quita_la_fecha_con_no_date():
+    """Pilla un [Deshacer] que no devuelve a «sin fecha» lo que no la tenía."""
+    api = FakeTodoistApi([raw_task("t1", due="2030-01-07")])
+    run(make_writer(api).move("t1", None))
+    assert api.calls_of("update_task") == [
+        {
+            "task_id": "t1",
+            "due_string": "no date",
+            "due_lang": "en",
+            "due_date": None,
+            "due_datetime": None,
+        }
+    ]
+    moved = run(make_reader(api).get_task("t1"))
+    assert moved is not None and moved.due is None
+
+
+def test_quitar_la_fecha_de_una_recurrente_se_niega_sin_escribir():
+    """Pilla quitar la fecha a una recurrente, que perdería su recurrencia."""
+    api = FakeTodoistApi([raw_task("t1", due="2030-01-07", recurring=True)])
+    with pytest.raises(ToolFailure) as caught:
+        run(make_writer(api).move("t1", None))
+    assert caught.value.code == "invalid_due"
+    assert api.calls_of("update_task") == []
+
+
+def test_la_guardia_de_dev_niega_la_foto_de_otro_proyecto():
+    api = FakeTodoistApi([raw_task("t1", project_id=REAL_PROJECT, title=PRIVATE_TITLE)])
+    reader = todoist.GuardedReader(make_reader(api), TEST_PROJECT)
+    with pytest.raises(ToolFailure) as caught:
+        run(reader.get_photo("t1"))
+    assert caught.value.code == "outside_test_project"

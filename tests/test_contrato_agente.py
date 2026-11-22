@@ -19,6 +19,7 @@ from claude_agent_sdk import ResultMessage, SystemMessage, query
 from conftest import CONTRACT
 from heartbeat_data import limits, task
 
+from jimic.agent.guard import guard_hooks
 from jimic.agent.options import build_options
 from jimic.agent.tools import build_server
 from jimic.memory.database import open_database
@@ -70,10 +71,11 @@ def test_el_agente_real_ve_solo_las_seis_lee_y_reanuda(contract_env, tmp_path):
     srcs = agent_sources(TaskList(available=True, tasks=[task("t1"), task("t2")]))
     try:
         ctx = context(conn, config_dir, srcs)
+        hooks = guard_hooks(limits(), conn, ctx.day)
         first = asyncio.run(
             run(
                 "[lun 07/01 10:15] Llama a read_tasks y dime solo cuántas tareas tengo, en cifra.",
-                build_options(settings, limits(), agent_dir, build_server(ctx), None),
+                build_options(settings, limits(), agent_dir, build_server(ctx), None, hooks),
             )
         )
         (init,) = [m for m in first if isinstance(m, SystemMessage) and m.subtype == "init"]
@@ -95,7 +97,7 @@ def test_el_agente_real_ve_solo_las_seis_lee_y_reanuda(contract_env, tmp_path):
             run(
                 "[lun 07/01 10:20] ¿Cuántas tareas me dijiste antes?"
                 " Solo la cifra, sin herramientas.",
-                build_options(settings, limits(), agent_dir, build_server(ctx), session),
+                build_options(settings, limits(), agent_dir, build_server(ctx), session, hooks),
             )
         )
         (again,) = [m for m in second if isinstance(m, ResultMessage)]

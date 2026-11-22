@@ -3,7 +3,7 @@
 import json
 
 import pytest
-from pydantic import ValidationError
+from pydantic import JsonValue, ValidationError
 
 from jimic.channel.message import (
     MAX_APPROVAL_ID,
@@ -15,11 +15,14 @@ from jimic.channel.message import (
     Option,
     Outcome,
     Tap,
+    claim,
     clip_result,
     ensure_fits,
     expire,
     final_status,
+    fit_titles,
     parse_callback,
+    release,
     render,
     resolve,
     targets,
@@ -51,9 +54,9 @@ def test_un_mensaje_con_n_elementos_lleva_n_filas_numeradas_y_la_global():
     """Pilla un teclado sin fila por elemento, sin numerar o sin la fila global."""
     view = render(make_message(), approval_id=7)
     assert labels(view) == [
-        ["1 · Sí", "1 · No"],
-        ["2 · Sí", "2 · No"],
-        ["3 · Sí", "3 · No"],
+        ["1 Sí", "1 No"],
+        ["2 Sí", "2 No"],
+        ["3 Sí", "3 No"],
         ["Créalo todo", "Nada"],
     ]
     assert view.text == (
@@ -83,7 +86,7 @@ def test_un_toque_quita_su_fila_y_el_texto_dice_que_paso():
     assert targets(message, tap) == [(0, "y")]
     after = resolve(message, {0: Outcome("y", "✓ creada")})
     view = render(after, approval_id=7)
-    assert labels(view) == [["2 · Sí", "2 · No"], ["3 · Sí", "3 · No"], ["Créalo todo", "Nada"]]
+    assert labels(view) == [["2 Sí", "2 No"], ["3 Sí", "3 No"], ["Créalo todo", "Nada"]]
     assert "1. Gimnasio 13:00 — ✓ creada" in view.text
     assert "2. Llamar a la tienda 17:30\n" in view.text
 
@@ -125,7 +128,7 @@ def test_la_global_no_resuelve_lo_que_no_ofrece_su_opcion():
     )
     assert targets(message, Tap(1, None, "all")) == [(0, "y")]
     after = resolve(message, {0: Outcome("y", "✓ creada")})
-    assert labels(render(after, 1)) == [["2 · Borrar"]]
+    assert labels(render(after, 1)) == [["2 Borrar"]]
 
 
 def test_un_toque_que_no_existe_no_toca_nada():
@@ -284,3 +287,115 @@ def test_el_resultado_largo_se_recorta_y_queda_en_una_linea():
     assert clip_result("a" * 41) == "a" * 39 + "…"
     assert clip_result("uno\ndos\n\ntres") == "uno dos tres"
     assert clip_result("  \n ") == "hecho"
+
+
+# --- Lo que añade la 1.11: cuerpo, nota, «en curso» y títulos que caben --------------------
+
+
+def test_el_cuerpo_va_antes_de_la_cabecera_y_se_escapa():
+    """Pilla el texto del agente sin escapar, en negrita o detrás de la lista."""
+    message = make_message(TITLES[:1]).model_copy(update={"body": "Mira <esto> & aquello"})
+    assert render(message, 1).text == (
+        "Mira &lt;esto&gt; &amp; aquello\n\n<b>Plan de prueba</b>\n\n1. Gimnasio 13:00"
+    )
+
+
+def test_sin_cabecera_ni_cuerpo_no_hay_mensaje():
+    with pytest.raises(ValidationError):
+        InteractiveMessage(items=(Item(title="x", options=(YES,)),))
+
+
+def test_la_nota_se_ve_y_el_elemento_conserva_su_fila():
+    """Pilla un fallo que quita la fila (Pedro no podría reintentarlo) o que no se ve."""
+    message = make_message(TITLES[:1])
+    item = message.items[0].model_copy(update={"note": "falló (timeout)"})
+    view = render(message.model_copy(update={"items": (item,)}), 1)
+    assert view.text.endswith("1. Gimnasio 13:00 — falló (timeout)")
+    assert labels(view)[0] == ["1 Sí", "1 No"]
+
+
+def test_un_elemento_en_curso_no_tiene_fila_ni_lo_toca_un_toque():
+    """Pilla un elemento reclamado que aún se puede tocar: su efecto correría dos veces."""
+    message = claim(make_message(), {0})
+    view = render(message, 1)
+    assert "1. Gimnasio 13:00 — en curso…" in view.text
+    assert labels(view)[0] == ["2 Sí", "2 No"]
+    assert targets(message, Tap(1, 1, "y")) == []
+    assert targets(message, Tap(1, None, "all")) == [(1, "y"), (2, "y")]
+    assert final_status(resolve(message, {1: Outcome("y", "ok"), 2: Outcome("y", "ok")})) is None
+
+
+def test_resolver_un_elemento_en_curso_lo_cierra_y_borra_su_nota():
+    item = make_message().items[0].model_copy(update={"running": True, "note": "falló (x)"})
+    message = make_message().model_copy(update={"items": (item,)})
+    done = resolve(message, {0: Outcome("y", "✓ creada")}).items[0]
+    assert (done.result, done.running, done.note) == ("✓ creada", False, None)
+
+
+def test_al_caducar_lo_pendiente_dice_su_texto_y_lo_que_estaba_en_curso_queda_sin_confirmar():
+    """Pilla un efecto a medias que se da por caducado (podría haber ocurrido)."""
+    message = claim(make_message(), {0}).model_copy(update={"expired_text": "Deshacer caducado"})
+    expired = expire(message)
+    assert [item.result for item in expired.items] == [
+        "sin confirmar: mira Todoist",
+        "Deshacer caducado",
+        "Deshacer caducado",
+    ]
+    assert not any(item.running for item in expired.items)
+
+
+def test_una_nota_de_mas_de_40_no_entra():
+    with pytest.raises(ValidationError):
+        Item(title="x", options=(YES,), note="n" * 41)
+
+
+def test_fit_titles_recorta_solo_lo_que_se_ve_hasta_que_cabe():
+    """Pilla un mensaje que no cabe tras renovar un título largo, o que pierde lo que hace."""
+    data: dict[str, JsonValue] = {"task_id": "t1"}
+    items = tuple(Item(title="x" * 500, options=(YES, NO), data=data) for _ in range(MAX_ITEMS))
+    message = InteractiveMessage(header="Plan", items=items)
+    with pytest.raises(MessageTooLong):
+        ensure_fits(message)
+    fitted = fit_titles(message)
+    ensure_fits(fitted)
+    assert all(item.title.endswith("…") and item.data == data for item in fitted.items)
+    assert fit_titles(make_message()) == make_message()
+
+
+def test_release_vuelve_a_dejar_pendiente_y_reajusta_el_titulo():
+    message = claim(make_message(), {0})
+    renewed = message.items[0].model_copy(update={"title": "y" * 5000, "note": "ha cambiado"})
+    released = release(message, 0, renewed)
+    item = released.items[0]
+    assert item.pending and item.note == "ha cambiado" and item.title.endswith("…")
+    ensure_fits(released)
+
+
+def test_release_nunca_lanza_si_el_titulo_nuevo_no_cabe_se_queda_el_anterior():
+    """Hallazgo 5 de la revisión: `release` corre tras los efectos de un toque; si lanzara, lo
+    ya hecho quedaría «en curso». Un cuerpo al límite y ocho títulos cortos no dejan sitio a un
+    título renovado, que no se recorta por debajo de 20: se queda el que había, con su nota y lo
+    nuevo en `data`."""
+    items = tuple(Item(title="t" * 5, options=(YES, NO)) for _ in range(MAX_ITEMS))
+    body = "b" * 1
+    message = InteractiveMessage(header="Plan", body=body, items=items)
+    for step in (50, 1):  # el cuerpo más largo que aún cabe, al carácter
+        while True:
+            try:
+                ensure_fits(message.model_copy(update={"body": body + "b" * step}))
+            except MessageTooLong:
+                break
+            body += "b" * step
+    message = claim(message.model_copy(update={"body": body}), {0})
+    renewed = message.items[0].model_copy(
+        update={"title": "n" * 200, "note": "ha cambiado", "data": {"x": 1}}
+    )
+    released = release(message, 0, renewed)
+    item = released.items[0]
+    assert (item.title, item.note, item.data, item.pending) == (
+        "t" * 5,
+        "ha cambiado",
+        {"x": 1},
+        True,
+    )
+    ensure_fits(released)

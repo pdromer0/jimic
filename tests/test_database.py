@@ -27,8 +27,8 @@ TABLES = {
     "handovers",
     "conversations",
 }
-LATEST = 3
-"""La última migración del paquete (0003, la del agente)."""
+LATEST = 4
+"""La última migración del paquete (0004, la de la guardia)."""
 
 
 def table_names(conn: sqlite3.Connection) -> set[str]:
@@ -66,7 +66,7 @@ def test_una_migracion_que_falla_a_medias_no_deja_nada(db_path):
     """Pilla migraciones sin transacción: ni la tabla nueva ni la versión deben quedar."""
     conn = open_database(db_path)
     broken = Migration(
-        LATEST + 1, "0004_broken.sql", "CREATE TABLE extra (x);\nCREATE TABLE decisions (y);"
+        LATEST + 1, "0005_broken.sql", "CREATE TABLE extra (x);\nCREATE TABLE decisions (y);"
     )
     try:
         with pytest.raises(sqlite3.OperationalError, match="already exists"):
@@ -176,5 +176,21 @@ def test_un_dia_que_no_es_yyyy_mm_dd_se_rechaza(db_path):
                 "INSERT INTO day_ratings (day, rating, rated_at) VALUES (?, 3, ?)",
                 ("19/11/2026", "2026-11-19T20:00:00+00:00"),
             )
+    finally:
+        conn.close()
+
+
+def test_la_0004_anade_el_mensaje_de_telegram_a_approvals_sin_tocar_lo_que_habia(tmp_path):
+    """Pilla una 0004 que no añade la columna o que pierde las filas de la 1.10."""
+    conn = open_database(tmp_path / "jimic.db")
+    try:
+        columns = [row[1] for row in conn.execute("PRAGMA table_info(approvals)")]
+        assert columns[-1] == "telegram_message_id"
+        conn.execute(
+            "INSERT INTO approvals (created_at, expires_at, kind, payload)"
+            " VALUES ('2030-01-07T09:00:00+00:00', '2030-01-07T23:00:00+00:00', 'plan', '{}')"
+        )
+        (value,) = conn.execute("SELECT telegram_message_id FROM approvals").fetchone()
+        assert value is None
     finally:
         conn.close()

@@ -33,3 +33,5 @@ Cada cambio con su tarea y su commit, o «Nada».
 - [0002. Repositorio público sin nada personal](0002-repositorio-publico.md) (43, 50, 52 y 53)
 - [0003. Comprobación de tipos con pyright](0003-pyright.md) (46)
 - [0004. gitleaks contra los secretos](0004-gitleaks.md) (49)
+- [0005. La guardia: el agente propone y el código ejecuta](0005-la-guardia.md) (15, 27, 55, 56
+  y 96 a 100)

@@ -199,6 +199,23 @@ def test_telegram_rechaza_el_envio_no_deja_aviso_y_el_motivo_lo_dice(conn):
     assert world.reasons() == [f"{SECRET_REASON} [send ok send_failed:Forbidden]"]
 
 
+def test_un_envio_rechazado_se_descarta_sin_gastar_y_el_siguiente_latido_puede_enviarlo(conn):
+    """Lo decidido en la 1.11 para el pendiente de la 1.8: lo que Telegram rechaza no se
+    reintenta a ciegas, pero no consta como enviado (ni en el cupo ni en el tope por
+    intención), así que el latido siguiente puede volver a elegirlo y sale."""
+    world = World(conn, FakeMessages(api_message(answer(True, "ofertas", SECRET_TEXT))))
+    world.sender.fail = "Forbidden"
+    world.at("2030-01-07T16:30")
+    world.sender.fail = None
+    world.at("2030-01-07T16:45")
+    assert [intent for intent, _ in world.notices()] == ["ofertas"]
+    assert world.reasons()[1] == f"{SECRET_REASON} [send ok]"
+    first, second = (json.loads(r["messages"][0]["content"]) for r in world.fake.requests)
+    # 7 en los dos: el hueco del cierre está guardado y lo rechazado no gastó nada.
+    assert first["messages_left"] == second["messages_left"] == 7
+    assert second["sent_today"] == []
+
+
 @pytest.mark.parametrize(
     ("intent", "task_id"), [("plan_del_dia", "1.14"), ("cierre_del_dia", "1.16")]
 )

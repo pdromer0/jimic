@@ -64,7 +64,15 @@ LIMITS: dict[str, Any] = {
         "daily_cap_usd": 3.0,
         "max_session_usd": 0.5,
     },
-    "tool_levels": {"read_calendar": "free"},
+    # Como la plantilla: las seis libres (la guardia de la 1.11 bloquea lo que falta).
+    "tool_levels": {
+        "read_calendar": "free",
+        "read_tasks": "free",
+        "read_apex_today": "free",
+        "propose_plan": "free",
+        "propose_change": "free",
+        "log_idea": "free",
+    },
     "sensitive_categories": {},
 }
 

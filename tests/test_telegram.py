@@ -1,6 +1,7 @@
 """El canal de Telegram con la biblioteca de verdad y la red de mentira: ni red ni *polling*."""
 
 import asyncio
+import json
 import logging
 from datetime import datetime, time, timedelta
 from zoneinfo import ZoneInfo
@@ -26,8 +27,12 @@ from jimic.channel import store
 from jimic.channel.bot import (
     ALREADY_RESOLVED,
     COULD_NOT_REPLY,
+    IN_PROGRESS,
     NOT_YET,
     ChannelError,
+    Incoming,
+    Outgoing,
+    Reply,
     SendError,
     TelegramChannel,
     build_application,
@@ -37,6 +42,7 @@ from jimic.channel.message import (
     InteractiveMessage,
     Item,
     Option,
+    claim,
 )
 from jimic.memory.database import open_database
 
@@ -58,7 +64,7 @@ def make_message() -> InteractiveMessage:
     )
 
 
-async def handler_ok(item: Item, option: str) -> str:
+async def handler_ok(item: Item, option: str, approval_id: int) -> str:
     return "✓ creada" if option == "y" else "✗ descartada"
 
 
@@ -147,7 +153,7 @@ def test_enviar_manda_html_sin_vista_previa_con_filas_numeradas_y_la_global(
     assert params["parse_mode"] == "HTML"
     assert params["link_preview_options"]["is_disabled"] is True
     assert params["text"].startswith("<b>Plan de prueba</b>")
-    assert keyboard_rows(params) == [["1 · Sí", "1 · No"], ["2 · Sí", "2 · No"], ["Créalo todo"]]
+    assert keyboard_rows(params) == [["1 Sí", "1 No"], ["2 Sí", "2 No"], ["Créalo todo"]]
     data = [b["callback_data"] for row in params["reply_markup"]["inline_keyboard"] for b in row]
     assert data == [
         f"{approval_id}:1:y",
@@ -171,7 +177,7 @@ def test_un_toque_edita_el_mismo_mensaje_y_no_envia_otro(make_channel, request_d
     assert params["parse_mode"] == "HTML"
     assert params["link_preview_options"]["is_disabled"] is True
     assert "1. Gimnasio 13:00 — ✓ creada" in params["text"]
-    assert keyboard_rows(params) == [["2 · Sí", "2 · No"], ["Créalo todo"]]
+    assert keyboard_rows(params) == [["2 Sí", "2 No"], ["Créalo todo"]]
 
 
 def test_un_toque_de_otro_chat_se_ignora_sin_responder_ni_editar(
@@ -227,7 +233,8 @@ def test_sin_conversacion_un_texto_recibe_la_frase_fija(make_channel, request_do
 def test_el_texto_de_pedro_va_al_manejador_inyectado(make_channel, request_double):
     received: list[str] = []
 
-    async def on_text(text: str) -> str:
+    async def on_text(incoming: Incoming) -> str:
+        text = incoming.text
         received.append(text)
         return "respuesta <inventada> & sin escapar"
 
@@ -337,7 +344,7 @@ def test_un_error_inesperado_en_un_manejador_registra_solo_su_tipo(
 
 
 def test_si_la_conversacion_falla_pedro_recibe_una_frase_fija(make_channel, request_double, caplog):
-    async def on_text(text: str) -> str:
+    async def on_text(incoming: Incoming) -> str:
         raise RuntimeError(SECRET_TEXT)
 
     channel, application = make_channel(on_text=on_text)
@@ -356,7 +363,7 @@ def test_mientras_el_agente_piensa_un_toque_se_atiende_y_el_texto_sale_despues(
     thinking, started = asyncio.Event(), asyncio.Event()
     order: list[str] = []
 
-    async def on_text(text: str) -> str:
+    async def on_text(incoming: Incoming) -> str:
         started.set()
         await thinking.wait()
         order.append("respuesta")
@@ -385,7 +392,7 @@ def test_mientras_el_agente_piensa_un_toque_se_atiende_y_el_texto_sale_despues(
 
 
 def test_una_respuesta_larga_se_parte_en_mensajes_que_caben(make_channel, request_double):
-    async def on_text(text: str) -> str:
+    async def on_text(incoming: Incoming) -> str:
         return "\n".join(["línea & más " + "x" * 90] * 60)
 
     channel, application = make_channel(on_text=on_text)
@@ -399,7 +406,7 @@ def test_una_respuesta_larga_se_parte_en_mensajes_que_caben(make_channel, reques
 def test_al_parar_se_cancela_el_turno_que_sigue_pensando(make_channel, request_double):
     never = asyncio.Event()
 
-    async def on_text(text: str) -> str:
+    async def on_text(incoming: Incoming) -> str:
         await never.wait()
         return "nunca"
 
@@ -600,7 +607,7 @@ def test_el_modulo_expone_el_gestor_de_errores_y_sin_concurrencia():
 def test_un_fallo_parcial_de_creelo_todo_avisa_en_el_toque(make_channel, request_double):
     """Pilla un [Créalo todo] que deja un elemento sin resolver sin decírselo a Pedro."""
 
-    async def flaky(item: Item, option: str) -> str:
+    async def flaky(item: Item, option: str, approval_id: int) -> str:
         if item.title == SECRET_TITLE:
             raise RuntimeError("falla")
         return "✓ creada"
@@ -631,7 +638,8 @@ def test_un_mensaje_que_llega_mientras_para_no_abre_un_turno(make_channel, reque
     que nadie cancelaría."""
     received: list[str] = []
 
-    async def on_text(text: str) -> str:
+    async def on_text(incoming: Incoming) -> str:
+        text = incoming.text
         received.append(text)
         return "nunca"
 
@@ -657,7 +665,8 @@ def test_dos_mensajes_seguidos_se_contestan_en_el_orden_de_llegada(make_channel,
     lock = asyncio.Lock()
     arrived: list[str] = []
 
-    async def on_text(text: str) -> str:
+    async def on_text(incoming: Incoming) -> str:
+        text = incoming.text
         arrived.append(text)  # lo que anota la conversación al llegar
         async with lock:  # el turno, como en la conversación
             await asyncio.sleep(0)
@@ -686,3 +695,205 @@ def test_dos_mensajes_seguidos_se_contestan_en_el_orden_de_llegada(make_channel,
         "respuesta a uno",
         "respuesta a dos",
     ]
+
+
+# --- El último mensaje, la respuesta citada, las respuestas con botones y el barrido (1.11) ---
+
+
+def test_enviar_guarda_el_id_del_mensaje_y_lo_recuerda_como_el_ultimo(
+    make_channel, request_double, conn
+):
+    """Pilla un mensaje que no se puede editar sin un toque (el «sí», el barrido)."""
+    channel, application = make_channel()
+    approval_id = send_and_drive(channel, application)
+    approval = store.load(conn, approval_id)
+    assert approval is not None and approval.telegram_message_id == 10
+    assert channel.last_sent == 10
+
+
+def test_el_ultimo_mensaje_cuenta_tambien_el_texto_y_las_respuestas(make_channel, request_double):
+    """Pilla un «último mensaje» que solo mira lo interactivo: un aviso del latido o una
+    respuesta de la conversación después del borrado no lo dejarían atrás (decisión 1.11-d)."""
+    seen: list[Incoming] = []
+
+    async def on_text(incoming: Incoming) -> str:
+        seen.append(incoming)
+        return "una respuesta"
+
+    channel, application = make_channel(on_text=on_text)
+
+    async def scenario():
+        async with application:
+            await channel.send("demo", make_message(), EXPIRES)  # id 10
+            await channel.send_text("un aviso del latido")  # id 11
+            for number, text in enumerate(("hola", "otra"), start=1):
+                update = to_update(text_update(text, update_id=number), application.bot)
+                await application.process_update(update)
+                await channel.drain()
+
+    asyncio.run(scenario())
+    # Lo que vale es lo último enviado cuando llegó cada mensaje: tras «hola», su respuesta (12).
+    assert [incoming.last_sent for incoming in seen] == [11, 12]
+    assert channel.last_sent == 13
+
+
+def test_la_respuesta_citada_llega_con_su_id(make_channel):
+    seen: list[Incoming] = []
+
+    async def on_text(incoming: Incoming) -> str:
+        seen.append(incoming)
+        return "vale"
+
+    channel, application = make_channel(on_text=on_text)
+    drive(application, text_update("sí", reply_to=33))
+    assert [(incoming.text, incoming.reply_to) for incoming in seen] == [("sí", 33)]
+
+
+def test_una_respuesta_con_mensaje_sale_en_uno_con_el_texto_como_cuerpo(
+    make_channel, request_double, conn
+):
+    """Pilla los botones en un mensaje aparte de la respuesta (decisión 1.11-a)."""
+
+    async def on_text(incoming: Incoming) -> Reply:
+        return Reply("Te dejo <esto>", Outgoing("demo", make_message(), EXPIRES))
+
+    channel, application = make_channel(on_text=on_text)
+    drive(application, text_update("hola"))
+    (params,) = request_double.params("sendMessage")
+    assert params["text"].startswith("Te dejo &lt;esto&gt;\n\n<b>Plan de prueba</b>")
+    assert keyboard_rows(params)[0] == ["1 Sí", "1 No"]
+    (approval,) = conn.execute("SELECT kind, telegram_message_id FROM approvals").fetchall()
+    assert approval == ("demo", 10)
+
+
+def test_si_no_caben_juntos_el_texto_sale_antes_y_la_propuesta_sin_cuerpo(
+    make_channel, request_double
+):
+    async def on_text(incoming: Incoming) -> Reply:
+        return Reply("x" * 4000, Outgoing("demo", make_message(), EXPIRES))
+
+    channel, application = make_channel(on_text=on_text)
+    drive(application, text_update("hola"))
+    first, second = request_double.params("sendMessage")
+    assert first["text"] == "x" * 4000 and "reply_markup" not in first
+    assert second["text"].startswith("<b>Plan de prueba</b>")
+
+
+def test_si_telegram_rechaza_lo_hecho_sale_su_texto_sin_boton(make_channel, request_double, conn):
+    """Lo ya hecho al momento no se pierde de vista si su [Deshacer] no puede salir."""
+    calls = {"n": 0}
+    original = request_double.do_request
+
+    async def first_fails(url, method, request_data=None, **timeouts):
+        if url.endswith("/sendMessage"):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                body = {"ok": False, "error_code": 400, "description": "Bad Request: inventado"}
+                return 400, json.dumps(body).encode()
+        return await original(url, method, request_data, **timeouts)
+
+    request_double.do_request = first_fails
+
+    async def on_text(incoming: Incoming) -> Reply:
+        return Reply("Hecho", Outgoing("undo", make_message(), EXPIRES, if_unsent="✅ Hecho: x"))
+
+    channel, application = make_channel(on_text=on_text)
+    drive(application, text_update("hola"))
+    texts = [params["text"] for params in request_double.params("sendMessage")]
+    assert texts == ["Hecho", "✅ Hecho: x"]  # el primero lo rechazó Telegram
+    assert conn.execute("SELECT COUNT(*) FROM approvals").fetchone() == (0,)
+
+
+def test_refresh_edita_el_mensaje_guardado_sin_toque(make_channel, request_double, conn):
+    channel, application = make_channel()
+    approval_id = send_and_drive(channel, application)
+    request_double.calls.clear()
+
+    async def before():
+        await channel.refresh(approval_id)
+
+    drive(application, before=before)
+    (params,) = request_double.params("editMessageText")
+    assert params["message_id"] == 10
+
+
+def test_el_barrido_edita_y_quita_los_botones_de_lo_caducado(make_channel, request_double, clock):
+    """Pilla una propuesta sin toque que conserva sus botones (1.11-c)."""
+    channel, application = make_channel()
+    send_and_drive(channel, application)
+    request_double.calls.clear()
+    clock.moment = EXPIRES
+
+    async def before():
+        await channel.sweep()
+
+    drive(application, before=before)
+    (params,) = request_double.params("editMessageText")
+    assert params["message_id"] == 10
+    assert params["reply_markup"] == {"inline_keyboard": []}
+    assert "— caducado" in params["text"]
+
+
+def test_un_toque_sobre_lo_que_esta_en_curso_avisa(make_channel, request_double, conn):
+    channel, application = make_channel()
+    approval_id = send_and_drive(channel, application)
+    approval = store.load(conn, approval_id)
+    assert approval is not None
+    store.save(conn, approval_id, claim(approval.message, {0}), None, NOW)
+    request_double.calls.clear()
+    drive(application, callback_update(f"{approval_id}:1:y"))
+    assert request_double.methods() == ["answerCallbackQuery"]
+    assert request_double.params("answerCallbackQuery")[0]["text"] == IN_PROGRESS
+
+
+def test_si_pedro_escribio_despues_del_ultimo_envio_el_si_no_responde_a_ese(make_channel):
+    """Hallazgo 1 de la revisión: Pedro escribe «no, mejor borra Y» tras la propuesta A y,
+    antes de que salga la respuesta, «sí». Ese «sí» no puede confirmar el borrado de A."""
+    seen: list[Incoming] = []
+    gate = asyncio.Event()
+
+    async def on_text(incoming: Incoming) -> str:
+        seen.append(incoming)
+        if incoming.text != "sí":
+            await gate.wait()
+        return "respuesta"
+
+    channel, application = make_channel(on_text=on_text)
+
+    async def scenario():
+        async with application:
+            await channel.send("demo", make_message(), EXPIRES)  # A, id 10
+            for number, text in enumerate(("no, mejor borra Y", "sí"), start=1):
+                update = to_update(text_update(text, update_id=number), application.bot)
+                await application.process_update(update)
+            gate.set()
+            await channel.drain()
+
+    asyncio.run(scenario())
+    assert [incoming.last_sent for incoming in seen] == [10, None]
+
+
+def test_si_telegram_rechaza_la_propuesta_la_respuesta_del_agente_llega_igual(
+    make_channel, request_double, conn
+):
+    """Hallazgo 6 de la revisión: la respuesta iba solo en el cuerpo de la propuesta; si
+    Telegram la rechaza, Pedro no recibía nada."""
+    original = request_double.do_request
+    state = {"first": True}
+
+    async def first_fails(url, method, request_data=None, **timeouts):
+        if url.endswith("/sendMessage") and state["first"]:
+            state["first"] = False
+            body = {"ok": False, "error_code": 400, "description": "Bad Request: inventado"}
+            return 400, json.dumps(body).encode()
+        return await original(url, method, request_data, **timeouts)
+
+    request_double.do_request = first_fails
+
+    async def on_text(incoming: Incoming) -> Reply:
+        return Reply("Te propongo esto", Outgoing("demo", make_message(), EXPIRES))
+
+    channel, application = make_channel(on_text=on_text)
+    drive(application, text_update("hola"))
+    texts = [params["text"] for params in request_double.params("sendMessage")]
+    assert texts[-1] == "Te propongo esto"

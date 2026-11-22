@@ -16,7 +16,7 @@ from jimic.channel.message import (
     Option,
     Tap,
 )
-from jimic.channel.taps import process_tap
+from jimic.channel.taps import Failed, Renew, process_tap, sweep
 from jimic.memory.database import open_database
 
 NOW = datetime(2026, 11, 21, 19, 0, tzinfo=ZoneInfo("Europe/Madrid"))
@@ -34,7 +34,7 @@ class RecordingHandler:
         self.calls: list[tuple[str, str]] = []
         self.fail_on = fail_on or set()
 
-    async def __call__(self, item: Item, option: str) -> str:
+    async def __call__(self, item: Item, option: str, approval_id: int) -> str:
         self.calls.append((item.title, option))
         if len(self.calls) > MAX_CALLS:
             raise AssertionError("el manejador se ha llamado en bucle")
@@ -95,8 +95,8 @@ def test_un_toque_llama_al_manejador_resuelve_el_elemento_y_quita_su_fila(conn, 
     assert result.view is not None
     assert "1. Gimnasio 13:00 — ✓ creada" in result.view.text
     assert [[b.label for b in row] for row in result.view.keyboard] == [
-        ["2 · Sí", "2 · No"],
-        ["3 · Sí", "3 · No"],
+        ["2 Sí", "2 No"],
+        ["3 Sí", "3 No"],
         ["Créalo todo", "Nada"],
     ]
     approval = stored(conn, approval_id)
@@ -143,10 +143,12 @@ def test_un_manejador_que_falla_deja_ese_elemento_pendiente_sin_contenido_en_el_
         result = run(conn, clock, handler, Tap(approval_id, None, "all"))
     assert result.code == "partially_resolved"
     assert result.view is not None
-    assert f"2. {SECRET_TITLE}\n3. Leer 21:00 — ✓ creada" in result.view.text
+    assert f"2. {SECRET_TITLE} — falló (unexpected:RuntimeError)\n3. Leer 21:00 — ✓ creada" in (
+        result.view.text
+    )
     assert "1. Gimnasio 13:00 — ✓ creada" in result.view.text
     assert [[b.label for b in row] for row in result.view.keyboard] == [
-        ["2 · Sí", "2 · No"],
+        ["2 Sí", "2 No"],
         ["Créalo todo", "Nada"],
     ]
     assert "RuntimeError" in caplog.text
@@ -154,12 +156,26 @@ def test_un_manejador_que_falla_deja_ese_elemento_pendiente_sin_contenido_en_el_
     assert stored(conn, approval_id).status == "pending"
 
 
-def test_si_el_unico_manejador_falla_no_se_cambia_el_mensaje(conn, clock, approval_id):
-    result = run(
-        conn, clock, RecordingHandler(fail_on={"Gimnasio 13:00"}), Tap(approval_id, 1, "y")
+def test_si_el_unico_manejador_falla_el_elemento_sigue_pendiente_con_su_nota(
+    conn, clock, approval_id
+):
+    """Pilla un fallo que deja el elemento «en curso» (sin fila: no se podría reintentar) o que
+    lo resuelve. Con su nota y su fila, Pedro puede volver a intentarlo."""
+    handler = RecordingHandler(fail_on={"Gimnasio 13:00"})
+    result = run(conn, clock, handler, Tap(approval_id, 1, "y"))
+    assert result.code == "handler_failed"
+    item = stored(conn, approval_id).message.items[0]
+    assert (item.result, item.running, item.note) == (
+        None,
+        False,
+        "falló (unexpected:RuntimeError)",
     )
-    assert (result.code, result.view) == ("handler_failed", None)
-    assert stored(conn, approval_id).message == make_message()
+    assert result.view is not None
+    assert result.view.keyboard[0][0].label == "1 Sí"
+    handler.fail_on = set()
+    again = run(conn, clock, handler, Tap(approval_id, 1, "y"))
+    assert again.code == "resolved"
+    assert stored(conn, approval_id).message.items[0].note is None
 
 
 def test_un_toque_caducado_marca_caducado_y_quita_el_teclado(conn, clock, approval_id):
@@ -216,3 +232,151 @@ def test_tras_resolver_todo_un_toque_viejo_no_hace_nada(conn, clock, approval_id
     run(conn, clock, RecordingHandler(), Tap(approval_id, None, "all"))
     result = run(conn, clock, RecordingHandler(), Tap(approval_id, 1, "n"))
     assert (result.code, result.view) == ("already_resolved", None)
+
+
+# --- Reclamar antes del efecto, renovar y barrer (tarea 1.11) --------------------------------
+
+
+class GatedHandler:
+    """A handler that waits for `gate` before answering: an effect under way."""
+
+    def __init__(self) -> None:
+        self.calls = 0
+        self.gate = asyncio.Event()
+        self.started = asyncio.Event()
+
+    async def __call__(self, item: Item, option: str, approval_id: int) -> str:
+        self.calls += 1
+        if self.calls > MAX_CALLS:
+            raise AssertionError("el manejador se ha llamado en bucle")
+        self.started.set()
+        await self.gate.wait()
+        return "✓ creada"
+
+
+def test_dos_toques_simultaneos_ejecutan_una_sola_vez(conn, clock, approval_id):
+    """Pilla el toque doble (versión incorrecta 7): sin reclamar antes del efecto, el segundo
+    toque llega mientras el primero espera a Todoist y vuelve a ejecutar."""
+    handler = GatedHandler()
+
+    async def scenario():
+        first = asyncio.create_task(
+            process_tap(conn, clock, {"demo": handler}, Tap(approval_id, 1, "y"))
+        )
+        await handler.started.wait()
+        second = await process_tap(conn, clock, {"demo": handler}, Tap(approval_id, 1, "y"))
+        global_tap = asyncio.create_task(
+            process_tap(conn, clock, {"demo": handler}, Tap(approval_id, None, "all"))
+        )
+        await asyncio.sleep(0)
+        handler.gate.set()
+        return await first, second, await global_tap
+
+    first, second, global_tap = asyncio.run(scenario())
+    assert second.code == "in_progress"
+    assert first.code == "resolved"
+    # [Créalo todo] mientras el 1 estaba en curso: hace el 2 y el 3, nunca el 1 otra vez.
+    assert global_tap.code == "resolved"
+    assert handler.calls == 3
+    assert [item.result for item in stored(conn, approval_id).message.items] == ["✓ creada"] * 3
+
+
+def test_mientras_corre_el_elemento_queda_guardado_en_curso(conn, clock, approval_id):
+    """El estado «en curso» se guarda antes del efecto: tras una caída, nadie lo repite solo."""
+    handler = GatedHandler()
+
+    async def scenario():
+        task = asyncio.create_task(
+            process_tap(conn, clock, {"demo": handler}, Tap(approval_id, 1, "y"))
+        )
+        await handler.started.wait()
+        running = stored(conn, approval_id).message.items[0].running
+        handler.gate.set()
+        await task
+        return running
+
+    assert asyncio.run(scenario()) is True
+
+
+def test_si_el_payload_cambio_entre_leer_y_reclamar_no_se_ejecuta(
+    conn, clock, approval_id, monkeypatch
+):
+    """Pilla un reclamo sin comparar el payload: dos sobre lo mismo ejecutarían dos veces."""
+    original = store.load
+
+    def stale(connection, approval):
+        loaded = original(connection, approval)
+        # Otro toque reclamó en medio: el payload guardado ya no es el leído.
+        connection.execute("UPDATE approvals SET payload = json_set(payload, '$.header', 'otro')")
+        return loaded
+
+    monkeypatch.setattr(store, "load", stale)
+    handler = RecordingHandler()
+    assert run(conn, clock, handler, Tap(approval_id, 1, "y")).code == "in_progress"
+    assert handler.calls == []
+
+
+def test_renovar_deja_el_elemento_pendiente_con_lo_nuevo(conn, clock, approval_id):
+    """Pilla una renovación que resuelve el elemento (no volvería a preguntar)."""
+
+    async def renew(item: Item, option: str, approval: int):
+        return Renew(
+            item.model_copy(update={"title": "Título nuevo", "note": "ha cambiado: ¿la borro así?"})
+        )
+
+    result = asyncio.run(process_tap(conn, clock, {"demo": renew}, Tap(approval_id, 1, "y")))
+    assert result.code == "renewed"
+    item = stored(conn, approval_id).message.items[0]
+    assert (item.title, item.note, item.pending) == (
+        "Título nuevo",
+        "ha cambiado: ¿la borro así?",
+        True,
+    )
+    assert stored(conn, approval_id).status == "pending"
+
+
+def test_un_fallo_con_codigo_se_ve_en_la_nota(conn, clock, approval_id):
+    async def failing(item: Item, option: str, approval: int):
+        return Failed("timeout")
+
+    asyncio.run(process_tap(conn, clock, {"demo": failing}, Tap(approval_id, 1, "y")))
+    assert stored(conn, approval_id).message.items[0].note == "falló (timeout)"
+
+
+def test_el_manejador_recibe_el_id_de_su_aprobacion(conn, clock, approval_id):
+    seen = []
+
+    async def handler(item: Item, option: str, approval: int):
+        seen.append(approval)
+        return "ok"
+
+    asyncio.run(process_tap(conn, clock, {"demo": handler}, Tap(approval_id, 1, "y")))
+    assert seen == [approval_id]
+
+
+def test_el_barrido_caduca_lo_vencido_y_dice_que_editar(conn, clock, approval_id):
+    """Pilla una propuesta sin toque que conserva sus botones tras caducar (pendiente de la 1.4)."""
+    store.set_message_id(conn, approval_id, 77)
+    assert sweep(conn, clock) == []
+    clock.moment = EXPIRES
+    (swept,) = sweep(conn, clock)
+    assert (swept.approval_id, swept.telegram_message_id) == (approval_id, 77)
+    assert swept.view is not None and swept.view.keyboard == ()
+    assert "— caducado" in swept.view.text
+    assert stored(conn, approval_id).status == "expired"
+    assert sweep(conn, clock) == []
+
+
+def test_el_barrido_solo_marca_lo_que_no_tiene_mensaje_o_no_es_un_mensaje(conn, clock):
+    """Las propuestas de la 1.10 (otro payload, sin mensaje) y un payload roto con mensaje."""
+    for payload, message_id in (('{"items": []}', None), ('{"roto": true}', 5)):
+        conn.execute(
+            "INSERT INTO approvals (created_at, expires_at, kind, payload, telegram_message_id)"
+            " VALUES ('2026-11-21T17:00:00+00:00', '2026-11-21T18:00:00+00:00', 'plan', ?, ?)",
+            (payload, message_id),
+        )
+    clock.moment = EXPIRES
+    swept = sweep(conn, clock)
+    assert [(s.telegram_message_id, s.view) for s in swept] == [(None, None), (5, None)]
+    statuses = [row[0] for row in conn.execute("SELECT status FROM approvals ORDER BY id")]
+    assert statuses == ["expired", "expired"]

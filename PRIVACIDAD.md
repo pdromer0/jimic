@@ -38,8 +38,14 @@ usuario. **No lee la descripción**, la ubicación ni los correos de los asisten
   tareas; sin texto.
 - **Lo que propone el agente.** Un plan (crear, mover o borrar tareas, con la foto de cada tarea
   que mueve o borra: título, fecha y proyecto) o un cambio de memoria se guarda como propuesta en la
-  base, sin ejecutarse, hasta que el usuario la apruebe; caduca al acabar el día y se borra a los 30
-  días.
+  base, con el identificador del mensaje de Telegram que la enseña, sin ejecutarse, hasta que el
+  usuario la apruebe; caduca al acabar el día y se borra a los 30 días. Lo que se hace al momento
+  con [Deshacer] guarda igual, también 30 días, lo que hace falta para deshacerlo: la tarea creada
+  (título, fecha y proyecto) o la movida y su fecha anterior.
+- **Las tareas borradas.** Antes de borrar una tarea, JimiC guarda su foto completa (título,
+  descripción, fecha, duración, proyecto, etiquetas, prioridad), el motivo del borrado y la
+  aprobación, para poder recrearla. Se borra a los 30 días. Todoist no tiene papelera: sin esa
+  foto, lo borrado no se podría recuperar.
 - **Las ideas** que el usuario pide anotar van, una por línea y con su fecha, a `ideas.md`, junto a
   los ficheros personales; JimiC solo añade líneas, nunca reescribe el fichero.
 - Cuando el latido pasa al agente el plan o el cierre del día, la base anota la intención y la
