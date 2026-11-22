@@ -12,7 +12,7 @@
 #   gh.sh revisiones N        revisiones y comentarios de línea del PR N
 #   gh.sh abrir-pr RAMA TITULO FICHERO    abre el PR de RAMA contra main
 #   gh.sh editar-pr N FICHERO             cambia la descripción del PR N
-#   gh.sh crear-release ETIQUETA TITULO FICHERO   Release en borrador de una etiqueta v0.N-hitoN
+#   gh.sh crear-release ETIQUETA TITULO docs/releases/ETIQUETA.md   Release en borrador (v0.N-hitoN)
 set -u
 raiz=$(git rev-parse --show-toplevel) || exit 1
 cd "$raiz" || exit 1
@@ -64,9 +64,10 @@ case "$orden" in
     [[ "$1" =~ ^v0\.(0|[1-9][0-9]?)-hito(0|[1-9][0-9]?)$ ]] && [ "${BASH_REMATCH[1]}" = "${BASH_REMATCH[2]}" ] \
       || { echo "gh.sh: «$1» no es una etiqueta v0.N-hitoN" >&2; exit 64; }
     [ -n "$2" ] || { echo "gh.sh: falta el título" >&2; exit 64; }
+    [ "$3" = "docs/releases/$1.md" ] || { echo "gh.sh: las notas de $1 son docs/releases/$1.md, no «$3»" >&2; exit 64; }
     fichero "$3"
-    gh api "repos/$R/git/ref/tags/$1" --jq .ref >/dev/null 2>&1 \
-      || { echo "gh.sh: la etiqueta $1 no está en GitHub (o no responde); no se crea nada" >&2; exit 1; }
+    gh api "repos/$R/git/ref/tags/$1" --jq .ref >/dev/null \
+      || { echo "gh.sh: la etiqueta $1 no está en GitHub o no se pudo comprobar (arriba, el error de gh); no se crea nada" >&2; exit 1; }
     ya=$(gh api "repos/$R/releases" --paginate --jq '.[] | select(.tag_name == "'"$1"'") | .id') \
       || { echo "gh.sh: no se pudo listar las Releases; no se crea nada" >&2; exit 1; }
     [ -z "$ya" ] || { echo "gh.sh: ya hay una Release con la etiqueta $1 (id $ya); no se crea otra" >&2; exit 1; }
