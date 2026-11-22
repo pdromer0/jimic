@@ -9,17 +9,20 @@ Rules of the format (task 1.4):
 - Telegram HTML with **every** dynamic text escaped, never Markdown.
 - `callback_data` is `<approval id>:<item number or g>:<option key>`: short ids, never content.
 - A tap removes the row of what it resolved and says what happened in the text of the item.
+- An item being executed is `running` (task 1.11): it has no row and no tap touches it, so a
+  second tap never runs its effect twice. One that failed keeps its row with a `note`.
 - At most `MAX_ITEMS` items, and the text always fits in `TELEGRAM_TEXT_LIMIT`: if it cannot,
-  `ensure_fits` raises `MessageTooLong` instead of cutting.
+  `ensure_fits` raises `MessageTooLong` instead of cutting; `fit_titles` shortens the titles
+  shown (never what an item does) until it fits.
 """
 
 import html
 import re
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
 from dataclasses import dataclass
 from typing import Annotated, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, StringConstraints, model_validator
+from pydantic import BaseModel, ConfigDict, JsonValue, StringConstraints, model_validator
 
 MAX_ITEMS = 8
 MAX_OPTIONS = 4
@@ -30,11 +33,18 @@ TELEGRAM_TEXT_LIMIT = 4096
 MAX_APPROVAL_ID = 2**63 - 1
 """The largest `INTEGER PRIMARY KEY` of SQLite; it fixes the longest `callback_data` (30 bytes)."""
 EXPIRED_RESULT = "caducado"
+UNCONFIRMED_RESULT = "sin confirmar: mira Todoist"
+"""What an item still running gets when its message expires: its effect may or may not have
+happened, and it is never retried on its own."""
+RUNNING_TEXT = "en curso…"
 GLOBAL_TARGET = "g"
+MIN_TITLE_CHARS = 20
+"""`fit_titles` never shortens a title below this."""
 
 Key = Annotated[str, StringConstraints(pattern=r"^[a-z0-9]{1,8}$")]
 Label = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=32)]
 Text = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
+Short = Annotated[str, StringConstraints(min_length=1, max_length=MAX_RESULT_CHARS)]
 
 CALLBACK_DATA = re.compile(r"([1-9][0-9]{0,18}):([1-8]|g):([a-z0-9]{1,8})")
 
@@ -74,12 +84,16 @@ class Item(BaseModel):
 
     title: Text
     options: tuple[Option, ...]
-    result: Annotated[str, StringConstraints(min_length=1, max_length=MAX_RESULT_CHARS)] | None = (
-        None
-    )
+    result: Short | None = None
     """What happened, once resolved or expired; `None` while the item is pending."""
     chosen: Key | None = None
     """The key of the option that resolved it; `None` while pending or when it expired."""
+    running: bool = False
+    """Claimed by a tap whose effect is under way: no row, and no other tap touches it."""
+    note: Short | None = None
+    """Shown while still pending: why the last try failed, or that the task changed."""
+    data: dict[str, JsonValue] | None = None
+    """What the handler of its kind needs (ids, the snapshot); never shown."""
 
     @model_validator(mode="after")
     def _check(self) -> Self:
@@ -90,10 +104,17 @@ class Item(BaseModel):
             raise ValueError("the options of an item must have different keys")
         if self.chosen is not None and (self.chosen not in keys or self.result is None):
             raise ValueError("`chosen` must be one of the options and come with a result")
+        if self.running and self.result is not None:
+            raise ValueError("a resolved item is not running")
         return self
 
     @property
     def pending(self) -> bool:
+        """Waiting for a tap: not resolved and not running."""
+        return self.result is None and not self.running
+
+    @property
+    def unresolved(self) -> bool:
         return self.result is None
 
     def offers(self, key: str) -> bool:
@@ -103,13 +124,20 @@ class Item(BaseModel):
 class InteractiveMessage(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    header: Text
+    header: Text | None = None
+    """In bold, just above the items."""
+    body: Text | None = None
+    """Plain text before the header: the agent's answer (decision 1.11-a)."""
     items: tuple[Item, ...]
     global_options: tuple[GlobalOption, ...] = ()
     expired: bool = False
+    expired_text: Short = EXPIRED_RESULT
+    """What a pending item says once the message expires."""
 
     @model_validator(mode="after")
     def _check(self) -> Self:
+        if self.header is None and self.body is None:
+            raise ValueError("a message needs a header or a body")
         if not 1 <= len(self.items) <= MAX_ITEMS:
             raise ValueError(f"a message has between 1 and {MAX_ITEMS} items")
         keys = [option.key for option in self.global_options]
@@ -119,7 +147,8 @@ class InteractiveMessage(BaseModel):
 
     @property
     def pending_count(self) -> int:
-        return sum(item.pending for item in self.items)
+        """Items not resolved yet, the running ones included."""
+        return sum(item.unresolved for item in self.items)
 
 
 @dataclass(frozen=True)
@@ -159,11 +188,16 @@ def _escape(text: str) -> str:
 
 
 def _text(message: InteractiveMessage) -> str:
-    lines = [f"<b>{_escape(message.header)}</b>", ""]
+    lines: list[str] = []
+    if message.body is not None:
+        lines += [_escape(message.body), ""]
+    if message.header is not None:
+        lines += [f"<b>{_escape(message.header)}</b>", ""]
     for number, item in enumerate(message.items, start=1):
         line = f"{number}. {_escape(item.title)}"
-        if item.result is not None:
-            line += f" — {_escape(item.result)}"
+        status = item.result or (RUNNING_TEXT if item.running else item.note)
+        if status is not None:
+            line += f" — {_escape(status)}"
         lines.append(line)
     return "\n".join(lines)
 
@@ -173,7 +207,7 @@ def _keyboard(message: InteractiveMessage, approval_id: int) -> tuple[tuple[Butt
         return ()
     rows = [
         tuple(
-            Button(f"{number} · {option.label}", f"{approval_id}:{number}:{option.key}")
+            Button(f"{number} {option.label}", f"{approval_id}:{number}:{option.key}")
             for option in item.options
         )
         for number, item in enumerate(message.items, start=1)
@@ -203,22 +237,48 @@ def telegram_length(text: str) -> int:
     return len(text.encode("utf-16-le")) // 2
 
 
-def ensure_fits(message: InteractiveMessage) -> None:
-    """Raise `MessageTooLong` unless every state the message can reach fits in one message.
+def worst_length(message: InteractiveMessage) -> int:
+    """The longest text the message can reach in any later state.
 
-    The worst case is every item resolved with a result of `&` (the one that grows most when
-    escaped, 5 times), so no later tap can push the text past the limit.
+    The worst case is every item with a status of `&` (the one that grows most when escaped,
+    5 times): a result, a note and «en curso…» are all at most `MAX_RESULT_CHARS`.
     """
     worst = message.model_copy(
         update={
             "items": tuple(
-                item.model_copy(update={"result": "&" * MAX_RESULT_CHARS}) for item in message.items
+                item.model_copy(update={"result": "&" * MAX_RESULT_CHARS, "running": False})
+                for item in message.items
             )
         }
     )
-    length = max(telegram_length(_text(message)), telegram_length(_text(worst)))
+    return max(telegram_length(_text(message)), telegram_length(_text(worst)))
+
+
+def ensure_fits(message: InteractiveMessage) -> None:
+    """Raise `MessageTooLong` unless every state the message can reach fits in one message."""
+    length = worst_length(message)
     if length > TELEGRAM_TEXT_LIMIT:
         raise MessageTooLong(f"the message needs {length} characters and Telegram allows 4096")
+
+
+def _shorten(title: str, length: int) -> str:
+    return title[: length - 1].rstrip() + "…"
+
+
+def fit_titles(message: InteractiveMessage) -> InteractiveMessage:
+    """`message` with the longest titles shown cut with `…` until every state fits. Only the
+    text shown changes: what an item does lives in its `data`. Raises `MessageTooLong` if it
+    cannot fit even with every title at `MIN_TITLE_CHARS`."""
+    current = message
+    while worst_length(current) > TELEGRAM_TEXT_LIMIT:
+        index, item = max(enumerate(current.items), key=lambda pair: len(pair[1].title))
+        if len(item.title) <= MIN_TITLE_CHARS:
+            ensure_fits(current)  # raises: nothing left to cut
+        cut = max(MIN_TITLE_CHARS, len(item.title) * 9 // 10)
+        items = list(current.items)
+        items[index] = item.model_copy(update={"title": _shorten(item.title, cut)})
+        current = current.model_copy(update={"items": tuple(items)})
+    return current
 
 
 def parse_callback(data: str) -> Tap | None:
@@ -231,7 +291,7 @@ def parse_callback(data: str) -> Tap | None:
 
 
 def clip_result(result: str) -> str:
-    """A result as one line of at most `MAX_RESULT_CHARS` characters, cut with `…`."""
+    """A result or a note as one line of at most `MAX_RESULT_CHARS` characters, cut with `…`."""
     line = " ".join(result.split()) or "hecho"
     if len(line) <= MAX_RESULT_CHARS:
         return line
@@ -262,22 +322,56 @@ def targets(message: InteractiveMessage, tap: Tap) -> list[tuple[int, str]]:
 
 
 def resolve(message: InteractiveMessage, outcomes: Mapping[int, Outcome]) -> InteractiveMessage:
-    """The message with those items resolved (index from 0); what was resolved is not touched."""
+    """The message with those items resolved (index from 0), running or not; what was resolved
+    is not touched."""
     items = tuple(
         item.model_copy(
-            update={"result": clip_result(outcomes[index].result), "chosen": outcomes[index].option}
+            update={
+                "result": clip_result(outcomes[index].result),
+                "chosen": outcomes[index].option,
+                "running": False,
+                "note": None,
+            }
         )
-        if index in outcomes and item.pending
+        if index in outcomes and item.unresolved
         else item
         for index, item in enumerate(message.items)
     )
     return message.model_copy(update={"items": items})
 
 
-def expire(message: InteractiveMessage) -> InteractiveMessage:
-    """The message after its time ran out: what was pending says `caducado`; no keyboard."""
+def claim(message: InteractiveMessage, indexes: Collection[int]) -> InteractiveMessage:
+    """The message with those pending items marked `running` (their rows go)."""
     items = tuple(
-        item.model_copy(update={"result": EXPIRED_RESULT}) if item.pending else item
+        item.model_copy(update={"running": True}) if index in indexes and item.pending else item
+        for index, item in enumerate(message.items)
+    )
+    return message.model_copy(update={"items": items})
+
+
+def release(message: InteractiveMessage, index: int, item: Item) -> InteractiveMessage:
+    """The message with the unresolved item at `index` replaced by `item`, pending again: a
+    try that failed (with its `note`) or a task that changed (renewed). The titles are fitted
+    again, since a renewed one may be longer."""
+    if not message.items[index].unresolved:
+        return message
+    items = list(message.items)
+    items[index] = item.model_copy(update={"running": False, "result": None, "chosen": None})
+    return fit_titles(message.model_copy(update={"items": tuple(items)}))
+
+
+def expire(message: InteractiveMessage) -> InteractiveMessage:
+    """The message after its time ran out: what was pending says its `expired_text`, what was
+    running says it is unconfirmed; no keyboard."""
+    items = tuple(
+        item.model_copy(
+            update={
+                "result": UNCONFIRMED_RESULT if item.running else message.expired_text,
+                "running": False,
+            }
+        )
+        if item.unresolved
+        else item
         for item in message.items
     )
     return message.model_copy(update={"items": items, "expired": True})

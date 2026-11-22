@@ -8,17 +8,23 @@ codes (the name of an exception type), ids and counts.
 Rules (1.4-a): whatever comes from another chat is ignored in silence, with no reply and no
 `answerCallbackQuery`; the log says only «unknown chat».
 
-Pedro's text goes to the injected `on_text` (the conversation of task 1.10) as a task of its
+Pedro's text goes to the injected `on_text` (the assistant of task 1.11) as a task of its
 own, started as the message arrives: the handler returns at once, so taps and the next messages
 are not held while the agent thinks. The order of the turns is the conversation's, and the
 replies go out in the order the messages came. While it thinks, the chat shows «escribiendo…»;
-the answer goes as escaped HTML, without previews.
+the answer goes as escaped HTML, without previews. An answer may carry an interactive message
+(a proposal with its buttons, or what was done with [Deshacer]), which goes as one message with
+the answer as its body (decision 1.11-a), and approvals to edit (the written «sí»).
+
+The channel remembers the id of the last message it sent, of any kind (decision 1.11-d): the
+written «sí» only counts as an answer to it. It lives in memory: after a restart there is none.
 """
 
 import asyncio
 import logging
 import sqlite3
 from collections.abc import Awaitable, Callable, Mapping
+from dataclasses import dataclass
 from datetime import datetime, time, timedelta
 from typing import Any
 
@@ -42,8 +48,16 @@ from telegram.ext import (
 from telegram.request import BaseRequest
 
 from jimic.channel import store
-from jimic.channel.message import InteractiveMessage, View, parse_callback, render, reply_chunks
-from jimic.channel.taps import TapHandler, process_tap
+from jimic.channel.message import (
+    InteractiveMessage,
+    MessageTooLong,
+    View,
+    ensure_fits,
+    parse_callback,
+    render,
+    reply_chunks,
+)
+from jimic.channel.taps import TapHandler, process_tap, sweep
 from jimic.clock import Clock
 from jimic.config import Settings
 
@@ -57,12 +71,46 @@ TYPING_TIMES = 75
 """At most 5 minutes of «escribiendo…»: a turn that takes longer goes on without it."""
 COULD_NOT_REPLY = "No he podido contestarte; prueba otra vez en un rato."
 ALREADY_RESOLVED = "Eso ya estaba resuelto"
+IN_PROGRESS = "Ya está en marcha"
 COULD_NOT = "No he podido hacerlo"
 ALLOWED_UPDATES = ("message", "callback_query")
 NOT_MODIFIED = "message is not modified"
 
-type TextHandler = Callable[[str], Awaitable[str]]
-"""Called with the text Pedro wrote; returns the reply, as plain text."""
+
+@dataclass(frozen=True)
+class Incoming:
+    """What Pedro wrote, with what the «sí» needs to know about the chat at that moment."""
+
+    text: str
+    reply_to: int | None = None
+    """The id of the message he answered with Telegram's «Responder», if any."""
+    last_sent: int | None = None
+    """The id of the last message the channel sent before this one arrived, if it knows."""
+
+
+@dataclass(frozen=True)
+class Outgoing:
+    """An interactive message that goes with an answer; the channel saves it as an approval."""
+
+    kind: str
+    message: InteractiveMessage
+    expires_at: datetime
+    if_unsent: str | None = None
+    """Plain text to send instead if Telegram refuses the message (something already done)."""
+
+
+@dataclass(frozen=True)
+class Reply:
+    """An answer: plain `text`, or an `outgoing` message whose body is that text, and the
+    approvals whose message must be edited to their stored state."""
+
+    text: str | None = None
+    outgoing: Outgoing | None = None
+    refresh: tuple[int, ...] = ()
+
+
+type TextHandler = Callable[[Incoming], Awaitable[str | Reply]]
+"""Called with what Pedro wrote; returns the reply, as plain text or a `Reply`."""
 type OnStarted = Callable[["TelegramChannel"], Awaitable[None]]
 type Task = Callable[[], Awaitable[None]]
 """What a scheduled job runs: the heartbeat, the purge."""
@@ -82,7 +130,7 @@ class SendError(ChannelError):
     """A message could not be sent; `code` is the name of the failure, never content."""
 
 
-async def reply_not_yet(text: str) -> str:
+async def reply_not_yet(incoming: Incoming) -> str:
     return NOT_YET
 
 
@@ -146,6 +194,8 @@ class TelegramChannel:
         self._last_turn: asyncio.Task[None] | None = None
         self._stopping = False
         self._running = False
+        self.last_sent: int | None = None
+        """The id of the last message sent (decision 1.11-d); in memory only."""
         application.add_handler(CallbackQueryHandler(self._handle_tap))
         application.add_handler(MessageHandler(filters.ALL, self._handle_message))
         application.add_error_handler(self._handle_error)
@@ -202,7 +252,7 @@ class TelegramChannel:
         approval_id = store.create(self._conn, self._clock, kind, message, expires_at)
         view = render(message, approval_id)
         try:
-            await self._app.bot.send_message(
+            sent = await self._app.bot.send_message(
                 chat_id=self._chat_id,
                 text=view.text,
                 parse_mode=ParseMode.HTML,
@@ -213,8 +263,32 @@ class TelegramChannel:
             store.discard(self._conn, approval_id)
             logger.error("telegram send failed (%s)", _code(error))
             raise SendError(_code(error)) from None
+        store.set_message_id(self._conn, approval_id, sent.message_id)
+        self.last_sent = sent.message_id
         logger.info("interactive message sent for approval %d", approval_id)
         return approval_id
+
+    async def refresh(self, approval_id: int) -> None:
+        """Edit the message of an approval to its stored state (without a tap to answer)."""
+        try:
+            approval = store.load(self._conn, approval_id)
+        except ValueError:
+            logger.warning("approval %d has an invalid payload", approval_id)
+            return
+        if approval is None or approval.telegram_message_id is None:
+            return
+        await self._edit(approval.telegram_message_id, render(approval.message, approval_id))
+
+    async def sweep(self) -> None:
+        """Expire what ran out and take its buttons off (1.11-c). Never raises."""
+        try:
+            swept = sweep(self._conn, self._clock)
+        except Exception as error:
+            logger.error("sweep failed (%s)", type(error).__name__)
+            return
+        for item in swept:
+            if item.telegram_message_id is not None and item.view is not None:
+                await self._edit(item.telegram_message_id, item.view)
 
     async def send_text(self, text: str) -> int:
         """Send `text` as plain text, without keyboard or preview; return its `message_id`.
@@ -230,6 +304,7 @@ class TelegramChannel:
         except TelegramError as error:
             logger.error("telegram send failed (%s)", _code(error))
             raise SendError(_code(error)) from None
+        self.last_sent = sent.message_id
         logger.info("text message sent")
         return sent.message_id
 
@@ -280,6 +355,8 @@ class TelegramChannel:
     def _toast(code: str) -> str | None:
         if code in ("nothing_to_do", "already_resolved"):
             return ALREADY_RESOLVED
+        if code == "in_progress":
+            return IN_PROGRESS
         if code in ("handler_failed", "partially_resolved"):
             return COULD_NOT
         return None
@@ -296,9 +373,15 @@ class TelegramChannel:
         if self._stopping:
             logger.info("message ignored (stopping)")
             return
+        reply_to = message.reply_to_message
+        incoming = Incoming(
+            message.text,
+            reply_to=None if reply_to is None else reply_to.message_id,
+            last_sent=self.last_sent,
+        )
         # `on_text` starts here, before any wait on the network: the conversation notes the
         # moment and takes its place in the order of the turns as the message arrives.
-        answer = asyncio.ensure_future(self._on_text(message.text))
+        answer = asyncio.ensure_future(self._on_text(incoming))
         turn = asyncio.create_task(self._converse(answer, self._last_turn))
         self._last_turn = turn
         for task in (answer, turn):
@@ -306,23 +389,32 @@ class TelegramChannel:
             task.add_done_callback(self._turns.discard)
 
     async def _converse(
-        self, answer: asyncio.Future[str], previous: asyncio.Task[None] | None
+        self, answer: asyncio.Future[str | Reply], previous: asyncio.Task[None] | None
     ) -> None:
         """One answer: «escribiendo…» while `answer` is thinking, then the answer, after the
         answer to the message before (the replies go out in the order the messages came)."""
         typing = asyncio.create_task(self._keep_typing())
         try:
-            reply = await answer
+            result = await answer
         except Exception as error:
             logger.error("text handler failed (%s)", _code(error))
-            reply = COULD_NOT_REPLY
+            result = COULD_NOT_REPLY
         finally:
             typing.cancel()
         if previous is not None:
             await asyncio.wait([previous])
-        for chunk in reply_chunks(reply):
+        reply = Reply(text=result) if isinstance(result, str) else result
+        for approval_id in reply.refresh:
+            await self.refresh(approval_id)
+        if reply.outgoing is not None:
+            await self._send_outgoing(reply.text, reply.outgoing)
+        elif reply.text is not None:
+            await self._send_chunks(reply.text)
+
+    async def _send_chunks(self, text: str) -> bool:
+        for chunk in reply_chunks(text):
             try:
-                await self._app.bot.send_message(
+                sent = await self._app.bot.send_message(
                     chat_id=self._chat_id,
                     text=chunk,
                     parse_mode=ParseMode.HTML,
@@ -330,7 +422,28 @@ class TelegramChannel:
                 )
             except TelegramError as error:
                 logger.error("telegram send failed (%s)", _code(error))
-                return
+                return False
+            self.last_sent = sent.message_id
+        return True
+
+    async def _send_outgoing(self, text: str | None, outgoing: Outgoing) -> None:
+        """The answer as the body of the interactive message; if together they do not fit, the
+        answer goes first on its own and the message after it, without a body."""
+        message = outgoing.message
+        if text is not None and text.strip():
+            with_body = message.model_copy(update={"body": text.strip()})
+            try:
+                ensure_fits(with_body)
+                message = with_body
+            except MessageTooLong:
+                if not await self._send_chunks(text):
+                    return
+        try:
+            await self.send(outgoing.kind, message, outgoing.expires_at)
+        except (SendError, MessageTooLong) as error:
+            logger.error("interactive reply not sent (%s)", _code(error))
+            if outgoing.if_unsent is not None:
+                await self._send_chunks(outgoing.if_unsent)
 
     async def _typing(self) -> None:
         try:

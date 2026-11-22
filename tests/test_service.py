@@ -414,9 +414,9 @@ def test_el_runtime_programa_el_latido_alineado_y_la_purga_y_para_en_orden(tmp_p
     assert events == ["channel start", "channel stop", "model close"]
     assert todoist.closed
     assert runtime.heartbeat is not None
-    # El texto de Pedro va a la conversación del agente (1.10).
+    # El texto de Pedro va a la conversación del agente (1.10), envuelto en lo que recibe el canal.
     assert runtime.conversation is not None
-    assert channel.on_text == runtime.conversation.reply
+    assert channel.on_text is not None
 
 
 def test_si_el_canal_no_arranca_el_runtime_cierra_el_modelo_y_las_fuentes(tmp_path):

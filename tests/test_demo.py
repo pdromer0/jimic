@@ -96,9 +96,9 @@ def test_el_plan_inventado_son_tres_propuestas_con_sus_filas_y_la_global():
     """La forma que Pedro verá en el móvil: `n · Sí` / `n · No` y `[Créalo todo] [Nada]`."""
     view = render(demo.demo_message(), approval_id=1)
     assert [[b.label for b in row] for row in view.keyboard] == [
-        ["1 · Sí", "1 · No"],
-        ["2 · Sí", "2 · No"],
-        ["3 · Sí", "3 · No"],
+        ["1 Sí", "1 No"],
+        ["2 Sí", "2 No"],
+        ["3 Sí", "3 No"],
         ["Créalo todo", "Nada"],
     ]
     assert view.text.splitlines()[0] == "<b>Plan de prueba (inventado)</b>"
@@ -107,8 +107,8 @@ def test_el_plan_inventado_son_tres_propuestas_con_sus_filas_y_la_global():
 
 def test_los_toques_de_la_demo_solo_marcan_el_resultado():
     item = demo.demo_message().items[0]
-    assert asyncio.run(demo.demo_handler(item, "y")) == "✓ creada"
-    assert asyncio.run(demo.demo_handler(item, "n")) == "✗ descartada"
+    assert asyncio.run(demo.demo_handler(item, "y", 1)) == "✓ creada"
+    assert asyncio.run(demo.demo_handler(item, "n", 1)) == "✗ descartada"
 
 
 def test_con_dev_la_demo_arranca_el_canal_manda_el_plan_y_para_con_sigterm(

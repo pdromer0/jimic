@@ -39,6 +39,8 @@ class FakeRequest(BaseRequest):
         self.chat_action_gates: dict[int, asyncio.Event] = {}
         """Number of a `sendChatAction` call (from 0) -> what it waits for: a slow answer."""
         self._chat_actions = 0
+        self.next_message_id = 10
+        """The id of the next `sendMessage`: each one gets its own, from 10."""
 
     @property
     def read_timeout(self) -> float | None:
@@ -77,8 +79,13 @@ class FakeRequest(BaseRequest):
         result: Any = True
         if name == "getMe":
             result = BOT_USER
-        elif name in ("sendMessage", "editMessageText"):
-            result = sent_message(text=str(params.get("text", "")))
+        elif name == "sendMessage":
+            result = sent_message(message_id=self.next_message_id, text=str(params.get("text", "")))
+            self.next_message_id += 1
+        elif name == "editMessageText":
+            result = sent_message(
+                message_id=int(str(params.get("message_id", 10))), text=str(params.get("text", ""))
+            )
         return 200, json.dumps({"ok": True, "result": result}).encode()
 
 
@@ -111,8 +118,14 @@ def inline_callback_update(data: str, update_id: int = 1) -> dict[str, Any]:
     }
 
 
-def text_update(text: str, chat_id: int = CHAT_ID, update_id: int = 1) -> dict[str, Any]:
-    return {"update_id": update_id, "message": sent_message(chat_id, 20, text)}
+def text_update(
+    text: str, chat_id: int = CHAT_ID, update_id: int = 1, reply_to: int | None = None
+) -> dict[str, Any]:
+    """A text of Pedro; `reply_to` is the id of the message he answered with «Responder»."""
+    message = sent_message(chat_id, 20, text)
+    if reply_to is not None:
+        message["reply_to_message"] = sent_message(chat_id, reply_to, "citado")
+    return {"update_id": update_id, "message": message}
 
 
 def photo_update(chat_id: int = CHAT_ID, update_id: int = 1) -> dict[str, Any]:

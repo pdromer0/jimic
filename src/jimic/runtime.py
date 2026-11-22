@@ -17,7 +17,7 @@ from datetime import time
 
 from jimic.agent.conversation import Conversation
 from jimic.agent.transcripts import purge_agent_files
-from jimic.channel.bot import TelegramChannel, TextHandler, build_channel
+from jimic.channel.bot import Incoming, TelegramChannel, TextHandler, build_channel
 from jimic.clock import Clock
 from jimic.config import Settings
 from jimic.heartbeat.beat import INTERVAL, Heartbeat, next_beat
@@ -88,9 +88,11 @@ class Runtime:
                 conn=self._conn,
                 sources=sources,
             )
-            channel = self._channel_factory(
-                self._settings, self._conn, self._clock, conversation.reply
-            )
+
+            async def on_text(incoming: Incoming) -> str:
+                return await conversation.reply(incoming.text)
+
+            channel = self._channel_factory(self._settings, self._conn, self._clock, on_text)
             heartbeat = Heartbeat(
                 clock=self._clock,
                 timezone=self._settings.timezone,

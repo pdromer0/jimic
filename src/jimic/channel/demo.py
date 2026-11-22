@@ -53,7 +53,7 @@ def demo_message() -> InteractiveMessage:
     )
 
 
-async def demo_handler(item: Item, option: str) -> str:
+async def demo_handler(item: Item, option: str, approval_id: int) -> str:
     """Only marks the result: the demo creates nothing."""
     return CREATED if option == "y" else DISCARDED
 
