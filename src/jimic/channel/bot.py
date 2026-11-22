@@ -7,8 +7,14 @@ codes (the name of an exception type), ids and counts.
 
 Rules (1.4-a): whatever comes from another chat is ignored in silence, with no reply and no
 `answerCallbackQuery`; the log says only «unknown chat».
+
+Pedro's text goes to the injected `on_text` (the conversation of task 1.10) as a task of its
+own: the handler returns at once, so taps and the next messages are not held while the agent
+thinks. The order of the turns is the conversation's. While it thinks, the chat shows
+«escribiendo…»; the answer goes as escaped HTML, without previews.
 """
 
+import asyncio
 import logging
 import sqlite3
 from collections.abc import Awaitable, Callable, Mapping
@@ -21,7 +27,7 @@ from telegram import (
     LinkPreviewOptions,
     Update,
 )
-from telegram.constants import ParseMode
+from telegram.constants import ChatAction, ParseMode
 from telegram.error import BadRequest, TelegramError
 from telegram.ext import (
     Application,
@@ -35,15 +41,20 @@ from telegram.ext import (
 from telegram.request import BaseRequest
 
 from jimic.channel import store
-from jimic.channel.message import InteractiveMessage, View, parse_callback, render
+from jimic.channel.message import InteractiveMessage, View, parse_callback, render, reply_chunks
 from jimic.channel.taps import TapHandler, process_tap
 from jimic.clock import Clock
 from jimic.config import Settings
 
 logger = logging.getLogger(__name__)
 
-NOT_YET = "Aún no sé conversar: llego en la 1.10"
-"""What Pedro's text gets until the conversation arrives (task 1.10)."""
+NOT_YET = "En la demo no converso: prueba los botones."
+"""What Pedro's text gets when nothing converses (the demo of task 1.4)."""
+TYPING_EVERY = 4.0
+"""Seconds between two «escribiendo…»: Telegram shows each one for 5 s."""
+TYPING_TIMES = 75
+"""At most 5 minutes of «escribiendo…»: a turn that takes longer goes on without it."""
+COULD_NOT_REPLY = "No he podido contestarte; prueba otra vez en un rato."
 ALREADY_RESOLVED = "Eso ya estaba resuelto"
 COULD_NOT = "No he podido hacerlo"
 ALLOWED_UPDATES = ("message", "callback_query")
@@ -120,6 +131,7 @@ class TelegramChannel:
         handlers: Mapping[str, TapHandler] | None = None,
         on_text: TextHandler = reply_not_yet,
         on_started: OnStarted | None = None,
+        typing_every: float = TYPING_EVERY,
     ) -> None:
         self._app = application
         self._chat_id = chat_id
@@ -128,6 +140,8 @@ class TelegramChannel:
         self._handlers = dict(handlers or {})
         self._on_text = on_text
         self._on_started = on_started
+        self._typing_every = typing_every
+        self._turns: set[asyncio.Task[None]] = set()
         self._running = False
         application.add_handler(CallbackQueryHandler(self._handle_tap))
         application.add_handler(MessageHandler(filters.ALL, self._handle_message))
@@ -158,6 +172,7 @@ class TelegramChannel:
         assert updater is not None
         steps: list[tuple[str, Callable[[], Awaitable[None]]]] = [
             ("updater", updater.stop),
+            ("turns", self._cancel_turns),
             ("application", self._app.stop),
             ("shutdown", self._app.shutdown),
         ]
@@ -272,11 +287,56 @@ class TelegramChannel:
         if message is None or message.text is None:
             logger.info("message ignored (not_text)")
             return
-        reply = await self._on_text(message.text)
+        turn = asyncio.create_task(self._converse(message.text))
+        self._turns.add(turn)
+        turn.add_done_callback(self._turns.discard)
+
+    async def _converse(self, text: str) -> None:
+        """One answer: «escribiendo…» while `on_text` thinks, then the answer."""
+        await self._typing()
+        typing = asyncio.create_task(self._keep_typing())
         try:
-            await self._app.bot.send_message(chat_id=self._chat_id, text=reply)
+            reply = await self._on_text(text)
+        except Exception as error:
+            logger.error("text handler failed (%s)", _code(error))
+            reply = COULD_NOT_REPLY
+        finally:
+            typing.cancel()
+        for chunk in reply_chunks(reply):
+            try:
+                await self._app.bot.send_message(
+                    chat_id=self._chat_id,
+                    text=chunk,
+                    parse_mode=ParseMode.HTML,
+                    link_preview_options=LinkPreviewOptions(is_disabled=True),
+                )
+            except TelegramError as error:
+                logger.error("telegram send failed (%s)", _code(error))
+                return
+
+    async def _typing(self) -> None:
+        try:
+            await self._app.bot.send_chat_action(self._chat_id, ChatAction.TYPING)
         except TelegramError as error:
-            logger.error("telegram send failed (%s)", _code(error))
+            logger.debug("telegram typing failed (%s)", _code(error))
+
+    async def _keep_typing(self) -> None:
+        """Again every `typing_every` seconds, the first one already sent; with a cap."""
+        for _ in range(TYPING_TIMES - 1):
+            await asyncio.sleep(self._typing_every)
+            await self._typing()
+
+    async def _cancel_turns(self) -> None:
+        """A turn still thinking when the service stops is dropped: nobody would get it."""
+        turns = list(self._turns)
+        for turn in turns:
+            turn.cancel()
+        await asyncio.gather(*turns, return_exceptions=True)
+
+    async def drain(self) -> None:
+        """Wait for the turns under way (what the tests use)."""
+        while self._turns:
+            await asyncio.gather(*list(self._turns), return_exceptions=True)
 
     async def _edit(self, message_id: int, view: View) -> None:
         try:
@@ -319,6 +379,7 @@ def build_channel(
     clock: Clock,
     handlers: Mapping[str, TapHandler] | None = None,
     on_started: OnStarted | None = None,
+    on_text: TextHandler = reply_not_yet,
 ) -> TelegramChannel:
     """The channel of the bot in `settings`, ready to `start` (nothing connects before that)."""
     application = build_application(settings.telegram_token.get_secret_value())
@@ -328,5 +389,6 @@ def build_channel(
         conn,
         clock,
         handlers=handlers,
+        on_text=on_text,
         on_started=on_started,
     )

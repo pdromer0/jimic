@@ -355,6 +355,10 @@ class FakeRuntimeChannel:
     async def send_text(self, text: str) -> int:
         raise AssertionError("the runtime test sends nothing")
 
+    def wired(self, on_text):
+        self.on_text = on_text
+        return self
+
     def schedule_every(self, task, interval, first, name) -> None:
         self.scheduled.append((name, interval, first))
 
@@ -379,7 +383,7 @@ def runtime_with(conn, events, fail_start=False):
         conn,
         intentions(),
         limits(),
-        channel_factory=lambda settings, conn, clock: channel,  # pyright: ignore[reportArgumentType] - a double of the channel
+        channel_factory=lambda settings, conn, clock, on_text: channel.wired(on_text),  # pyright: ignore[reportArgumentType] - a double of the channel
         model_factory=lambda settings: ModelApi(FakeMessages().create, close_model),
         todoist_api=todoist,
     )
@@ -410,6 +414,9 @@ def test_el_runtime_programa_el_latido_alineado_y_la_purga_y_para_en_orden(tmp_p
     assert events == ["channel start", "channel stop", "model close"]
     assert todoist.closed
     assert runtime.heartbeat is not None
+    # El texto de Pedro va a la conversación del agente (1.10).
+    assert runtime.conversation is not None
+    assert channel.on_text == runtime.conversation.reply
 
 
 def test_si_el_canal_no_arranca_el_runtime_cierra_el_modelo_y_las_fuentes(tmp_path):
@@ -424,3 +431,19 @@ def test_si_el_canal_no_arranca_el_runtime_cierra_el_modelo_y_las_fuentes(tmp_pa
     assert events == ["channel start", "model close"]
     assert todoist.closed
     assert channel.scheduled == []
+
+
+def test_la_purga_diaria_borra_tambien_lo_viejo_del_agente(tmp_path):
+    """Decisión 23: las transcripciones del agente se van a los 7 días con la purga de las 4:00."""
+    conn = open_database(tmp_path / "jimic.db")
+    runtime, _, _ = runtime_with(conn, [])
+    transcript = resolve_paths(os.environ).agent_dir / "projects" / "x" / "s.jsonl"
+    transcript.parent.mkdir(parents=True)
+    transcript.write_text("inventado")
+    old = (NOW - timedelta(days=8)).timestamp()
+    os.utime(transcript, (old, old))
+    try:
+        asyncio.run(runtime._purge())
+    finally:
+        conn.close()
+    assert not transcript.exists()
