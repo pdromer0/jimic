@@ -15,7 +15,7 @@ import jimic.cli
 import jimic.service
 from jimic.channel import demo
 from jimic.channel.message import InteractiveMessage, Item, render
-from jimic.config import load_settings
+from jimic.config import Settings, load_settings
 from jimic.logs import LOG_FILE
 from jimic.memory.database import open_database
 from jimic.paths import resolve_paths
@@ -92,23 +92,38 @@ def test_la_cli_se_niega_con_prod_saliendo_con_2_y_un_mensaje_claro(built, capsy
     assert built == []
 
 
-def test_el_plan_inventado_son_tres_propuestas_con_sus_filas_y_la_global():
-    """La forma que Pedro verá en el móvil: `n · Sí` / `n · No` y `[Créalo todo] [Nada]`."""
-    view = render(demo.demo_message(), approval_id=1)
+def demo_settings():
+    return Settings.model_validate(DEV_ENV)
+
+
+def test_la_demo_ensena_una_propuesta_con_sus_filas_y_la_global_bajo_una_respuesta():
+    """La forma que Pedro verá en el móvil (la captura de la 1.11): las etiquetas del formato
+    del plan, la fila global sin el borrado y el texto de la respuesta encima."""
+    (kind, proposal), (undo_kind, undo) = demo.demo_messages(demo_settings())
+    assert (kind, undo_kind) == ("plan", "undo")
+    view = render(proposal, approval_id=1)
     assert [[b.label for b in row] for row in view.keyboard] == [
-        ["1 Sí", "1 No"],
-        ["2 Sí", "2 No"],
-        ["3 Sí", "3 No"],
-        ["Créalo todo", "Nada"],
+        ["1 ✅", "1 ⏭"],
+        ["2 🔄 A las 9:50", "2 🆗 Déjalo"],
+        ["3 🗑️ Bórrala", "3 🆗 Déjala"],
+        ["✅ Créalo todo", "⏭ Nada"],
     ]
-    assert view.text.splitlines()[0] == "<b>Plan de prueba (inventado)</b>"
-    assert len(demo.demo_message().items) == 3
+    assert view.text.startswith(f"{demo.ANSWER}\n\n<b>Te propongo</b>")
+    assert [[b.label for b in row] for row in render(undo, 2).keyboard] == [["1 ↩️ Deshacer"]]
 
 
-def test_los_toques_de_la_demo_solo_marcan_el_resultado():
-    item = demo.demo_message().items[0]
-    assert asyncio.run(demo.demo_handler(item, "y", 1)) == "✓ creada"
-    assert asyncio.run(demo.demo_handler(item, "n", 1)) == "✗ descartada"
+@pytest.mark.parametrize(
+    ("index", "option", "result"),
+    [
+        (0, "ok", "✓ creada"),
+        (0, "no", "⏭ descartada"),
+        (1, "ok", "✓ movida"),
+        (2, "del", "✓ borrada"),
+    ],
+)
+def test_los_toques_de_la_demo_solo_marcan_el_resultado(index, option, result):
+    (_, proposal), _ = demo.demo_messages(demo_settings())
+    assert asyncio.run(demo.demo_plan(proposal.items[index], option, 1)) == result
 
 
 def test_con_dev_la_demo_arranca_el_canal_manda_el_plan_y_para_con_sigterm(
@@ -137,11 +152,11 @@ def test_con_dev_la_demo_arranca_el_canal_manda_el_plan_y_para_con_sigterm(
         stopper.join()
         signal.signal(signal.SIGTERM, previous)
     (channel,) = built
-    ((kind, message, expires_at),) = channel.sent
-    assert kind == "demo"
-    assert message == demo.demo_message()
+    (kind, message, expires_at), (undo_kind, _, _) = channel.sent
+    assert (kind, undo_kind) == ("plan", "undo")
+    assert message == demo.demo_messages(demo_settings())[0][1]
     assert channel.stopped
-    assert list(channel.handlers) == ["demo"]
+    assert list(channel.handlers) == ["plan", "undo"]
     # `expires_at` viene del reloj del sistema: una hora después de enviar, con holgura.
     assert (
         timedelta(minutes=59) < expires_at - datetime.now(expires_at.tzinfo) <= timedelta(hours=1)
@@ -161,5 +176,7 @@ def test_la_factoria_de_la_demo_pasa_su_manejador_y_envia_el_plan_al_empezar(mon
         conn.close()
     assert channel is built[0]
     asyncio.run(channel.start())
-    assert built[0].sent == [("demo", demo.demo_message(), NOW + timedelta(hours=1))]
+    assert built[0].sent == [
+        (kind, message, NOW + timedelta(hours=1)) for kind, message in demo.demo_messages(settings)
+    ]
     assert isinstance(built[0].sent[0][1].items[0], Item)
