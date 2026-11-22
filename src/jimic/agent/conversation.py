@@ -72,6 +72,8 @@ class Outcome:
     usd: Decimal | None = None
     usage: TokenUsage | None = None
     api_status: int | None = None
+    ran: bool = False
+    """The engine answered something before failing: it may have spent, unknown how much."""
 
 
 def usage_of(data: dict[str, Any] | None) -> TokenUsage:
@@ -132,8 +134,10 @@ def outcome_of_error(error: ResultError) -> Outcome:
 async def run_once(run_agent: RunAgent, prompt: str, options: ClaudeAgentOptions) -> Outcome:
     """Run the agent and say how it ended. Never raises for a failure of the SDK."""
     result: ResultMessage | None = None
+    ran = False
     try:
         async for message in run_agent(prompt, options):
+            ran = True
             if isinstance(message, ResultMessage):
                 result = message
     except ResultError as error:
@@ -142,9 +146,9 @@ async def run_once(run_agent: RunAgent, prompt: str, options: ClaudeAgentOptions
     except ClaudeSDKError as error:
         if result is not None:
             return outcome_of_result(result)
-        return Outcome(f"agent:process:{type(error).__name__}")
+        return Outcome(f"agent:process:{type(error).__name__}", ran=ran)
     if result is None:
-        return Outcome("agent:no_result")
+        return Outcome("agent:no_result", ran=ran)
     return outcome_of_result(result)
 
 
@@ -220,8 +224,9 @@ class Conversation:
 
     def _bookkeeping(self, day: date, outcome: Outcome, resumed: bool) -> None:
         now = self._now()
-        if outcome.usage is not None or outcome.usd is not None:
-            # Without the SDK's estimate, the most a run may spend: the discreet count.
+        if outcome.usage is not None or outcome.usd is not None or outcome.ran:
+            # Without the SDK's estimate (or without a result at all, once the engine answered),
+            # the most a run may spend: the discreet count.
             usd = outcome.usd
             if usd is None:
                 usd = Decimal(str(self._limits.budget.max_session_usd))

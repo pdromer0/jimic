@@ -17,7 +17,7 @@ from agent_data import (
     agent_sources,
     result_message,
 )
-from claude_agent_sdk import CLINotFoundError, ProcessError, ResultError
+from claude_agent_sdk import CLINotFoundError, ProcessError, ResultError, SystemMessage
 from conftest import VALID_ENV, FixedClock
 from heartbeat_data import MADRID, limits, madrid
 
@@ -340,3 +340,24 @@ def test_los_logs_no_llevan_el_mensaje_la_respuesta_ni_la_clave(conn, tmp_path, 
     assert AGENT_ANSWER not in caplog.text
     assert VALID_ENV["CLAVE_ANTHROPIC"] not in caplog.text
     assert "agent: ok" in caplog.text
+
+
+@pytest.mark.parametrize(
+    ("script", "rows"),
+    [
+        # El motor respondió y se cayó sin resultado: pudo gastar; cuenta el tope de la sesión.
+        ([SystemMessage("init", {}), ProcessError("x", 1)], [0.5]),
+        ([SystemMessage("init", {})], [0.5]),
+        # No llegó a arrancar o no dijo nada: no gastó.
+        (CLINotFoundError(), []),
+        ([], []),
+    ],
+)
+def test_una_ejecucion_que_se_cae_sin_resultado_cuenta_lo_que_pudo_gastar(
+    conn, tmp_path, script, rows
+):
+    """Hallazgo 2 de la revisión: sin esto, fallos repetidos gastarían sin llegar nunca al tope
+    diario."""
+    world = World(conn, tmp_path, FakeAgent(script))
+    world.say()
+    assert [row[-1] for row in world.usage_rows()] == rows
