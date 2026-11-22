@@ -284,3 +284,23 @@ def test_si_la_tarea_desaparece_antes_de_borrarla_dice_que_ya_no_existe(conn):
     world.tap(approval, 1, "del")
     assert world.message(approval).items[0].result == "ya no existe"
     assert world.photos() == []
+
+
+class Error5xxOnDelete(YieldingApi):
+    """Todoist borra y la pasarela contesta 504."""
+
+    async def delete_task(self, task_id: str) -> bool:
+        await super().delete_task(task_id)
+        raise httpx.HTTPStatusError(
+            "x", request=httpx.Request("DELETE", "https://x"), response=httpx.Response(504)
+        )
+
+
+def test_un_504_tras_borrar_de_verdad_tambien_deja_la_foto(conn):
+    """Hallazgo 4 de la revisión: un 5xx también es ambiguo; sin releer, la tarea se perdería
+    sin foto."""
+    world = with_api(conn, Error5xxOnDelete([todoist_task("t1")]))
+    approval, _ = world.show([world.delete_entry("t1")])
+    world.tap(approval, 1, "del")
+    assert world.message(approval).items[0].result == "✓ borrada"
+    assert len(world.photos()) == 1

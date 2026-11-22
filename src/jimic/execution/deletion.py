@@ -11,9 +11,10 @@
    `await` between them, so two deletions at once (a button and a «sí») cannot both pass the cap.
 
 If Todoist fails, the photo is taken back and the item can be tried again, unless the failure is
-ambiguous (a timeout, the network): then the task is read again. Gone, the deletion did happen:
-the photo stays and the item is done. Still there, the photo goes. Unknown, the photo stays and
-the item can be tried again.
+ambiguous (a timeout, the network, a 5xx): then the task is read again. Gone, the deletion did
+happen: the photo stays and the item is done. Still there, the photo goes. Unknown, the photo
+stays and the item can be tried again. A task that was already gone (404) is «ya no existe»,
+without a photo: JimiC did not delete it.
 """
 
 import json
@@ -42,7 +43,12 @@ CAP_REACHED = "tope de borrados de hoy"
 CHANGED = "ha cambiado: ¿la borro así?"
 NOT_FOUND = frozenset({TASK_NOT_FOUND, "http_404"})
 AMBIGUOUS = frozenset({"timeout", "network"})
-"""Failures after which the deletion may or may not have happened."""
+
+
+def ambiguous(code: str) -> bool:
+    """A failure after which the deletion may or may not have happened: a timeout, the network
+    or a 5xx (a gateway can answer 504 after Todoist did delete)."""
+    return code in AMBIGUOUS or (code.startswith("http_5") and code[5:].isdigit())
 
 
 def deletions_on(conn: sqlite3.Connection, day: date, timezone: ZoneInfo) -> int:
@@ -144,7 +150,7 @@ async def delete(
             # Someone else deleted it in between: not ours, and nothing to undo.
             _take_back(conn, row_id)
             return GONE
-        state = await _state_after(todoist, task_id) if error.code in AMBIGUOUS else "exists"
+        state = await _state_after(todoist, task_id) if ambiguous(error.code) else "exists"
         if state == "gone":
             logger.info("deletion confirmed after %s", error.code)
             return DELETED
