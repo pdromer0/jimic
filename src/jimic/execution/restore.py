@@ -119,11 +119,13 @@ async def restore(
         _release(conn, row_id)
         logger.info("restore %d failed (%s)", row_id, error.code)
         return Failed(error.code)
-    # Every photo of that task: none is offered again.
+    # One statement, so it is all or nothing: every photo of that task stops being offered, and
+    # this one keeps the new id.
     conn.execute(
-        "UPDATE deleted_tasks SET restored_at = COALESCE(restored_at, ?) WHERE todoist_task_id = ?",
-        (to_db(clock.now()), old_id),
+        "UPDATE deleted_tasks SET restored_at = COALESCE(restored_at, ?),"
+        " restored_task_id = CASE WHEN id = ? THEN ? ELSE restored_task_id END"
+        " WHERE todoist_task_id = ?",
+        (to_db(clock.now()), row_id, created.id, old_id),
     )
-    conn.execute("UPDATE deleted_tasks SET restored_task_id = ? WHERE id = ?", (created.id, row_id))
     logger.info("restore %d: task recreated", row_id)
     return Show(RECREATED_TEXT.format(title=recreation.content), RECREATED)

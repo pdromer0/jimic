@@ -286,8 +286,8 @@ def test_recrear_un_borrado_da_un_id_nuevo_y_lo_avisa(conn, tmp_path):
 def test_dos_fotos_de_la_misma_tarea_dan_una_entrada(conn, tmp_path):
     """Ajuste 5: un borrado reintentado dejó dos fotos; se ofrece la más reciente."""
     w = World(conn, tmp_path)
-    w.photo("t9", "Versión vieja", madrid(NOW) - timedelta(days=2))
-    w.photo("t9", "Versión nueva", madrid(NOW) - timedelta(days=1))
+    old = w.photo("t9", "Versión vieja", madrid(NOW) - timedelta(days=2))
+    new = w.photo("t9", "Versión nueva", madrid(NOW) - timedelta(days=1))
     reply = w.command("/deshacer")
     assert isinstance(reply, Reply) and reply.outgoing is not None
     (item,) = reply.outgoing.message.items
@@ -295,6 +295,11 @@ def test_dos_fotos_de_la_misma_tarea_dan_una_entrada(conn, tmp_path):
     (approval,) = w.send(reply)
     w.tap(approval, 1)
     assert w.command("/deshacer") == NOTHING_TO_UNDO
+    rows = conn.execute(
+        "SELECT id, restored_at IS NOT NULL, restored_task_id FROM deleted_tasks ORDER BY id"
+    ).fetchall()
+    # Las dos dejan de ofrecerse y solo la recreada lleva el ID nuevo (hallazgo 5).
+    assert rows == [(old, 1, None), (new, 1, w.api.tasks[-1]["id"])]
 
 
 def test_una_tarea_que_sigue_en_todoist_no_se_recrea_ni_se_vuelve_a_ofrecer(conn, tmp_path):
