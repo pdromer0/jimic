@@ -7,8 +7,15 @@ codes (the name of an exception type), ids and counts.
 
 Rules (1.4-a): whatever comes from another chat is ignored in silence, with no reply and no
 `answerCallbackQuery`; the log says only «unknown chat».
+
+Pedro's text goes to the injected `on_text` (the conversation of task 1.10) as a task of its
+own, started as the message arrives: the handler returns at once, so taps and the next messages
+are not held while the agent thinks. The order of the turns is the conversation's, and the
+replies go out in the order the messages came. While it thinks, the chat shows «escribiendo…»;
+the answer goes as escaped HTML, without previews.
 """
 
+import asyncio
 import logging
 import sqlite3
 from collections.abc import Awaitable, Callable, Mapping
@@ -21,7 +28,7 @@ from telegram import (
     LinkPreviewOptions,
     Update,
 )
-from telegram.constants import ParseMode
+from telegram.constants import ChatAction, ParseMode
 from telegram.error import BadRequest, TelegramError
 from telegram.ext import (
     Application,
@@ -35,15 +42,20 @@ from telegram.ext import (
 from telegram.request import BaseRequest
 
 from jimic.channel import store
-from jimic.channel.message import InteractiveMessage, View, parse_callback, render
+from jimic.channel.message import InteractiveMessage, View, parse_callback, render, reply_chunks
 from jimic.channel.taps import TapHandler, process_tap
 from jimic.clock import Clock
 from jimic.config import Settings
 
 logger = logging.getLogger(__name__)
 
-NOT_YET = "Aún no sé conversar: llego en la 1.10"
-"""What Pedro's text gets until the conversation arrives (task 1.10)."""
+NOT_YET = "En la demo no converso: prueba los botones."
+"""What Pedro's text gets when nothing converses (the demo of task 1.4)."""
+TYPING_EVERY = 4.0
+"""Seconds between two «escribiendo…»: Telegram shows each one for 5 s."""
+TYPING_TIMES = 75
+"""At most 5 minutes of «escribiendo…»: a turn that takes longer goes on without it."""
+COULD_NOT_REPLY = "No he podido contestarte; prueba otra vez en un rato."
 ALREADY_RESOLVED = "Eso ya estaba resuelto"
 COULD_NOT = "No he podido hacerlo"
 ALLOWED_UPDATES = ("message", "callback_query")
@@ -120,6 +132,7 @@ class TelegramChannel:
         handlers: Mapping[str, TapHandler] | None = None,
         on_text: TextHandler = reply_not_yet,
         on_started: OnStarted | None = None,
+        typing_every: float = TYPING_EVERY,
     ) -> None:
         self._app = application
         self._chat_id = chat_id
@@ -128,6 +141,10 @@ class TelegramChannel:
         self._handlers = dict(handlers or {})
         self._on_text = on_text
         self._on_started = on_started
+        self._typing_every = typing_every
+        self._turns: set[asyncio.Future[Any]] = set()
+        self._last_turn: asyncio.Task[None] | None = None
+        self._stopping = False
         self._running = False
         application.add_handler(CallbackQueryHandler(self._handle_tap))
         application.add_handler(MessageHandler(filters.ALL, self._handle_message))
@@ -156,9 +173,13 @@ class TelegramChannel:
         """Stop polling and shut the application down; every step runs even if one fails."""
         updater = self._app.updater
         assert updater is not None
+        self._stopping = True
         steps: list[tuple[str, Callable[[], Awaitable[None]]]] = [
             ("updater", updater.stop),
             ("application", self._app.stop),
+            # After the application: its stop can still process a queued update, and that turn
+            # must be cancelled too; no new one starts once `_stopping` is set.
+            ("turns", self._cancel_turns),
             ("shutdown", self._app.shutdown),
         ]
         for name, step in steps:
@@ -272,11 +293,69 @@ class TelegramChannel:
         if message is None or message.text is None:
             logger.info("message ignored (not_text)")
             return
-        reply = await self._on_text(message.text)
+        if self._stopping:
+            logger.info("message ignored (stopping)")
+            return
+        # `on_text` starts here, before any wait on the network: the conversation notes the
+        # moment and takes its place in the order of the turns as the message arrives.
+        answer = asyncio.ensure_future(self._on_text(message.text))
+        turn = asyncio.create_task(self._converse(answer, self._last_turn))
+        self._last_turn = turn
+        for task in (answer, turn):
+            self._turns.add(task)
+            task.add_done_callback(self._turns.discard)
+
+    async def _converse(
+        self, answer: asyncio.Future[str], previous: asyncio.Task[None] | None
+    ) -> None:
+        """One answer: «escribiendo…» while `answer` is thinking, then the answer, after the
+        answer to the message before (the replies go out in the order the messages came)."""
+        typing = asyncio.create_task(self._keep_typing())
         try:
-            await self._app.bot.send_message(chat_id=self._chat_id, text=reply)
+            reply = await answer
+        except Exception as error:
+            logger.error("text handler failed (%s)", _code(error))
+            reply = COULD_NOT_REPLY
+        finally:
+            typing.cancel()
+        if previous is not None:
+            await asyncio.wait([previous])
+        for chunk in reply_chunks(reply):
+            try:
+                await self._app.bot.send_message(
+                    chat_id=self._chat_id,
+                    text=chunk,
+                    parse_mode=ParseMode.HTML,
+                    link_preview_options=LinkPreviewOptions(is_disabled=True),
+                )
+            except TelegramError as error:
+                logger.error("telegram send failed (%s)", _code(error))
+                return
+
+    async def _typing(self) -> None:
+        try:
+            await self._app.bot.send_chat_action(self._chat_id, ChatAction.TYPING)
         except TelegramError as error:
-            logger.error("telegram send failed (%s)", _code(error))
+            logger.debug("telegram typing failed (%s)", _code(error))
+
+    async def _keep_typing(self) -> None:
+        """«escribiendo…» now and every `typing_every` seconds, with a cap. It runs beside the
+        answer and never holds it back; an answer that comes at once has none."""
+        for _ in range(TYPING_TIMES):
+            await self._typing()
+            await asyncio.sleep(self._typing_every)
+
+    async def _cancel_turns(self) -> None:
+        """A turn still thinking when the service stops is dropped: nobody would get it."""
+        turns = list(self._turns)
+        for turn in turns:
+            turn.cancel()
+        await asyncio.gather(*turns, return_exceptions=True)
+
+    async def drain(self) -> None:
+        """Wait for the turns under way (what the tests use)."""
+        while self._turns:
+            await asyncio.gather(*list(self._turns), return_exceptions=True)
 
     async def _edit(self, message_id: int, view: View) -> None:
         try:
@@ -319,6 +398,7 @@ def build_channel(
     clock: Clock,
     handlers: Mapping[str, TapHandler] | None = None,
     on_started: OnStarted | None = None,
+    on_text: TextHandler = reply_not_yet,
 ) -> TelegramChannel:
     """The channel of the bot in `settings`, ready to `start` (nothing connects before that)."""
     application = build_application(settings.telegram_token.get_secret_value())
@@ -328,5 +408,6 @@ def build_channel(
         conn,
         clock,
         handlers=handlers,
+        on_text=on_text,
         on_started=on_started,
     )

@@ -7,10 +7,12 @@ from datetime import date, time
 
 import pytest
 from heartbeat_data import (
+    BINS,
     CLOSE,
     GYM,
     MADRID,
     MONDAY,
+    OFFERS,
     PLAN,
     PLANTS,
     SECRET_TEXT,
@@ -163,9 +165,10 @@ def test_con_tope_8_el_octavo_que_no_es_cierre_se_bloquea(conn):
 
 
 def test_el_cierre_como_octavo_entra(conn):
+    """El cierre cabe y se pasa al agente (1.8-b); lo atendido no gasta cupo hasta la 1.16."""
     fill(conn, 7)
     assert only(run(conn, "2030-01-07T21:30", outgoing("cierre_del_dia"))) == (
-        "send",
+        "handover",
         "ok",
         ("cierre_del_dia",),
     )
@@ -331,22 +334,35 @@ def test_una_key_task_no_espera_nunca(conn):
     )
 
 
-def test_si_sale_un_urgente_la_cola_sigue_esperando(conn):
-    """Agrupar nunca manda dos mensajes en un latido: el urgente reinicia la ventana."""
+def test_con_la_ventana_cumplida_la_cola_sale_con_el_urgente_en_un_mensaje(conn):
+    """Un latido, un mensaje (revisa la 79, decisión 1.8-d): a las 10:30 la ventana de las 10:00
+    se ha cumplido y lo que esperaba va con el gimnasio. Pilla dos mensajes en un latido."""
     add_notice(conn, "plan_del_dia", madrid("2030-01-07T10:00"), 1)
     queue = WaitingNotices()
     run(conn, "2030-01-07T10:15", outgoing("regar"), queue)
-    assert only(run(conn, "2030-01-07T10:30", outgoing("insistir_gimnasio"), queue))[:2] == (
+    assert only(run(conn, "2030-01-07T10:30", outgoing("insistir_gimnasio"), queue)) == (
+        "send",
+        "released",
+        ("insistir_gimnasio", "regar"),
+    )
+    assert queue.items == ()
+
+
+def test_con_la_ventana_sin_cumplir_sale_el_urgente_y_la_cola_espera(conn):
+    add_notice(conn, "plan_del_dia", madrid("2030-01-07T10:00"), 1)
+    queue = WaitingNotices()
+    run(conn, "2030-01-07T10:15", outgoing("regar"), queue)
+    assert only(run(conn, "2030-01-07T10:20", outgoing("insistir_gimnasio"), queue)) == (
         "send",
         "ok",
+        ("insistir_gimnasio",),
     )
     assert [item.intent for item in queue.items] == ["regar"]
 
 
-def test_dos_propuestas_en_un_latido_van_en_orden_y_la_segunda_ve_la_primera(conn):
-    """Las plantillas de la API caída pueden ser dos: el gimnasio sale y el aviso, que llega
-    justo detrás de un proactivo, espera la ventana. Pilla una pasada que solo mira la primera
-    propuesta, o que no cuenta lo que acaba de salir."""
+def test_dos_plantillas_en_un_latido_salen_juntas(conn):
+    """El plan B también es un lote: sin proactivos hoy, la ventana está abierta y el gimnasio y
+    el aviso van en un mensaje. Pilla una pasada que solo mira la primera propuesta."""
     queue = WaitingNotices()
     verdicts = second_pass(
         madrid("2030-01-07T13:00"),
@@ -357,10 +373,80 @@ def test_dos_propuestas_en_un_latido_van_en_orden_y_la_segunda_ve_la_primera(con
         queue,
     )
     assert [(v.action, v.reason, v.intents) for v in verdicts] == [
-        ("send", "ok", ("insistir_gimnasio",)),
-        ("wait", "group_window", ("regar",)),
+        ("send", "ok", ("insistir_gimnasio", "regar")),
     ]
-    assert [item.intent for item in queue.items] == ["regar"]
+    assert queue.items == ()
+
+
+# --- Varias intenciones en un latido (1.8-d) ---------------------------------------------------
+
+
+def batch(conn, now: str, *intents: str, queue=None, its=None):
+    return second_pass(
+        madrid(now),
+        tuple(outgoing(intent) for intent in intents),
+        its if its is not None else intentions(PLAN, CLOSE, GYM, PLANTS, BINS, OFFERS),
+        limits(),
+        sent(conn, MONDAY),
+        queue if queue is not None else WaitingNotices(),
+    )
+
+
+def test_tres_avisos_a_la_vez_salen_en_un_mensaje(conn):
+    """Pilla un lote que manda un mensaje por intención."""
+    assert [
+        (v.action, v.reason, v.intents)
+        for v in batch(conn, "2030-01-07T16:30", "ofertas", "regar", "basura")
+    ] == [("send", "ok", ("ofertas", "regar", "basura"))]
+
+
+def test_un_aviso_en_su_tope_cae_y_los_otros_dos_salen(conn):
+    add_notice(conn, "regar", madrid("2030-01-07T08:00"), 1)
+    verdicts = batch(conn, "2030-01-07T16:30", "ofertas", "regar", "basura")
+    assert [(v.action, v.reason, v.intents) for v in verdicts] == [
+        ("block", "repeated", ("regar",)),
+        ("send", "ok", ("ofertas", "basura")),
+    ]
+
+
+def test_con_la_ventana_sin_cumplir_los_avisos_del_lote_esperan_y_el_resto_sale(conn):
+    add_notice(conn, "plan_del_dia", madrid("2030-01-07T16:15"), 1)
+    queue = WaitingNotices()
+    verdicts = batch(conn, "2030-01-07T16:30", "ofertas", "insistir_gimnasio", queue=queue)
+    assert [(v.action, v.reason, v.intents) for v in verdicts] == [
+        ("wait", "group_window", ("ofertas",)),
+        ("send", "ok", ("insistir_gimnasio",)),
+    ]
+    assert [item.intent for item in queue.items] == ["ofertas"]
+
+
+def test_un_lote_con_el_cupo_lleno_se_bloquea_entero(conn):
+    fill(conn, 7)
+    verdicts = batch(conn, "2030-01-07T16:30", "ofertas", "regar")
+    assert [(v.action, v.reason, v.intents) for v in verdicts] == [
+        ("block", "close_slot", ("ofertas", "regar"))
+    ]
+
+
+def test_lo_que_no_cabe_en_4096_vuelve_a_la_cola(conn):
+    """Diez bloques de 400 caben (4018); el undécimo vuelve a esperar. Pilla un mensaje que
+    Telegram rechazaría."""
+    names = [f"aviso_{n}" for n in range(11)]
+    its = intentions(*[{**PLANTS, "id": name, "days": ["mon"]} for name in names])
+    queue = WaitingNotices()
+    verdicts = second_pass(
+        madrid("2030-01-07T16:30"),
+        tuple(outgoing(name, "x" * 400) for name in names),
+        its,
+        limits(),
+        sent(conn, MONDAY),
+        queue,
+    )
+    assert [(v.action, v.reason, v.intents) for v in verdicts] == [
+        ("wait", "message_full", ("aviso_10",)),
+        ("send", "ok", tuple(names[:10])),
+    ]
+    assert [item.intent for item in queue.items] == ["aviso_10"]
 
 
 def test_un_aviso_sin_proactivos_hoy_sale_solo_sin_esperar(conn):
@@ -405,6 +491,60 @@ def test_la_cola_descarta_lo_de_otro_dia():
     queue.add(outgoing("basura"), date(2030, 1, 8))
     assert queue.drop_other_days(date(2030, 1, 8)) == 1
     assert [item.intent for item in queue.items] == ["basura"]
+
+
+# --- Mientras Pedro conversa (1.10-c) ---------------------------------------------------------
+
+
+def chat(conn, now: str, *intents: str, last: str, queue=None, lim=None):
+    return second_pass(
+        madrid(now),
+        tuple(outgoing(intent) for intent in intents),
+        intentions(PLAN, CLOSE, GYM, PLANTS, BINS, OFFERS),
+        lim if lim is not None else limits(),
+        sent(conn, MONDAY),
+        queue if queue is not None else WaitingNotices(),
+        madrid(last),
+    )
+
+
+def codes(verdicts):
+    return [(v.action, v.reason, v.intents) for v in verdicts]
+
+
+def test_un_aviso_5_minutos_despues_de_un_mensaje_de_pedro_espera_y_sale_despues(conn):
+    """Pedro escribe a las 10:10: a las 10:15 (5 min) el aviso espera; a las 10:30 (20 min)
+    sale. Pilla la 1.10-c ignorada (versión incorrecta 6)."""
+    queue = WaitingNotices()
+    assert codes(
+        chat(conn, "2030-01-07T10:15", "basura", last="2030-01-07T10:10", queue=queue)
+    ) == [("wait", "chatting", ("basura",))]
+    assert codes(chat(conn, "2030-01-07T10:30", last="2030-01-07T10:10", queue=queue)) == [
+        ("send", "released", ("basura",))
+    ]
+
+
+def test_mientras_conversa_la_key_task_sale_sola_y_la_cola_sigue_esperando(conn):
+    """Lo urgente no espera, pero no arrastra la cola mientras dure la conversación."""
+    queue = WaitingNotices()
+    chat(conn, "2030-01-07T10:15", "basura", last="2030-01-07T10:10", queue=queue)
+    assert codes(
+        chat(conn, "2030-01-07T10:15", "insistir_gimnasio", last="2030-01-07T10:14", queue=queue)
+    ) == [("send", "ok", ("insistir_gimnasio",))]
+    assert [item.intent for item in queue.items] == ["basura"]
+
+
+def test_a_los_10_minutos_justos_ya_no_espera(conn):
+    assert codes(chat(conn, "2030-01-07T10:15", "basura", last="2030-01-07T10:05")) == [
+        ("send", "ok", ("basura",))
+    ]
+
+
+def test_con_quiet_while_chatting_a_cero_no_espera_nunca(conn):
+    lim = limits(quiet_while_chatting="0m")
+    assert codes(chat(conn, "2030-01-07T10:15", "basura", last="2030-01-07T10:15", lim=lim)) == [
+        ("send", "ok", ("basura",))
+    ]
 
 
 # --- Privacidad -------------------------------------------------------------------------------

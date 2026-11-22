@@ -24,9 +24,11 @@ TABLES = {
     "deleted_tasks",
     "model_usage",
     "system_notices",
+    "handovers",
+    "conversations",
 }
-LATEST = 2
-"""La última migración del paquete (0002, la del contador de gasto)."""
+LATEST = 3
+"""La última migración del paquete (0003, la del agente)."""
 
 
 def table_names(conn: sqlite3.Connection) -> set[str]:
@@ -64,7 +66,7 @@ def test_una_migracion_que_falla_a_medias_no_deja_nada(db_path):
     """Pilla migraciones sin transacción: ni la tabla nueva ni la versión deben quedar."""
     conn = open_database(db_path)
     broken = Migration(
-        LATEST + 1, "0003_broken.sql", "CREATE TABLE extra (x);\nCREATE TABLE decisions (y);"
+        LATEST + 1, "0004_broken.sql", "CREATE TABLE extra (x);\nCREATE TABLE decisions (y);"
     )
     try:
         with pytest.raises(sqlite3.OperationalError, match="already exists"):

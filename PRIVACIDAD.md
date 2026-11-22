@@ -28,8 +28,22 @@ usuario. **No lee la descripción**, la ubicación ni los correos de los asisten
   legible solo por su propietario), junto a los ficheros de configuración, hasta que se borre.
 - La base de datos conserva la mayoría de los registros un plazo limitado (de 30 días a un año,
   según la tabla; las decisiones del latido, 90 días). La excepción es el historial de cambios de
-  memoria (`changes`), que se guarda siempre, hasta que el usuario lo borre. Las transcripciones
-  locales del agente se borran a los 7 días.
+  memoria (`changes`), que se guarda siempre, hasta que el usuario lo borre.
+- **La conversación con el agente.** El motor del agente guarda la transcripción de cada día
+  (los mensajes, las respuestas y lo que leyó de las fuentes) en una carpeta propia de JimiC, dentro
+  de sus datos (`agent/`), legible solo por su propietario. Todo lo que el motor escribe ahí se
+  borra a los 7 días, salvo los pocos ficheros que necesita para funcionar, que no llevan contenido
+  (identificadores, contadores y ajustes). La base guarda, también 7 días, el identificador de la
+  sesión de cada día, la hora del último mensaje del usuario y si la sesión leyó el calendario o las
+  tareas; sin texto.
+- **Lo que propone el agente.** Un plan (crear, mover o borrar tareas, con la foto de cada tarea
+  que mueve o borra: título, fecha y proyecto) o un cambio de memoria se guarda como propuesta en la
+  base, sin ejecutarse, hasta que el usuario la apruebe; caduca al acabar el día y se borra a los 30
+  días.
+- **Las ideas** que el usuario pide anotar van, una por línea y con su fecha, a `ideas.md`, junto a
+  los ficheros personales; JimiC solo añade líneas, nunca reescribe el fichero.
+- Cuando el latido pasa al agente el plan o el cierre del día, la base anota la intención y la
+  hora (90 días), sin texto.
 - La base guarda también el **gasto en el modelo** (por llamada: el día, el modelo, cuántos tokens
   y cuántos dólares; ni el texto enviado ni el recibido) y el **registro de los avisos del
   sistema** (el tipo, como «API caída», un código como `calendar:auth` y la hora; sin texto). Los

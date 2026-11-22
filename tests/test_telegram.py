@@ -8,7 +8,7 @@ from zoneinfo import ZoneInfo
 import pytest
 from conftest import FixedClock
 from telegram.error import InvalidToken
-from telegram.ext import Application
+from telegram.ext import Application, MessageHandler, filters
 from telegram_data import (
     CHAT_ID,
     OTHER_CHAT_ID,
@@ -25,6 +25,7 @@ from jimic.channel import bot as bot_module
 from jimic.channel import store
 from jimic.channel.bot import (
     ALREADY_RESOLVED,
+    COULD_NOT_REPLY,
     NOT_YET,
     ChannelError,
     SendError,
@@ -90,8 +91,22 @@ def make_channel(conn, clock, request_double):
     return build
 
 
+MAX_SPINS = 1000
+"""Loop turns `drive` waits for the turns of the conversation before giving up."""
+
+
+async def settle() -> None:
+    """Wait until the tasks the channel started (the turns of the conversation) have ended."""
+    for _ in range(MAX_SPINS):
+        if len(asyncio.all_tasks()) == 1:
+            return
+        await asyncio.sleep(0)
+    raise AssertionError("a turn of the conversation never ended")
+
+
 def drive(application, *updates, before=None):
-    """Initialize the application (no polling), run `before(channel)`, feed it the updates."""
+    """Initialize the application (no polling), run `before(channel)`, feed it the updates and
+    wait for the turns they start."""
 
     async def scenario():
         async with application:
@@ -99,6 +114,7 @@ def drive(application, *updates, before=None):
                 await before()
             for update in updates:
                 await application.process_update(to_update(update, application.bot))
+            await settle()
 
     asyncio.run(scenario())
 
@@ -196,15 +212,16 @@ def test_un_mensaje_de_otro_chat_se_ignora_sin_responder(make_channel, request_d
 
 
 @pytest.mark.parametrize("text", [SECRET_TEXT, "/plan", "/start"])
-def test_un_texto_de_pedro_recibe_la_frase_fija_sin_formato(make_channel, request_double, text):
-    """También un `/comando`: hasta la 1.10 todo texto de Pedro recibe lo mismo, en texto plano."""
+def test_sin_conversacion_un_texto_recibe_la_frase_fija(make_channel, request_double, text):
+    """La demo: también un `/comando` recibe lo mismo. La respuesta es inmediata: sin
+    «escribiendo…», que no hace falta."""
     channel, application = make_channel()
     drive(application, text_update(text))
     assert request_double.methods() == ["sendMessage"]
     (params,) = request_double.params("sendMessage")
     assert params["text"] == NOT_YET
     assert params["chat_id"] == CHAT_ID
-    assert "parse_mode" not in params
+    assert params["parse_mode"] == "HTML"
 
 
 def test_el_texto_de_pedro_va_al_manejador_inyectado(make_channel, request_double):
@@ -217,7 +234,10 @@ def test_el_texto_de_pedro_va_al_manejador_inyectado(make_channel, request_doubl
     channel, application = make_channel(on_text=on_text)
     drive(application, text_update("hola"))
     assert received == ["hola"]
-    assert request_double.params("sendMessage")[0]["text"] == "respuesta <inventada> & sin escapar"
+    (params,) = request_double.params("sendMessage")
+    assert params["text"] == "respuesta &lt;inventada&gt; &amp; sin escapar"
+    assert params["parse_mode"] == "HTML"
+    assert params["link_preview_options"] == {"is_disabled": True}
 
 
 def test_algo_que_no_es_texto_no_recibe_respuesta(make_channel, request_double):
@@ -304,15 +324,96 @@ def test_un_error_inesperado_en_un_manejador_registra_solo_su_tipo(
 ):
     """El manejador de errores propio: sin traceback ni mensaje (podrían llevar contenido)."""
 
+    async def broken(update, context):
+        raise RuntimeError(SECRET_TEXT)
+
+    channel, application = make_channel()
+    application.add_handler(MessageHandler(filters.ALL, broken), group=1)
+    with caplog.at_level(logging.INFO):
+        drive(application, text_update("hola"))
+    assert "unhandled error in telegram handler (RuntimeError)" in caplog.text
+    assert SECRET_TEXT not in caplog.text
+    assert not any(record.exc_info for record in caplog.records)
+
+
+def test_si_la_conversacion_falla_pedro_recibe_una_frase_fija(make_channel, request_double, caplog):
     async def on_text(text: str) -> str:
         raise RuntimeError(SECRET_TEXT)
 
     channel, application = make_channel(on_text=on_text)
     with caplog.at_level(logging.INFO):
         drive(application, text_update("hola"))
-    assert "unhandled error in telegram handler (RuntimeError)" in caplog.text
+    assert request_double.params("sendMessage")[0]["text"] == COULD_NOT_REPLY
+    assert "text handler failed (RuntimeError)" in caplog.text
     assert SECRET_TEXT not in caplog.text
-    assert not any(record.exc_info for record in caplog.records)
+
+
+def test_mientras_el_agente_piensa_un_toque_se_atiende_y_el_texto_sale_despues(
+    make_channel, request_double
+):
+    """Ajuste 1 del chat: el manejador de texto no bloquea Telegram. Con el agente «pensando»,
+    un toque de botón se resuelve y se edita; la respuesta sale cuando el agente acaba."""
+    thinking, started = asyncio.Event(), asyncio.Event()
+    order: list[str] = []
+
+    async def on_text(text: str) -> str:
+        started.set()
+        await thinking.wait()
+        order.append("respuesta")
+        return "hecho"
+
+    channel, application = make_channel(on_text=on_text, typing_every=0.001)
+
+    async def scenario():
+        async with application:
+            approval = await channel.send("demo", make_message(), EXPIRES)
+            await application.process_update(to_update(text_update("hola"), application.bot))
+            await started.wait()  # the agent is thinking now
+            await application.process_update(
+                to_update(callback_update(f"{approval}:1:y", update_id=2), application.bot)
+            )
+            order.append("toque")
+            assert "editMessageText" in request_double.methods()
+            thinking.set()
+            await settle()
+
+    asyncio.run(scenario())
+    assert order == ["toque", "respuesta"]
+    assert request_double.params("sendMessage")[-1]["text"] == "hecho"
+    typing = request_double.params("sendChatAction")[0]
+    assert (typing["chat_id"], typing["action"]) == (CHAT_ID, "typing")
+
+
+def test_una_respuesta_larga_se_parte_en_mensajes_que_caben(make_channel, request_double):
+    async def on_text(text: str) -> str:
+        return "\n".join(["línea & más " + "x" * 90] * 60)
+
+    channel, application = make_channel(on_text=on_text)
+    drive(application, text_update("hola"))
+    texts = [params["text"] for params in request_double.params("sendMessage")]
+    assert len(texts) == 2
+    assert all(len(text.encode("utf-16-le")) // 2 <= 4096 for text in texts)
+    assert "&amp;" in texts[0] and "& " not in texts[0]
+
+
+def test_al_parar_se_cancela_el_turno_que_sigue_pensando(make_channel, request_double):
+    never = asyncio.Event()
+
+    async def on_text(text: str) -> str:
+        await never.wait()
+        return "nunca"
+
+    channel, application = make_channel(on_text=on_text, typing_every=0.001)
+
+    async def scenario():
+        await application.initialize()
+        await application.process_update(to_update(text_update("hola"), application.bot))
+        await asyncio.sleep(0)
+        await channel.stop()
+        await settle()
+
+    asyncio.run(scenario())
+    assert request_double.params("sendMessage") == []
 
 
 def test_el_log_de_todo_un_recorrido_no_lleva_contenido_ni_chat_ni_token(
@@ -523,3 +624,65 @@ def test_parar_sigue_aunque_un_paso_falle_con_cualquier_error(conn, clock):
     app.updater.stop = broken_stop
     asyncio.run(fake_channel(app, conn, clock).stop())
     assert app.log == ["shutdown"]
+
+
+def test_un_mensaje_que_llega_mientras_para_no_abre_un_turno(make_channel, request_double):
+    """Hallazgo 1 de la revisión: lo que la aplicación procesa al pararse no empieza un turno
+    que nadie cancelaría."""
+    received: list[str] = []
+
+    async def on_text(text: str) -> str:
+        received.append(text)
+        return "nunca"
+
+    channel, application = make_channel(on_text=on_text)
+
+    async def scenario():
+        await application.initialize()
+        await channel.stop()
+        await application.initialize()
+        await application.process_update(to_update(text_update("hola"), application.bot))
+        await settle()
+        await application.shutdown()
+
+    asyncio.run(scenario())
+    assert received == []
+    assert request_double.params("sendMessage") == []
+
+
+def test_dos_mensajes_seguidos_se_contestan_en_el_orden_de_llegada(make_channel, request_double):
+    """Ajuste de la revisión del chat: el «escribiendo…» del primero tarda más que el del
+    segundo. Pilla un turno que espera a esa llamada de red antes de ponerse en la cola: el
+    segundo se colaría, y su hora de llegada se retrasaría."""
+    lock = asyncio.Lock()
+    arrived: list[str] = []
+
+    async def on_text(text: str) -> str:
+        arrived.append(text)  # lo que anota la conversación al llegar
+        async with lock:  # el turno, como en la conversación
+            await asyncio.sleep(0)
+            return f"respuesta a {text}"
+
+    slow = asyncio.Event()
+    request_double.chat_action_gates[0] = slow
+    channel, application = make_channel(on_text=on_text)
+
+    async def scenario():
+        async with application:
+            await application.process_update(to_update(text_update("uno"), application.bot))
+            await application.process_update(
+                to_update(text_update("dos", update_id=2), application.bot)
+            )
+            for _ in range(MAX_SPINS):
+                if len(request_double.params("sendMessage")) == 2:
+                    break
+                await asyncio.sleep(0)
+            slow.set()
+            await settle()
+
+    asyncio.run(scenario())
+    assert arrived == ["uno", "dos"]
+    assert [p["text"] for p in request_double.params("sendMessage")] == [
+        "respuesta a uno",
+        "respuesta a dos",
+    ]

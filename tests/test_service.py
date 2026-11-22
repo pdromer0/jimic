@@ -8,6 +8,7 @@ import threading
 import time
 from datetime import datetime, timedelta
 from datetime import time as dt_time
+from decimal import Decimal
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -23,6 +24,7 @@ from jimic.heartbeat.decide import ModelApi
 from jimic.logs import LOG_FILE
 from jimic.memory import personal
 from jimic.memory.database import load_migrations, open_database, schema_version
+from jimic.memory.usage import PRICES, Price
 from jimic.paths import resolve_paths
 from jimic.runtime import Runtime
 
@@ -314,13 +316,14 @@ def test_jimic_run_no_arranca_sin_los_yaml_pero_si_sin_los_markdown(capsys, monk
     assert "no se pudo arrancar Telegram" in capsys.readouterr().err
 
 
-def test_jimic_run_no_arranca_con_un_modelo_sin_precio_de_cache(capsys):
-    """Sonnet tiene precio, pero aún no el de su caché, y cada latido la usa (hallazgo 1 de la
-    revisión propia)."""
-    write_setup({**VALID_ENV, "MODELO_LATIDO": "claude-sonnet-5-5"})
+def test_jimic_run_no_arranca_con_un_modelo_sin_precio_de_cache(capsys, monkeypatch):
+    """Un modelo con precio pero sin el de su caché, que cada latido usa (hallazgo 1 de la
+    revisión propia de la 1.8)."""
+    monkeypatch.setitem(PRICES, "modelo-sin-cache", Price(input=Decimal(1), output=Decimal(1)))
+    write_setup({**VALID_ENV, "MODELO_LATIDO": "modelo-sin-cache"})
     assert jimic.cli.main(["run"]) == 2
     assert capsys.readouterr().err == (
-        "jimic: el modelo claude-sonnet-5-5 no tiene precio de caché en jimic.memory.usage\n"
+        "jimic: el modelo modelo-sin-cache no tiene precio de caché en jimic.memory.usage\n"
     )
 
 
@@ -352,6 +355,10 @@ class FakeRuntimeChannel:
     async def send_text(self, text: str) -> int:
         raise AssertionError("the runtime test sends nothing")
 
+    def wired(self, on_text):
+        self.on_text = on_text
+        return self
+
     def schedule_every(self, task, interval, first, name) -> None:
         self.scheduled.append((name, interval, first))
 
@@ -376,7 +383,7 @@ def runtime_with(conn, events, fail_start=False):
         conn,
         intentions(),
         limits(),
-        channel_factory=lambda settings, conn, clock: channel,  # pyright: ignore[reportArgumentType] - a double of the channel
+        channel_factory=lambda settings, conn, clock, on_text: channel.wired(on_text),  # pyright: ignore[reportArgumentType] - a double of the channel
         model_factory=lambda settings: ModelApi(FakeMessages().create, close_model),
         todoist_api=todoist,
     )
@@ -407,6 +414,9 @@ def test_el_runtime_programa_el_latido_alineado_y_la_purga_y_para_en_orden(tmp_p
     assert events == ["channel start", "channel stop", "model close"]
     assert todoist.closed
     assert runtime.heartbeat is not None
+    # El texto de Pedro va a la conversación del agente (1.10).
+    assert runtime.conversation is not None
+    assert channel.on_text == runtime.conversation.reply
 
 
 def test_si_el_canal_no_arranca_el_runtime_cierra_el_modelo_y_las_fuentes(tmp_path):
@@ -421,3 +431,40 @@ def test_si_el_canal_no_arranca_el_runtime_cierra_el_modelo_y_las_fuentes(tmp_pa
     assert events == ["channel start", "model close"]
     assert todoist.closed
     assert channel.scheduled == []
+
+
+def test_la_purga_diaria_borra_tambien_lo_viejo_del_agente(tmp_path):
+    """Decisión 23: las transcripciones del agente se van a los 7 días con la purga de las 4:00."""
+    conn = open_database(tmp_path / "jimic.db")
+    runtime, _, _ = runtime_with(conn, [])
+    transcript = resolve_paths(os.environ).agent_dir / "projects" / "x" / "s.jsonl"
+    transcript.parent.mkdir(parents=True)
+    transcript.write_text("inventado")
+    old = (NOW - timedelta(days=8)).timestamp()
+    os.utime(transcript, (old, old))
+    try:
+        asyncio.run(runtime._purge())
+    finally:
+        conn.close()
+    assert not transcript.exists()
+
+
+def test_si_falla_la_purga_de_la_base_la_del_agente_sigue(tmp_path, monkeypatch):
+    """Hallazgo 6 de la revisión: cada purga por su cuenta."""
+    conn = open_database(tmp_path / "jimic.db")
+    runtime, _, _ = runtime_with(conn, [])
+    transcript = resolve_paths(os.environ).agent_dir / "projects" / "x" / "s.jsonl"
+    transcript.parent.mkdir(parents=True)
+    transcript.write_text("inventado")
+    old = (NOW - timedelta(days=8)).timestamp()
+    os.utime(transcript, (old, old))
+
+    def broken(conn, clock):
+        raise sqlite3.OperationalError("database is locked")
+
+    monkeypatch.setattr("jimic.runtime.purge", broken)
+    try:
+        asyncio.run(runtime._purge())
+    finally:
+        conn.close()
+    assert not transcript.exists()

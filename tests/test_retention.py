@@ -159,8 +159,10 @@ def test_una_base_vacia_se_purga_sin_error(conn):
         "approvals": 0,
         "deleted_tasks": 0,
         "system_notices": 0,
+        "handovers": 0,
         "plan_items": 0,
         "day_ratings": 0,
         "day_plans": 0,
         "model_usage": 0,
+        "conversations": 0,
     }

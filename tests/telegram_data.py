@@ -4,6 +4,7 @@ Nothing here touches the network: `FakeRequest` replaces the HTTP client of `pyt
 so the real library code builds the requests and parses the answers.
 """
 
+import asyncio
 import json
 from typing import Any
 
@@ -35,6 +36,9 @@ class FakeRequest(BaseRequest):
         self.calls: list[tuple[str, dict[str, Any]]] = []
         self.failures: dict[str, tuple[int, str]] = {}
         """Method name -> (HTTP status, description): the call fails like Telegram would."""
+        self.chat_action_gates: dict[int, asyncio.Event] = {}
+        """Number of a `sendChatAction` call (from 0) -> what it waits for: a slow answer."""
+        self._chat_actions = 0
 
     @property
     def read_timeout(self) -> float | None:
@@ -61,6 +65,11 @@ class FakeRequest(BaseRequest):
         self.calls.append((name, params))
         if len(self.calls) > MAX_CALLS:
             raise AssertionError("se ha llamado a la API de Telegram en bucle")
+        if name == "sendChatAction":
+            gate = self.chat_action_gates.get(self._chat_actions)
+            self._chat_actions += 1
+            if gate is not None:
+                await gate.wait()
         if name in self.failures:
             status, description = self.failures[name]
             body = {"ok": False, "error_code": status, "description": description}

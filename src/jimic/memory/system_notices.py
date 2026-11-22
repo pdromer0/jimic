@@ -13,6 +13,8 @@ from datetime import date, datetime
 from typing import Literal
 
 from jimic.clock import to_db
+from jimic.memory import usage
+from jimic.memory.schemas import Budget
 
 type Kind = Literal["api_down", "source_down", "budget"]
 
@@ -55,3 +57,10 @@ def pending(conn: sqlite3.Connection, day: date) -> list[PendingNotice]:
 
 def mark_sent(conn: sqlite3.Connection, notice_id: int, moment: datetime) -> None:
     conn.execute("UPDATE system_notices SET sent_at = ? WHERE id = ?", (to_db(moment), notice_id))
+
+
+def check_budget(conn: sqlite3.Connection, budget: Budget, now: datetime) -> None:
+    """Register the budget notice of the month once the spend reaches `warn_at` of the target."""
+    spent = usage.spent_in_month(conn, now.date())
+    if spent > 0 and spent >= budget.warn_at * budget.monthly_target_usd:
+        detect(conn, "budget", now.date(), now)

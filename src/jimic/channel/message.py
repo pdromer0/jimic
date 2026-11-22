@@ -300,3 +300,30 @@ def final_status(message: InteractiveMessage) -> FinalStatus | None:
     }
     chosen = {(index, item.chosen) for index, item in enumerate(message.items)}
     return "approved" if approving & chosen else "rejected"
+
+
+def reply_chunks(text: str) -> list[str]:
+    """`text` escaped for Telegram HTML, in as few messages as fit in `TELEGRAM_TEXT_LIMIT`.
+
+    It is cut between lines when it can, and a line too long for one message between characters;
+    never inside an entity (`&amp;`), because each piece is escaped whole.
+    """
+    chunks: list[str] = []
+    current = ""
+    for line in text.strip().splitlines(keepends=True):
+        escaped = html.escape(line, quote=False)
+        if telegram_length(current + escaped) <= TELEGRAM_TEXT_LIMIT:
+            current += escaped
+            continue
+        if current:
+            chunks.append(current)
+            current = ""
+        for character in line:
+            piece = html.escape(character, quote=False)
+            if telegram_length(current + piece) > TELEGRAM_TEXT_LIMIT:
+                chunks.append(current)
+                current = ""
+            current += piece
+    if current.strip():
+        chunks.append(current)
+    return [chunk.strip() for chunk in chunks if chunk.strip()]

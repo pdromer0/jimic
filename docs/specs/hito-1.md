@@ -1668,3 +1668,148 @@ Pendiente).
 **Pruebas contra servicios reales** (regla «los tests no dejan basura»): una llamada a la API de
 Anthropic (el contrato), que no crea nada en ningún servicio. Ni Todoist, ni Calendar, ni Telegram:
 no hay restos que comprobar.
+
+### Tarea 1.10: agente con el SDK y conversación
+
+**Qué se hizo.** Issue #23 (★), rama `feat/h1-agente`, aprobada a las 09:10 del 22-nov-2026 con
+ocho ajustes del chat. Commits: `chore(deps)` de `claude-agent-sdk` 0.2.187 (f68adb7);
+`feat(heartbeat)` de las 3 intenciones por latido (9b10d9c) y del plan y el cierre atendidos
+(eefa1e4); `feat(memory)` de la 1.10-c (eb6b6fb); `feat(agent)` de las herramientas (3f6f2d7), las
+opciones y el prompt (3978c86) y la conversación (9945d19); `feat(channel)` (06f3f21);
+`test(contrato)` (203cf33); `docs(diseno)` (3f2f0b6); un `refactor` antes de la conversación
+(04424fe) y, de la revisión propia, cinco `fix` (d93f7d0, 1417c1e, 017ab57, 6ce8e86, 268d7d5) y un
+`refactor` sin tocar tests (686aa48). Este anexo es el último, `docs(hito-1)`.
+
+**Decisiones de la tarea** (en `diseno.md` como 89 a 95):
+- **1.10-a** · una conversación por día: la sesión del SDK del día local se reanuda en cada mensaje
+  (decisión 89).
+- **1.10-b** · las propuestas, como datos en `approvals`, sin botones (decisión 90).
+- **1.10-c** · mientras Pedro conversa (`quiet_while_chatting`, 10m), un `notice` espera y la cola
+  no se suelta; lo urgente sale solo (decisión 91, con el ajuste 8 del chat).
+- **1.8-d** · hasta 3 intenciones por latido, en un mensaje (decisión 92), con la 79 revisada
+  (decisión 93) y el plan B como lote.
+- **Plan y cierre atendidos** (primer añadido): veredicto `handover`, enganche inyectado, tabla
+  `handovers` y la unión con `notices`, nunca la suma (decisión 94, con el ajuste 2).
+- **El aviso del presupuesto** que se detecta en la conversación lo manda el latido siguiente
+  (decisión 95).
+
+**Decisiones del diff** (lo que el plan interpretaba, aprobado con el informe de `revisor-plan`,
+veredicto «dudas (10)», y los ajustes del chat):
+- Paquete `src/jimic/agent/`: `tools.py` (las seis, servidor MCP `jimic`; el contexto lleva los
+  lectores, nunca el escritor de Todoist), `proposals.py`, `options.py`, `prompt.md`,
+  `conversation.py` y `transcripts.py`. Migración 0003: `handovers` (90 días) y `conversations`
+  (7 días).
+- Opciones: además de las de 9.2, `tools=[]`, `allowed_tools` con las seis y `dontAsk`,
+  `strict_mcp_config`, `ANTHROPIC_BASE_URL` explícita, `stderr` descartado (sin él, la salida de
+  error del motor va a la del servicio: leído en el código instalado), `max_turns` 12 y `cwd` en
+  `<datos>/agent`. Los tests miran la orden que construye el SDK instalado (`--tools ""`,
+  `--setting-sources=`), sin arrancar el motor.
+- Una fuente caída devuelve al agente solo su código: al principio salía también `"tasks": []`, y
+  un test lo pilló (parecería «no tienes tareas»).
+- `propose_plan`: de 1 a 8 elementos; mover y borrar guardan la foto de la tarea leída por el
+  código (`get_task`, con la guardia de `dev`); **crear va a la bandeja de entrada** (en `dev`, la
+  guardia lo manda al proyecto de pruebas); una tarea solo una vez por plan (revisión). Caducan al
+  acabar el día local.
+- `after_external_content`, por sesión del día (ajuste 4): `conversations.read_external`; si no
+  se puede marcar la lectura, la herramienta da error y no lee.
+- Lo atendido pasa el tope por intención y el cupo (lo que la 1.14 y la 1.16 enviarán debe caber),
+  pero no lo gasta. El hueco del cierre sigue guardado mientras el cierre no se envíe (78).
+- La conversación: un `asyncio.Lock` ordena los turnos y el canal lanza cada uno como tarea propia
+  (ajuste 1): un toque se atiende mientras el agente piensa. «Escribiendo…» antes de llamar al
+  agente y cada 4 s (tope de 5 min). La respuesta, en HTML escapado y partida si no cabe.
+- Fallos: `agent:api:<estado>` (con `api_down`, el mismo `status_kind` que el latido),
+  `agent:max_turns`, `agent:max_budget`, `agent:process:<Tipo>`, `agent:error:<subtipo>` y
+  `agent:no_result`. Sin coste del SDK, o caída tras empezar a responder, cuenta
+  `max_session_usd`. Una sesión reanudada que falla como proceso o como error de ejecución se
+  olvida.
+- **La purga del agente** (ajuste 5), con lo que vio el contrato: se borra a los 7 días todo lo que
+  el motor escribe en su carpeta, también fuera de `projects/` (las transcripciones), salvo lo que
+  necesita para funcionar y no lleva contenido: `.claude.json` (identificadores y contadores),
+  `policy-limits.json`, `policy-limits.json.signature.json`, `policy-limits.json.stamp.json`,
+  `remote-settings.json`, `remote-settings.json.synced-at` y `plugins/` (el almacén de sus
+  complementos de serie). En un hilo, y aparte de la purga de la base.
+- Precios de caché de Sonnet 5.5 (vistos el 22-nov-2026) en `PRICES`; dos tests de la 1.8 que
+  usaban Sonnet como «modelo sin caché» pasan a un modelo inventado.
+- La demo contesta con su frase fija, sin «llego en la 1.10». El aviso de la API rechazada nombra
+  también `MODELO_AGENTE`.
+
+**Valores a mano** (código independiente, antes de implementar; los recalculó `revisor-plan`): el
+día local de la sesión, con los casos del revisor que cruzan la medianoche con el cambio de
+desfase (2030-03-31T22:30Z → 00:30 del 1-abr, sesión nueva; 2030-10-27T22:30Z → 23:30 del 27, la
+misma); caducidad de una propuesta, 2030-01-07T23:00Z y, el 31-mar, 22:00Z; la 1.10-c, Pedro a
+las 10:10, el latido de las 10:15 espera y el de las 10:30 suelta, y a los 10 min justos ya sale;
+4096: diez bloques de 400 caben (4018), once no (4420); el tope diario de 3 $ para con 3,0 y no con
+2,999; el aviso del mes a los 24 $; Sonnet, 3000 de entrada, 400 de salida y 12 000 escritos en la
+caché de 5 min, 0,04 $ (0,0112 $ con los 12 000 leídos). Todos, comprobados por los tests.
+
+**Contratos** (22-nov-2026, `JIMIC_CONTRATO=1`, clave de `jimic-dev`, sin restos: no tocan Todoist,
+Calendar ni Telegram):
+- **Agente**, dos ejecuciones con lectores inventados y `CLAUDE_CONFIG_DIR` temporal: el `init`
+  lista **solo las seis** (`mcp__jimic__…`) con el servidor conectado; el subproceso arranca en WSL
+  sin instalar nada; la primera llama a `read_tasks` una vez (2 turnos, **0,0103 $**, 3812 escritos
+  en la caché de 5 min y 3588 leídos); la segunda reanuda la **misma sesión** y contesta sin
+  herramientas (1 turno, **0,0109 $**).
+- **Haiku**, una vez con el esquema nuevo: bloque fijo de **1935 tokens** (1668 antes de la
+  1.8-d), 796 de entrada, 406 de salida, 2417 escritos en la caché de 1 h, 0,000766 $; respuesta
+  válida.
+
+**Medidas.** La N3 (tras la revisión): 930 tests (4 de contrato saltados; eran 792
+tras la 1.8), 0:27 en total (pre-commit 0:08, pytest 0:18, gitleaks de la historia 0:01); este
+anexo se escribió mientras corría y solo es documentación.
+
+**Versiones incorrectas** (aplicadas y deshechas con un script, sin dejar nada en el árbol).
+Predicción antes, observado después:
+
+| # | Versión | Predicción | Observado |
+| --- | --- | --- | --- |
+| 1 | Registrar `delete_task` | Rojo el de la lista exacta | **2**: también el de opciones que lista el servidor (lee el mismo servidor) |
+| 2 | `setting_sources` por defecto | Rojo el de ajustes heredados | Igual (1) |
+| 3 | Las herramientas de serie (`tools` sin pasar) | Rojo el de sin herramientas de serie | Igual (1) |
+| 4 | La sesión no cambia de día | Rojos los de día siguiente | 2: enero y 31-mar → 1-abr (tras el ajuste 6, el 27-oct es de mismo día; el plan lo daba de día siguiente) |
+| 5 | `propose_plan` llama al escritor | Rojo el del espía | Igual (1) |
+| 6 | 1.10-c ignorada | Rojos los dos de esperar mientras conversa | **3**: también el de la `key_task`, cuya preparación cuenta con que el aviso espere, y el del ciclo |
+| 7 | El plan se puede elegir dos veces | Rojo el de 8:30 → 8:45 | **2**: también el del cierre atendido que guarda su hueco (pide que cuente 1) |
+| 8 | El lote cuenta 3 en el cupo | Rojos el de los tres avisos y `messages_left` | **5**: también los que comprueban el mismo `telegram_message_id` |
+
+**Revisión propia** (`/code-review medium`, 10 hallazgos):
+- Corregidos: (1) un mensaje que llega al parar no abre un turno (d93f7d0); (2) una ejecución que
+  se cae sin resultado cuenta lo que pudo gastar (1417c1e); (3) una sesión reanudada con error de
+  ejecución se olvida (017ab57); (4) una tarea, una vez por plan (6ce8e86); (6) la purga del agente
+  tolera lo que desaparece, va en un hilo y no depende de la de la base (268d7d5); (8), (9) y el
+  envoltorio de (10), refactor sin tocar tests (686aa48).
+- Explicados: (5) `quiet_while_chatting` obligatorio, aceptado por Pedro (hay que añadir la línea a
+  los dos `limites.yaml`); (7) cerrar el generador del SDK al cancelar: en `run_once` el bucle no
+  espera nada más que al generador, así que una cancelación siempre nace dentro de él y su propio
+  `finally` cierra el motor; el test que lo probaba pasaba igual sin el arreglo, y se deshicieron
+  los dos; (8) la caché sin desglose: 5 min en el agente (la de serie del SDK) y 1 h en el latido
+  (la que pide), a propósito, con un comentario; (10) `get_task` en serie: como mucho 8, y así el
+  mensaje del primer elemento que falla es determinista y no hay ráfaga contra Todoist.
+
+**Pendiente.**
+- **1.11:** el *hook* `PreToolUse` con `tool_levels` (hoy todas se registran; `dontAsk` deniega lo
+  demás); los botones y la ejecución de las propuestas, con la foto y `after_external_content`; el
+  envío rechazado que se pierde (de la 1.8).
+- **1.12:** ejecutar `propose_change` con la regla de origen; `quiet_while_chatting` sube conversando
+  (más discreto).
+- **1.14 y 1.16:** rellenar el enganche (`on_handover`); al enviar el plan o el cierre, escribir su
+  fila en `notices` (seguirá contando 1 por la unión) y aplicar el cupo al enviar.
+- **1.9:** medir con las evaluaciones el lote de 3 (el bloque fijo creció a 1935 tokens).
+
+**Pruebas contra servicios reales** (regla «los tests no dejan basura»): tres llamadas a la API de
+Anthropic (dos del agente y una de Haiku), que no crean nada en ningún servicio. Ni Todoist, ni
+Calendar, ni Telegram: no hay restos que comprobar. Lo que el motor escribió va a las carpetas
+temporales de pytest (que guarda las tres últimas), con datos inventados.
+
+**Ajustes de la revisión** (el chat, en el PR #44; una ronda):
+- **El orden de los mensajes** (ab7651c): `_converse` esperaba el «escribiendo…», una llamada de
+  red, antes de llamar a la conversación. Con dos mensajes seguidos, si Telegram contestaba antes
+  al del segundo, este cogía el turno primero, y la hora de llegada se retrasaba lo que tardase
+  esa llamada. Ahora la tarea de `on_text` se crea en el manejador, al llegar el mensaje, y
+  «escribiendo…» va en su propia tarea. Con solo eso, la respuesta del primero aún podía salir
+  detrás de la del segundo si su «escribiendo…» seguía en el aire; por eso cada turno envía después
+  del anterior. Consecuencia: una respuesta inmediata ya no lleva «escribiendo…», y dos tests que lo
+  pedían con una respuesta inmediata dejan de hacerlo (el test lento lo sigue comprobando). Test
+  nuevo: el «escribiendo…» del primer mensaje tarda más que el del segundo y las respuestas salen en
+  el orden de llegada; sin el arreglo sale `['dos', 'uno']`.
+- N3 de la ronda: 931 tests, 0:31 en total (pre-commit 0:11, pytest 0:19, gitleaks de la
+  historia 0:01).

@@ -5,6 +5,7 @@ max_messages_per_day: 8                     # tope de mensajes proactivos al dí
 quiet_hours: {from: "23:00", to: "07:00"}   # silencio; cruza la medianoche si hace falta; from = to: todo el día
 silent_during_events: true                  # nada proactivo durante eventos del calendario
 group_window: 30m                           # agrupa los avisos a menos de este margen (m u h)
+quiet_while_chatting: 10m                   # mientras conversas, los avisos esperan (m u h; 0m, nunca)
 max_insist_per_task: 3                      # avisos por tarea clave y día
 max_deletions_per_day: 5                    # borrados de tareas al día (decisión 56)
 budget:                                     # presupuesto en dólares (sección 10.3 del diseño)

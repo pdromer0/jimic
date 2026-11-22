@@ -4,6 +4,10 @@ Only the heartbeat writes `notices`, one row per intention it sends: Pedro's con
 the confirmations he asks for never go there (4.3 of the design), so every row is proactive.
 A grouped message (decision 1.7-b) is several rows with the same `telegram_message_id`, and it
 counts as one message. A row without that id counts on its own: when in doubt, more discreet.
+
+A plan or a close that the heartbeat hands over to the agent is a row in `handovers`: it counts
+as attended today for the cap of its intention (once, even with a row in `notices` too when tasks
+1.14 and 1.16 send it), but never as a message.
 """
 
 import sqlite3
@@ -29,9 +33,17 @@ class SentToday:
     message_count: int = 0
     """Messages, not rows: the rows of a grouped message count once."""
     _per_intent: Counter[str] = field(default_factory=Counter, repr=False, compare=False)
+    handed: frozenset[str] = frozenset()
+    """The intentions handed over to the agent today."""
 
     def count(self, intent: str) -> int:
-        """How many times `intent` went out."""
+        """How many times `intent` was attended today: its sends, or 1 if it was only handed
+        over (the union of `notices` and `handovers`, never their sum)."""
+        sent = self._per_intent[intent]
+        return sent if sent else int(intent in self.handed)
+
+    def sent_count(self, intent: str) -> int:
+        """How many times `intent` actually went out (what the slot of the close looks at)."""
         return self._per_intent[intent]
 
     @property
@@ -40,7 +52,8 @@ class SentToday:
 
 
 def sent_between(conn: sqlite3.Connection, start: datetime, end: datetime) -> SentToday:
-    """The notices with `start <= sent_at < end`, oldest first. Both moments must be aware.
+    """The notices with `start <= sent_at < end`, oldest first, and the handovers in the same
+    span. Both moments must be aware.
 
     `sent_at` is ISO text in UTC (`to_db`), so comparing the text compares the moments.
     """
@@ -50,8 +63,17 @@ def sent_between(conn: sqlite3.Connection, start: datetime, end: datetime) -> Se
         (to_db(start), to_db(end)),
     ).fetchall()
     notices = tuple(SentNotice(intent, datetime.fromisoformat(at)) for intent, at, _ in rows)
+    handed = conn.execute(
+        "SELECT DISTINCT intent FROM handovers WHERE handed_at >= ? AND handed_at < ?",
+        (to_db(start), to_db(end)),
+    ).fetchall()
     return SentToday(
         notices=notices,
         message_count=len({message for _, _, message in rows}),
         _per_intent=Counter(notice.intent for notice in notices),
+        handed=frozenset(intent for (intent,) in handed),
     )
+
+
+def record_handover(conn: sqlite3.Connection, intent: str, moment: datetime) -> None:
+    conn.execute("INSERT INTO handovers (handed_at, intent) VALUES (?, ?)", (to_db(moment), intent))

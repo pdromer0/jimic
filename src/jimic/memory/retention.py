@@ -23,6 +23,7 @@ MOMENT_RETENTION = (
     ("approvals", "created_at", 30),
     ("deleted_tasks", "deleted_at", 30),
     ("system_notices", "detected_at", 365),
+    ("handovers", "handed_at", 90),
 )
 """(table, timestamp column, days kept)."""
 
@@ -31,6 +32,7 @@ DAY_RETENTION = (
     ("day_ratings", 365),
     ("day_plans", 365),
     ("model_usage", 365),
+    ("conversations", 7),
 )
 """(table, days kept) for tables keyed by `day`; `plan_items` goes before its `day_plans`."""
 

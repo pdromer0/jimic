@@ -12,6 +12,7 @@ import pytest
 from jimic.memory.database import open_database
 from jimic.memory.usage import (
     PRICES,
+    Price,
     TokenUsage,
     UnpricedError,
     cost,
@@ -73,11 +74,23 @@ def test_un_modelo_sin_precio_no_se_cuenta_en_silencio():
         cost("modelo-sin-precio", NO_CACHE)
 
 
-def test_sonnet_aun_no_tiene_precio_de_cache():
-    """La 1.10 confirma su caché: hasta entonces, usarla es un error, no un cero."""
-    assert PRICES["claude-sonnet-5-5"].cache_read is None
+def test_un_modelo_sin_precio_de_cache_no_la_cuenta_como_cero(monkeypatch):
+    """Usar una caché sin precio es un error, no un cero."""
+    monkeypatch.setitem(PRICES, "modelo-sin-cache", Price(input=Decimal(1), output=Decimal(1)))
     with pytest.raises(UnpricedError):
-        cost("claude-sonnet-5-5", CACHED)
+        cost("modelo-sin-cache", CACHED)
+
+
+@pytest.mark.parametrize(
+    ("usage", "expected"),
+    [
+        (TokenUsage(3000, 400, cache_write_5m_tokens=12_000), "0.04"),
+        (TokenUsage(3000, 400, cache_read_tokens=12_000), "0.0112"),
+    ],
+)
+def test_sonnet_con_su_cache(usage, expected):
+    """Valores a mano del plan de la 1.10, con los precios vistos el 22-nov-2026."""
+    assert cost("claude-sonnet-5-5", usage) == Decimal(expected)
 
 
 def test_un_dia_de_60_llamadas_con_la_reunion_escribe_la_cache_dos_veces(conn):

@@ -55,6 +55,7 @@ LIMITS: dict[str, Any] = {
     "quiet_hours": {"from": "23:00", "to": "07:00"},
     "silent_during_events": True,
     "group_window": "30m",
+    "quiet_while_chatting": "10m",
     "max_insist_per_task": 3,
     "max_deletions_per_day": 5,
     "budget": {
@@ -331,7 +332,20 @@ def answer(
     message: str | None = None,
     reason: str = SECRET_REASON,
 ) -> dict[str, Any]:
-    return {"speak": speak, "intent": intent, "reason": reason, "message": message}
+    """An answer with one pick (`intent`), or none."""
+    chosen = [] if intent is None else [(intent, message)]
+    return picks(*chosen, speak=speak, reason=reason)
+
+
+def picks(
+    *chosen: tuple[str, str | None], speak: bool = True, reason: str = SECRET_REASON
+) -> dict[str, Any]:
+    """An answer with these `(intent, message)` picks (decision 1.8-d)."""
+    return {
+        "speak": speak,
+        "reason": reason,
+        "picks": [{"intent": intent, "message": message} for intent, message in chosen],
+    }
 
 
 def api_down() -> anthropic.APIConnectionError:

@@ -6,11 +6,13 @@ day at the end, in the user message. The answer is structured: `messages.create`
 schema of `HeartbeatDecision` in `output_config.format`, validated here, so a call that answers
 something invalid still has its usage counted (`messages.parse` would raise and lose it).
 
-- An answer that does not fit (an intention that is not active today, speaking without a
-  message, a message too long, or no valid JSON) is `invalid_decision:<why>`: nobody speaks
-  and it is not retried.
+- The model may pick up to `MAX_PICKS` intentions (decision 1.8-d); they go out in one message.
+  A pick that does not fit (an intention that is not active today or already picked, no message,
+  a message too long) is dropped with its code and the rest goes on. An answer that does not
+  fit as a whole (more than `MAX_PICKS`, no valid pick, or no valid JSON) is
+  `invalid_decision:<why>`: nobody speaks and it is not retried.
 - The plan and the close (decision 1.8-b) are decided and recorded, but nothing goes out until
-  tasks 1.14 and 1.16 bring them.
+  tasks 1.14 and 1.16 bring them: the second pass hands them over to the agent.
 - If the API fails (RF-04), each `notice` and `key_task` whose default time falls in this
   heartbeat's slot and has not gone out today goes out with a fixed template of the code.
 
@@ -33,7 +35,7 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 from jimic.channel.message import telegram_length
 from jimic.config import Settings
 from jimic.heartbeat.cycle import Decision
-from jimic.heartbeat.limits import Outgoing, applies_on
+from jimic.heartbeat.limits import HANDOVER_TASK, Outgoing, applies_on
 from jimic.heartbeat.state import DayState
 from jimic.memory.schemas import DailyPlan, DayClose, Intention, Intentions, KeyTask, Notice
 from jimic.memory.usage import TokenUsage
@@ -52,10 +54,12 @@ EFFORT = "low"
 CACHE_TTL = "1h"
 """Heartbeats are 15 minutes apart: a 5-minute cache would expire before every call."""
 MAX_MESSAGE = 400
-"""Telegram length (UTF-16) of one message: seven grouped (the most the cap lets wait) fit."""
+"""Telegram length (UTF-16) of one block: ten, joined by a blank line, fit in 4096."""
+MAX_PICKS = 3
+"""Intentions the model may pick in one heartbeat (decision 1.8-d)."""
 SLOT = timedelta(minutes=15)
 """A heartbeat's slot for the default times: `default_time <= now < default_time + SLOT`."""
-PENDING_TASK = {"daily_plan": "1.14", "day_close": "1.16"}
+PENDING_TASK = HANDOVER_TASK
 """The intentions decided but not sent yet (decision 1.8-b), and the task that brings them."""
 INTENTIONS_MARK = "<<INTENCIONES>>"
 
@@ -65,13 +69,20 @@ type CreateMessage = Callable[..., Awaitable[Message]]
 
 # The schema the model answers with (decision 1.8-a: text only, no buttons). No docstring: it
 # would go to the model as the schema's description.
+# `picks` has no `maxItems`: the code counts them, so an answer with too many still has its usage.
+class Pick(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    intent: str
+    message: str | None
+
+
 class HeartbeatDecision(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     speak: bool
-    intent: str | None
     reason: str
-    message: str | None
+    picks: list[Pick]
 
 
 @cache
@@ -166,8 +177,25 @@ def _invalid(why: str, usage: TokenUsage) -> Decision:
     return Decision(False, None, f"invalid_decision:{why}", usage=usage)
 
 
+def _problem(pick: Pick, active: dict[str, str], seen: set[str]) -> str | None:
+    """Why this pick cannot be used, or `None`. The plan and the close need no message."""
+    if pick.intent not in active:
+        return "unknown_intent"
+    if pick.intent in seen:
+        return "duplicate"
+    if active[pick.intent] in PENDING_TASK:
+        return None
+    text = (pick.message or "").strip()
+    if not text:
+        return "no_message"
+    if telegram_length(text) > MAX_MESSAGE:
+        return "too_long"
+    return None
+
+
 def judge(message: Message, state: DayState) -> Decision:
-    """What an answer of the model decides, after checking it against today's intentions."""
+    """What an answer of the model decides, after checking each pick against today's
+    intentions. The codes of what was dropped go after the model's reason."""
     usage = usage_of(message)
     try:
         answer = HeartbeatDecision.model_validate_json(_answer_text(message))
@@ -176,23 +204,37 @@ def judge(message: Message, state: DayState) -> Decision:
     if not answer.speak:
         logger.info("decision: silent")
         return Decision(False, None, answer.reason, usage=usage)
+    if len(answer.picks) > MAX_PICKS:
+        return _invalid("too_many_picks", usage)
     active = {intention.id: intention.type for intention in state.intentions}
-    if answer.intent not in active:
-        return _invalid("unknown_intent", usage)
-    pending = PENDING_TASK.get(active[answer.intent])
-    if pending is not None:
-        logger.info("decision: speak %s (pending %s)", answer.intent, pending)
-        reason = f"{answer.reason} (pendiente: {pending})"
-        return Decision(True, answer.intent, reason, usage=usage)
-    text = (answer.message or "").strip()
-    if not text:
-        return _invalid("no_message", usage)
-    if telegram_length(text) > MAX_MESSAGE:
-        return _invalid("too_long", usage)
-    logger.info("decision: speak %s", answer.intent)
-    return Decision(
-        True, answer.intent, answer.reason, (Outgoing(intent=answer.intent, text=text),), usage
+    seen: set[str] = set()
+    intents: list[str] = []
+    proposals: list[Outgoing] = []
+    pending: list[str] = []
+    dropped: list[str] = []
+    for number, pick in enumerate(answer.picks, start=1):
+        problem = _problem(pick, active, seen)
+        if problem is not None:
+            dropped.append(f"{number}:{problem}")
+            continue
+        seen.add(pick.intent)
+        intents.append(pick.intent)
+        task = PENDING_TASK.get(active[pick.intent])
+        if task is not None:
+            # Handed over to the agent by the second pass: it has no text of its own.
+            pending.append(task)
+            proposals.append(Outgoing(intent=pick.intent, text=""))
+        else:
+            proposals.append(Outgoing(intent=pick.intent, text=(pick.message or "").strip()))
+    notes = "".join(
+        f" ({label}: {', '.join(codes)})"
+        for label, codes in (("pendiente", pending), ("descartado", dropped))
+        if codes
     )
+    if not intents:
+        return _invalid(f"no_valid_pick{notes}", usage)
+    logger.info("decision: speak %s%s", ",".join(intents), notes)
+    return Decision(True, ",".join(intents), answer.reason + notes, tuple(proposals), usage)
 
 
 def template_text(intention: Intention, habits: dict[str, str]) -> str:
@@ -247,12 +289,16 @@ class HaikuDecider:
 RETRYABLE_STATUS = frozenset({408, 409, 429})
 
 
-def api_error_code(error: anthropic.APIError) -> str:
-    """`rejected:<Type>` for a 4xx that will not go away by waiting (a wrong key or model id,
-    a bad request); `down:<Type>` for everything else."""
-    status = getattr(error, "status_code", None)
+def status_kind(status: object) -> str:
+    """`rejected` for a 4xx that will not go away by waiting (a wrong key or model id, a bad
+    request); `down` for everything else, an unknown status included."""
     rejected = isinstance(status, int) and 400 <= status < 500 and status not in RETRYABLE_STATUS
-    return f"{'rejected' if rejected else 'down'}:{type(error).__name__}"
+    return "rejected" if rejected else "down"
+
+
+def api_error_code(error: anthropic.APIError) -> str:
+    """`rejected:<Type>` or `down:<Type>`, by `status_kind`."""
+    return f"{status_kind(getattr(error, 'status_code', None))}:{type(error).__name__}"
 
 
 def build_client(settings: Settings) -> anthropic.AsyncAnthropic:

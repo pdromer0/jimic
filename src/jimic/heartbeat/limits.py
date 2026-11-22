@@ -17,6 +17,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from jimic.channel.message import TELEGRAM_TEXT_LIMIT, telegram_length
 from jimic.memory.notices import SentToday
 from jimic.memory.schemas import Intention, Intentions, Limits, Notice, Window
 from jimic.tools.calendar import CalendarDay
@@ -26,11 +27,20 @@ logger = logging.getLogger(__name__)
 URGENT_TYPES = frozenset({"daily_plan", "day_close", "key_task"})
 """They never wait in the group window. A `notice` is the only kind that does (1.7-b)."""
 
+HANDOVER_TASK = {"daily_plan": "1.14", "day_close": "1.16"}
+"""The types the heartbeat hands over to the agent, and the task that will send them."""
+HANDOVER_TYPES = frozenset(HANDOVER_TASK)
+"""They are not sent: the heartbeat hands them over to the agent (decision 1.8-b), and that counts
+as attended today, not as a message."""
+
+SEPARATOR = "\n\n"
+"""Between the blocks of one message: a blank line (decision 1.8-d)."""
+
 WEEKDAYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
 """`date.weekday()` order, as `Notice.days` writes them."""
 
 type StopReason = Literal["quiet_hours", "daily_cap", "in_event"]
-type Action = Literal["send", "wait", "block"]
+type Action = Literal["send", "wait", "block", "handover"]
 
 
 class Outgoing(BaseModel):
@@ -44,7 +54,8 @@ class Outgoing(BaseModel):
 
 @dataclass(frozen=True)
 class Verdict:
-    """What the second pass says: send, wait or block, always with a code."""
+    """What the second pass says: send, wait, block or hand over to the agent, always with a
+    code."""
 
     action: Action
     reason: str
@@ -98,7 +109,9 @@ class Quota:
     @classmethod
     def of(cls, limits: Limits, intentions: Intentions, sent: SentToday) -> Quota:
         close_pending = any(
-            intention.type == "day_close" and intention.enabled and sent.count(intention.id) == 0
+            intention.type == "day_close"
+            and intention.enabled
+            and sent.sent_count(intention.id) == 0
             for intention in intentions.intentions
         )
         return cls(limits.max_messages_per_day, sent.message_count, close_pending)
@@ -226,8 +239,10 @@ class _Pass:
         limits: Limits,
         sent: SentToday,
         queue: WaitingNotices,
+        last_chat: datetime | None,
     ) -> None:
         self.now = now
+        self.last_chat = last_chat
         self.day = now.date()
         self.limits = limits
         self.by_id = {intention.id: intention for intention in intentions.intentions}
@@ -250,6 +265,12 @@ class _Pass:
             return "insist_cap" if intention.type == "key_task" else "repeated"
         return None
 
+    def chatting(self) -> bool:
+        """Pedro wrote less than `quiet_while_chatting` ago (decision 1.10-c)."""
+        if self.last_chat is None:
+            return False
+        return self.now - self.last_chat < self.limits.quiet_while_chatting
+
     def window_open(self) -> bool:
         if self.last_sent_at is None:
             return True
@@ -263,43 +284,79 @@ class _Pass:
         self.quota = self.quota.after_sending(is_close)
         self.last_sent_at = self.now
 
-    def proposal(self, item: Outgoing) -> None:
+    def refusal_in_batch(self, item: Outgoing, taken: set[str]) -> str | None:
         refusal = self.refusal_of(item)
         if refusal is None and self.queue.has(item.intent):
             refusal = "already_waiting"
-        if refusal is not None:
-            return self.decide("block", refusal, item)
-        intention = self.by_id[item.intent]
-        is_close = intention.type == "day_close"
+        if refusal is None and item.intent in taken:
+            refusal = "duplicate"
+        return refusal
+
+    def batch(self, proposals: Sequence[Outgoing]) -> None:
+        """What this heartbeat proposes, as one message (decision 1.8-d).
+
+        The urgent ones go out now. A `notice` goes with them if the group window has passed
+        and Pedro is not chatting (decision 1.10-c); otherwise it waits. With the window passed,
+        what waited goes in the same message too: one heartbeat, one message, which counts 1.
+        While Pedro chats, an urgent one goes out alone and the queue keeps waiting.
+        """
+        urgent: list[Outgoing] = []
+        notices: list[Outgoing] = []
+        taken: set[str] = set()
+        for item in proposals:
+            refusal = self.refusal_in_batch(item, taken)
+            if refusal is not None:
+                self.decide("block", refusal, item)
+                continue
+            taken.add(item.intent)
+            kind = self.by_id[item.intent].type
+            if kind in HANDOVER_TYPES:
+                # What 1.14 and 1.16 will send must fit; handing over spends nothing yet.
+                refusal = self.quota.refusal(is_close=kind == "day_close")
+                self.decide("block" if refusal else "handover", refusal or "ok", item)
+            else:
+                (urgent if kind in URGENT_TYPES else notices).append(item)
+        released: list[Outgoing] = []
+        window_open, chatting = self.window_open(), self.chatting()
+        if window_open and not chatting:
+            for item in self.queue.take_all():
+                refusal = self.refusal_of(item)
+                if refusal is None:
+                    released.append(item)
+                else:
+                    self.decide("block", refusal, item)
+        else:
+            reason = "group_window" if not window_open else "chatting"
+            for item in notices:
+                self.queue.add(item, self.day)
+                self.decide("wait", reason, item)
+            notices = []
+        self.message(urgent, released + notices, bool(released))
+
+    def message(self, urgent: list[Outgoing], others: list[Outgoing], released: bool) -> None:
+        """Send `urgent` and `others` together, as much as fits in one Telegram message: the
+        `notice` that does not fit waits for the next one."""
+        if not urgent and not others:
+            return
+        items: list[Outgoing] = []
+        length = 0
+        for item in urgent + others:
+            added = telegram_length(item.text) + (len(SEPARATOR) if items else 0)
+            if length + added <= TELEGRAM_TEXT_LIMIT:
+                items.append(item)
+                length += added
+            elif self.by_id[item.intent].type in URGENT_TYPES:
+                self.decide("block", "message_full", item)
+            else:
+                self.queue.add(item, self.day)
+                self.decide("wait", "message_full", item)
+        if not items:
+            return
+        is_close = any(self.by_id[item.intent].type == "day_close" for item in items)
         refusal = self.quota.refusal(is_close)
         if refusal is not None:
-            return self.decide("block", refusal, item)
-        if intention.type in URGENT_TYPES:
-            return self.send("ok", item, is_close=is_close)
-        if self.window_open() and not self.queue.items:
-            return self.send("ok", item)
-        self.queue.add(item, self.day)
-        if not self.window_open():
-            self.decide("wait", "group_window", item)
-        # With the window open and others waiting it joins them, just below.
-
-    def release(self) -> None:
-        """Everything waiting goes out together, as one message, once the window has passed."""
-        if not self.queue.items or not self.window_open():
-            return
-        ready: list[Outgoing] = []
-        for item in self.queue.take_all():
-            refusal = self.refusal_of(item)
-            if refusal is None:
-                ready.append(item)
-            else:
-                self.decide("block", refusal, item)
-        if not ready:
-            return
-        refusal = self.quota.refusal(is_close=False)
-        if refusal is not None:
-            return self.decide("block", refusal, *ready)
-        self.send("released", *ready)
+            return self.decide("block", refusal, *items)
+        self.send("released" if released else "ok", *items, is_close=is_close)
 
 
 def second_pass(
@@ -309,18 +366,16 @@ def second_pass(
     limits: Limits,
     sent: SentToday,
     queue: WaitingNotices,
+    last_chat: datetime | None = None,
 ) -> list[Verdict]:
     """The verdicts of this heartbeat for the proposals and for what waits. `queue` changes.
+    `last_chat` is the last moment Pedro wrote, if any.
 
-    The model proposes one at most; the templates of a heartbeat with the API down can be
-    several, and they go through in order, each one seeing what the previous ones did. An
-    urgent message that goes out becomes the last proactive one, so the queue waits for the
-    window to pass again: grouping never sends two messages in one heartbeat.
+    The proposals (the model's picks, or the templates of a heartbeat with the API down) are
+    one batch: whatever goes out goes out as one message, so a heartbeat never sends two.
     """
-    state = _Pass(now, intentions, limits, sent, queue)
-    for proposal in proposals:
-        state.proposal(proposal)
-    state.release()
+    state = _Pass(now, intentions, limits, sent, queue, last_chat)
+    state.batch(proposals)
     for verdict in state.verdicts:
         logger.info(
             "second pass: %s %s (%s)", verdict.action, ",".join(verdict.intents), verdict.reason
