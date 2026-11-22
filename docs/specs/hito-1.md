@@ -2068,3 +2068,12 @@ creó y borró 5 tareas `jimic-contrato-*` en el proyecto de pruebas, una de ell
 de pruebas está vacío y que no hay eventos `jimic-contrato-*` en el calendario «Todoist». Además,
 cuatro ejecuciones del agente contra la API de Anthropic, que no crean nada. Ni Calendar ni
 Telegram.
+
+**Ajustes de la revisión del chat** (sin bloqueantes; 0 hallazgos en el PR; solo documentación):
+- Los 11 ajustes del chat fueron en la revisión del plan y están en «Ajustes de la aprobación»
+  del PR.
+- El chat comprobó con sus conectores que el proyecto de pruebas de Todoist está vacío, que no
+  queda ninguna tarea `jimic-contrato-*` y que no hay eventos de JimiC en el calendario
+  «Todoist». La captura de la demo está en un comentario del PR.
+- Las métricas del PR se completan con las cifras del chat: 7 idas y vueltas y 1 ronda de
+  revisión.
