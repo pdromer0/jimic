@@ -64,12 +64,18 @@ def read_valid(config_dir: Path, name: str) -> BaseModel | None:
 
 class LiveConfig:
     def __init__(
-        self, intentions: Intentions, limits: Limits, config_dir: Path | None = None
+        self,
+        intentions: Intentions,
+        limits: Limits,
+        config_dir: Path | None = None,
+        read_as: Signature | None = None,
     ) -> None:
+        """`read_as` is the signature of the files when `intentions` and `limits` were read;
+        without it (they were read who knows when), the first `refresh` reads them again."""
         self._intentions = intentions
         self._limits = limits
         self._config_dir = config_dir
-        self._signature = None if config_dir is None else signature(config_dir)
+        self._signature = read_as
         self.invalid: tuple[str, ...] = ()
         """The YAML files whose last version did not validate, in table order."""
 
@@ -80,8 +86,10 @@ class LiveConfig:
     @classmethod
     def load(cls, config_dir: Path) -> LiveConfig:
         """Both files must be valid now (`PersonalFilesInvalid` otherwise), as `jimic run` asks."""
+        # Taken before reading: an edit while loading is seen by the next `refresh`.
+        read_as = signature(config_dir)
         intentions, limits = load_personal(config_dir)
-        return cls(intentions, limits, config_dir)
+        return cls(intentions, limits, config_dir, read_as)
 
     @property
     def intentions(self) -> Intentions:

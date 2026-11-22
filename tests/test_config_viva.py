@@ -84,3 +84,14 @@ def test_la_fija_nunca_recarga(tmp_path):
     _, live = config(tmp_path)
     fixed = LiveConfig.fixed(live.intentions, live.limits)
     assert fixed.refresh() == () and fixed.reload() == ()
+
+
+def test_sin_firma_de_lectura_el_primer_refresh_vuelve_a_leer(tmp_path):
+    """Hallazgo 8: el servicio carga los ficheros antes de construir su configuración viva; una
+    edición entre medias no se pierde."""
+    config_dir, loaded = config(tmp_path)
+    set_deletions(config_dir, 1)  # entre la carga y la configuración viva
+    live = LiveConfig(loaded.intentions, loaded.limits, config_dir)
+    assert live.limits.max_deletions_per_day == 5
+    live.refresh()
+    assert live.limits.max_deletions_per_day == 1
