@@ -2264,3 +2264,9 @@ base).
 **Pruebas contra servicios reales** (regla «los tests no dejan basura»): nueve ejecuciones del
 agente contra la API de Anthropic (los dos contratos nuevos y los de la 1.10 y la 1.11), unos
 0,10 $, que no crean nada. Ni Todoist, ni Calendar, ni Telegram: no hay restos que comprobar.
+
+**Ajustes de la revisión del chat** (sin hallazgos en el PR; solo documentación):
+- Los 12 ajustes del chat fueron en la revisión del plan y están en «Ajustes de la aprobación» del
+  PR.
+- Las métricas del PR se completan con las cifras del chat: 5 idas y vueltas y 1 ronda de
+  revisión.
