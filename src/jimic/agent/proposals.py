@@ -94,6 +94,15 @@ class PlanProposal(BaseModel):
 
     items: Annotated[list[PlanItem], Field(min_length=1, max_length=MAX_PLAN_ITEMS)]
 
+    @model_validator(mode="after")
+    def _one_action_per_task(self) -> Self:
+        """A task moved and deleted, or moved twice, would be two actions that contradict each
+        other once Pedro approves them."""
+        ids = [item.task_id for item in self.items if isinstance(item, MoveItem | DeleteItem)]
+        if len(set(ids)) != len(ids):
+            raise ValueError("each task_id may appear only once in a plan")
+        return self
+
 
 class TaskSnapshot(BaseModel):
     """The task as the code read it when the proposal was saved (H1-2)."""

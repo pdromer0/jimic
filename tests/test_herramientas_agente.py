@@ -172,6 +172,15 @@ def test_propose_plan_guarda_la_aprobacion_y_no_llama_al_escritor(conn, config_d
         [{"action": "archive", "task_id": "t1", "reason": "r"}],
         [],
         [CREATE] * 9,
+        # La misma tarea dos veces (hallazgo 4 de la revisión): movida y borrada, o movida dos.
+        [
+            {"action": "move", "task_id": "t1", "due": "2030-01-08", "reason": "r"},
+            {"action": "delete", "task_id": "t1", "reason": "r"},
+        ],
+        [
+            {"action": "move", "task_id": "t1", "due": "2030-01-08", "reason": "r"},
+            {"action": "move", "task_id": "t1", "due": "2030-01-09", "reason": "r"},
+        ],
     ],
 )
 def test_una_propuesta_no_valida_se_rechaza_con_un_mensaje_y_no_guarda_nada(
