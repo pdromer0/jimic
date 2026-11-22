@@ -624,3 +624,27 @@ def test_parar_sigue_aunque_un_paso_falle_con_cualquier_error(conn, clock):
     app.updater.stop = broken_stop
     asyncio.run(fake_channel(app, conn, clock).stop())
     assert app.log == ["shutdown"]
+
+
+def test_un_mensaje_que_llega_mientras_para_no_abre_un_turno(make_channel, request_double):
+    """Hallazgo 1 de la revisión: lo que la aplicación procesa al pararse no empieza un turno
+    que nadie cancelaría."""
+    received: list[str] = []
+
+    async def on_text(text: str) -> str:
+        received.append(text)
+        return "nunca"
+
+    channel, application = make_channel(on_text=on_text)
+
+    async def scenario():
+        await application.initialize()
+        await channel.stop()
+        await application.initialize()
+        await application.process_update(to_update(text_update("hola"), application.bot))
+        await settle()
+        await application.shutdown()
+
+    asyncio.run(scenario())
+    assert received == []
+    assert request_double.params("sendMessage") == []

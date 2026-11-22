@@ -142,6 +142,7 @@ class TelegramChannel:
         self._on_started = on_started
         self._typing_every = typing_every
         self._turns: set[asyncio.Task[None]] = set()
+        self._stopping = False
         self._running = False
         application.add_handler(CallbackQueryHandler(self._handle_tap))
         application.add_handler(MessageHandler(filters.ALL, self._handle_message))
@@ -170,10 +171,13 @@ class TelegramChannel:
         """Stop polling and shut the application down; every step runs even if one fails."""
         updater = self._app.updater
         assert updater is not None
+        self._stopping = True
         steps: list[tuple[str, Callable[[], Awaitable[None]]]] = [
             ("updater", updater.stop),
-            ("turns", self._cancel_turns),
             ("application", self._app.stop),
+            # After the application: its stop can still process a queued update, and that turn
+            # must be cancelled too; no new one starts once `_stopping` is set.
+            ("turns", self._cancel_turns),
             ("shutdown", self._app.shutdown),
         ]
         for name, step in steps:
@@ -286,6 +290,9 @@ class TelegramChannel:
         message = update.effective_message
         if message is None or message.text is None:
             logger.info("message ignored (not_text)")
+            return
+        if self._stopping:
+            logger.info("message ignored (stopping)")
             return
         turn = asyncio.create_task(self._converse(message.text))
         self._turns.add(turn)
