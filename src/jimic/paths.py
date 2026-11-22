@@ -44,6 +44,11 @@ class Paths:
     def logs_dir(self) -> Path:
         return self.data_dir / "logs"
 
+    @property
+    def agent_dir(self) -> Path:
+        """The engine of the agent: its `CLAUDE_CONFIG_DIR` and its working folder (0700)."""
+        return self.data_dir / "agent"
+
 
 def _xdg_base(environ: Mapping[str, str], var: str, home: Path, default: str) -> Path:
     """Return `$var` if it is an absolute path; otherwise `home/default`, as the XDG spec says."""

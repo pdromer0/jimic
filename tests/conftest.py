@@ -100,6 +100,25 @@ def no_real_anthropic(request, monkeypatch):
     monkeypatch.setattr("anthropic._base_client.AsyncAPIClient.request", refuse)
 
 
+@pytest.fixture(autouse=True)
+def no_real_agent(request, monkeypatch):
+    """Ningún test rápido arranca el motor del Agent SDK: el transporte real falla en voz alta.
+
+    Los tests de la conversación usan un doble del SDK, que no pasa por aquí; el contrato del
+    agente, que es `slow`, sí lo arranca de verdad.
+    """
+    if request.node.get_closest_marker("slow"):
+        return
+
+    async def refuse(self, *args, **kwargs):
+        raise AssertionError("un test ha intentado arrancar el motor del agente de verdad")
+
+    monkeypatch.setattr(
+        "claude_agent_sdk._internal.transport.subprocess_cli.SubprocessCLITransport.connect",
+        refuse,
+    )
+
+
 @pytest.fixture
 def contract_env(monkeypatch) -> tuple[Paths, Settings]:
     """The real home and the configuration of the **test copy** (`dev`), for the contract tests.
