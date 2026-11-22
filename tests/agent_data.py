@@ -197,10 +197,22 @@ class ToolOutcome:
 type Script = list[Any] | BaseException
 
 
-async def engine_call(options: ClaudeAgentOptions, call: ToolCall) -> ToolOutcome:
-    """What the engine does with a tool call: every `PreToolUse` hook of the options first, and
-    the tool through the MCP bridge only if none denies it."""
-    name = call.model_name or f"mcp__jimic__{call.name}"
+@dataclass(frozen=True)
+class OneMessage:
+    """Several tool calls in one message of the model: the engine runs every hook first, in
+    order, and then the tools that passed, in `order` (indexes of `calls`; reversed if
+    missing), so a tool may run before the read whose hook came first."""
+
+    calls: tuple[ToolCall, ...]
+    order: tuple[int, ...] | None = None
+
+
+def _model_name(call: ToolCall) -> str:
+    return call.model_name or f"mcp__jimic__{call.name}"
+
+
+async def _denied(options: ClaudeAgentOptions, call: ToolCall) -> bool:
+    name = _model_name(call)
     data = {
         "hook_event_name": "PreToolUse",
         "session_id": "s",
@@ -215,12 +227,39 @@ async def engine_call(options: ClaudeAgentOptions, call: ToolCall) -> ToolOutcom
             answer = await hook(data, "u1", {"signal": None})  # pyright: ignore[reportArgumentType] - the input as the engine sends it
             specific = answer.get("hookSpecificOutput") or {}
             if specific.get("permissionDecision") == "deny":
-                return ToolOutcome(name, denied=True)
+                return True
+    return False
+
+
+async def _tool(options: ClaudeAgentOptions, call: ToolCall) -> ToolOutcome:
+    name = _model_name(call)
     if not name.startswith("mcp__jimic__") or not isinstance(options.mcp_servers, dict):
         return ToolOutcome(name, denied=True)  # the engine has no such tool
     server = options.mcp_servers["jimic"]
     text, is_error = await call_tool(server, name.removeprefix("mcp__jimic__"), call.args)  # pyright: ignore[reportArgumentType] - an SDK server
     return ToolOutcome(name, denied=False, text=text, is_error=is_error)
+
+
+async def engine_call(options: ClaudeAgentOptions, call: ToolCall) -> ToolOutcome:
+    """What the engine does with a tool call: every `PreToolUse` hook of the options first, and
+    the tool through the MCP bridge only if none denies it."""
+    if await _denied(options, call):
+        return ToolOutcome(_model_name(call), denied=True)
+    return await _tool(options, call)
+
+
+async def engine_message(options: ClaudeAgentOptions, message: OneMessage) -> list[ToolOutcome]:
+    """The outcomes of a `OneMessage`, in the order of its calls."""
+    denied = [await _denied(options, call) for call in message.calls]
+    outcomes: dict[int, ToolOutcome] = {}
+    order = message.order or tuple(reversed(range(len(message.calls))))
+    for index in order:
+        call = message.calls[index]
+        if denied[index]:
+            outcomes[index] = ToolOutcome(_model_name(call), denied=True)
+        else:
+            outcomes[index] = await _tool(options, call)
+    return [outcomes[index] for index in range(len(message.calls))]
 
 
 class FakeAgent:
@@ -254,6 +293,9 @@ class FakeAgent:
                     raise message
                 if isinstance(message, ToolCall):
                     self.tool_outcomes.append(await engine_call(options, message))
+                    continue
+                if isinstance(message, OneMessage):
+                    self.tool_outcomes.extend(await engine_message(options, message))
                     continue
                 yield message
         finally:

@@ -766,6 +766,25 @@ def test_una_respuesta_con_mensaje_sale_en_uno_con_el_texto_como_cuerpo(
     assert approval == ("demo", 10)
 
 
+def test_los_mensajes_de_mas_salen_despues_sin_cuerpo(make_channel, request_double, conn):
+    """`Reply.more` (tarea 1.12): la memoria tras el plan, o las páginas de `/deshacer`."""
+
+    async def on_text(incoming: Incoming) -> Reply:
+        return Reply(
+            "Te propongo",
+            Outgoing("demo", make_message(), EXPIRES),
+            more=(Outgoing("memory", make_message(), EXPIRES),),
+        )
+
+    channel, application = make_channel(on_text=on_text)
+    drive(application, text_update("hola"))
+    first, second = request_double.params("sendMessage")
+    assert first["text"].startswith("Te propongo\n\n<b>Plan de prueba</b>")
+    assert second["text"].startswith("<b>Plan de prueba</b>")
+    kinds = conn.execute("SELECT kind FROM approvals ORDER BY id").fetchall()
+    assert kinds == [("demo",), ("memory",)]
+
+
 def test_si_no_caben_juntos_el_texto_sale_antes_y_la_propuesta_sin_cuerpo(
     make_channel, request_double
 ):
