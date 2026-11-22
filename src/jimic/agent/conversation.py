@@ -48,6 +48,8 @@ CAPPED_TEXT = (
 )
 FAILED_TEXT = "Se me ha atascado algo por dentro y no he podido contestarte. Prueba en un rato."
 WEEKDAYS = ("lun", "mar", "mié", "jue", "vie", "sáb", "dom")
+STUCK = ("agent:process:", "agent:error:")
+"""The failures after which today's session is forgotten when it was resumed."""
 
 type RunAgent = Callable[[str, ClaudeAgentOptions], AsyncIterator[Message]]
 """`claude_agent_sdk.query`, or the tests' double."""
@@ -238,11 +240,12 @@ class Conversation:
                 usd,
             )
             system_notices.check_budget(self._conn, self._limits.budget, now)
-        if outcome.session_id:
-            conversations.save_session(self._conn, day, outcome.session_id)
-        elif resumed and outcome.code.startswith("agent:process:"):
-            # A session that cannot be resumed must not block the rest of the day.
+        if resumed and outcome.code.startswith(STUCK):
+            # A session that fails when resumed (not the API, not a cap) must not block the rest
+            # of the day: the next message starts another one.
             conversations.save_session(self._conn, day, None)
+        elif outcome.session_id:
+            conversations.save_session(self._conn, day, outcome.session_id)
         if outcome.code.startswith("agent:api:"):
             detail = api_notice_detail(outcome.api_status)
             system_notices.detect(self._conn, "api_down", day, now, detail)

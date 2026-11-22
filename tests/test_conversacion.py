@@ -361,3 +361,26 @@ def test_una_ejecucion_que_se_cae_sin_resultado_cuenta_lo_que_pudo_gastar(
     world = World(conn, tmp_path, FakeAgent(script))
     world.say()
     assert [row[-1] for row in world.usage_rows()] == rows
+
+
+def test_una_sesion_reanudada_que_da_error_de_ejecucion_se_olvida(conn, tmp_path):
+    """Hallazgo 3 de la revisión: el motor responde a la reanudación con un resultado de error
+    (con la misma sesión). Sin olvidarla, cada mensaje del día volvería a fallar."""
+    broken = result_message(None, subtype="error_during_execution", is_error=True)
+    world = World(
+        conn, tmp_path, FakeAgent([result_message()], [broken], [result_message(session="s-2")])
+    )
+    world.say(at="2030-01-07T10:15")
+    assert world.say(at="2030-01-07T10:20") == FAILED_TEXT
+    world.say(at="2030-01-07T10:25")
+    assert world.agent.resumed == [None, "sesion-1", None]
+
+
+def test_una_api_caida_no_olvida_la_sesion(conn, tmp_path):
+    """Lo de la API pasa solo: la conversación del día sigue cuando vuelva."""
+    down = result_message("API Error", is_error=True, api_status=529)
+    world = World(conn, tmp_path, FakeAgent([result_message()], [down], [result_message()]))
+    world.say(at="2030-01-07T10:15")
+    world.say(at="2030-01-07T10:20")
+    world.say(at="2030-01-07T10:25")
+    assert world.agent.resumed == [None, "sesion-1", "sesion-1"]
