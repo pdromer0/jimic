@@ -1905,9 +1905,15 @@ la sección de métricas del PR.
   choca con el plan («`sincronizar` no se toca»).
 
 **Pendiente.**
-- ¿Recuerda `/sincronizar` la etiqueta y la Release cuando el PR cierra un hito (rama
-  `docs/hN-cierre`)? Destino: la revisión del chat de este PR, o la 1.17.
 - Primer POST real de `crear-release`: comprobar que el borrador **no crea** la etiqueta y que
   las notas llegan enteras. Destino: la 1.17.
 - El parche del paso y el freno del borrador. Destino: la plantilla del módulo en el método, con
   el criterio de los parches locales que dejó pendiente la P3.
+
+**Ajustes de la revisión del chat** (sin bloqueantes; 0 hallazgos; solo documentación, sin otra N3
+por `tarea.md` §4):
+- Pedro decidió el pendiente: sí, `/sincronizar` lo recuerda. Con un PR de cierre (rama
+  `docs/hN-cierre`), al terminar recuerda a Pedro que cree la etiqueta y le pida después la
+  Release en borrador. Solo el recordatorio, sin crear nada: es el paso 4 de la skill.
+- Las métricas del PR se completan con las cifras del chat: 2 idas y vueltas y 1 ronda de
+  revisión.
