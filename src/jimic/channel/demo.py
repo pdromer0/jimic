@@ -1,11 +1,13 @@
 """`jimic telegram demo`: an invented proposal in the test bot, to see the buttons on the phone.
 
 Only with `ENTORNO=dev`: the demo refuses before it reads the `.env` or builds anything. It
-sends two messages, as the assistant of task 1.11 would: a proposal with a create, a move and a
-delete under an answer, with the global row `[✅ Créalo todo] [⏭ Nada]`, and what was done at
-once with its [Deshacer]. The taps edit the messages and touch nothing in Todoist: the handlers
-only say what would have happened. A text from Pedro gets the fixed phrase. It is a process that
-does not end (stop it with Ctrl+C): **Pedro launches it, never the agent**.
+sends four messages, as the assistant would: a proposal with a create, a move and a delete under
+an answer, with the global row `[✅ Créalo todo] [⏭ Nada]`; what was done at once with its
+[Deshacer] (task 1.11); a change of memory with [Guardar] [Cambiar] [No] and an idea with
+[📝 Apuntar]; and a list of `/deshacer` (task 1.12). The taps edit the messages and touch nothing
+in Todoist or in the files: the handlers only say what would have happened. A text from Pedro
+gets the fixed phrase. It is a process that does not end (stop it with Ctrl+C): **Pedro launches
+it, never the agent**.
 """
 
 import asyncio
@@ -17,9 +19,11 @@ from typing import Any
 
 from jimic.channel.bot import TelegramChannel, build_channel
 from jimic.channel.message import InteractiveMessage, Item
-from jimic.channel.taps import HandlerOutcome
+from jimic.channel.taps import HandlerOutcome, Show
 from jimic.clock import Clock, SystemClock
 from jimic.config import Settings, load_settings
+from jimic.execution.commands import UNDO, UNDO_HEADER, UNDO_LIST_KIND
+from jimic.execution.memory_message import MEMORY_KIND, memory_message
 from jimic.execution.plan_message import PLAN_KIND, UNDO_KIND, plan_message, undo_message
 from jimic.paths import Paths, resolve_paths
 from jimic.service import ChannelFactory, serve_until_signal
@@ -73,12 +77,49 @@ ENTRIES: list[dict[str, Any]] = [
 ]
 
 
+QUIET = 'quiet_hours: {from: "23:00", to: "07:00"}'
+MEMORY_ENTRIES: list[dict[str, Any]] = [
+    {
+        "action": "change",
+        "file": "limites.yaml",
+        "operation": "replace",
+        "before": QUIET,
+        "after": QUIET.replace('"07:00"', '"08:00"'),
+        "reason": "inventado",
+        "origin": "No me escribas antes de las 8 (inventado)",
+    },
+    {
+        "action": "idea",
+        "text": "Una app para apuntar lo que leo (inventado)",
+        "line": "- 2030-01-07 · Una app para apuntar lo que leo (inventado)",
+        "origin": "inventado",
+    },
+]
+MEMORY_ANSWER = "Te propongo no escribirte antes de las 8 y apuntar tu idea (inventado)."
+UNDO_ITEMS = (
+    Item(
+        title="📝 06/01 preferencias.md · añadir: - Mensajes cortos (inventado)",
+        options=(UNDO,),
+        data={"change": 1},
+    ),
+    Item(title="🗑️ 05/01 Andar 30 min (inventado)", options=(UNDO,), data={"deleted": 1}),
+)
+
+
 def demo_messages(settings: Settings) -> list[tuple[str, InteractiveMessage]]:
-    """The invented proposal and the invented [Deshacer]: nothing of them is real."""
+    """The invented proposal, the invented [Deshacer], a change of memory with [Guardar] and a
+    list of `/deshacer` (task 1.12): nothing of them is real."""
     proposal = plan_message(ENTRIES, DAY, settings.timezone).model_copy(update={"body": ANSWER})
     undo = undo_message("➕ 🧘 Estiramientos · hoy 21:30", {"action": "create", "task_id": "x"})
     undo = undo.model_copy(update={"body": "Apuntado (inventado)."})
-    return [(PLAN_KIND, proposal), (UNDO_KIND, undo)]
+    memory = memory_message(MEMORY_ENTRIES).model_copy(update={"body": MEMORY_ANSWER})
+    undo_list = InteractiveMessage(header=UNDO_HEADER, items=UNDO_ITEMS)
+    return [
+        (PLAN_KIND, proposal),
+        (UNDO_KIND, undo),
+        (MEMORY_KIND, memory),
+        (UNDO_LIST_KIND, undo_list),
+    ]
 
 
 async def demo_plan(item: Item, option: str, approval_id: int) -> HandlerOutcome:
@@ -91,7 +132,26 @@ async def demo_undo(item: Item, option: str, approval_id: int) -> HandlerOutcome
     return "↩️ deshecho"
 
 
-HANDLERS = {PLAN_KIND: demo_plan, UNDO_KIND: demo_undo}
+MEMORY_RESULTS = {"save": "💾 guardado", "edit": "✏️ dime cómo lo quieres", "note": "📝 apuntada"}
+
+
+async def demo_memory(item: Item, option: str, approval_id: int) -> HandlerOutcome:
+    """Only marks the result: the demo writes no file."""
+    return MEMORY_RESULTS.get(option, "✖️ descartado")
+
+
+async def demo_undo_list(item: Item, option: str, approval_id: int) -> HandlerOutcome:
+    if "deleted" in (item.data or {}):
+        return Show("He recreado «Andar 30 min» con un ID nuevo (inventado).", "↩️ recreada")
+    return "↩️ deshecho"
+
+
+HANDLERS = {
+    PLAN_KIND: demo_plan,
+    UNDO_KIND: demo_undo,
+    MEMORY_KIND: demo_memory,
+    UNDO_LIST_KIND: demo_undo_list,
+}
 
 
 def refuse_unless_dev(paths: Paths) -> None:
