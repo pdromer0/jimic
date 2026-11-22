@@ -112,3 +112,9 @@ H1-2 (decisiones 55 y 56), y la tarea 1.11 las implementa.
   - **El contrato de Todoist** (0e48753): el [Deshacer] de mover una tarea sin fecha la devuelve a
     «sin fecha» (`due_string="no date"`), así que sobra la quinta condición que el plan había
     propuesto.
+  - **Las correcciones de la revisión propia:**
+    - el *hook* escribe la marca del día al dejar pasar una lectura, antes de que corra: con dos
+      llamadas en un mensaje del modelo, la marca de la herramienta llegaba tarde (cb60985);
+    - el «sí» no vale si Pedro escribió después del último envío (a90b1a4);
+    - al borrar, un 5xx es ambiguo como el timeout (8a921d2), y un 404 es «ya no existe», sin
+      foto (1fca6a8).
