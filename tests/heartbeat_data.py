@@ -331,7 +331,20 @@ def answer(
     message: str | None = None,
     reason: str = SECRET_REASON,
 ) -> dict[str, Any]:
-    return {"speak": speak, "intent": intent, "reason": reason, "message": message}
+    """An answer with one pick (`intent`), or none."""
+    chosen = [] if intent is None else [(intent, message)]
+    return picks(*chosen, speak=speak, reason=reason)
+
+
+def picks(
+    *chosen: tuple[str, str | None], speak: bool = True, reason: str = SECRET_REASON
+) -> dict[str, Any]:
+    """An answer with these `(intent, message)` picks (decision 1.8-d)."""
+    return {
+        "speak": speak,
+        "reason": reason,
+        "picks": [{"intent": intent, "message": message} for intent, message in chosen],
+    }
 
 
 def api_down() -> anthropic.APIConnectionError:

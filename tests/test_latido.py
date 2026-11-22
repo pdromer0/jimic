@@ -34,6 +34,7 @@ from heartbeat_data import (
     intentions,
     limits,
     madrid,
+    picks,
     sources,
     task,
 )
@@ -342,7 +343,47 @@ def test_cada_llamada_suma_en_el_contador_tambien_las_no_validas(conn):
     world.at("2030-01-07T09:00")
     (rows, usd) = conn.execute("SELECT COUNT(*), SUM(usd) FROM model_usage").fetchone()
     assert rows == 1 and usd == pytest.approx(0.00032, abs=1e-12)
-    assert world.reasons() == ["invalid_decision:unknown_intent"]
+    assert world.reasons() == ["invalid_decision:no_valid_pick (descartado: 1:unknown_intent)"]
+
+
+# --- Varias intenciones en un latido (1.8-d) ---------------------------------------------------
+
+
+def test_tres_avisos_a_las_1630_salen_en_un_mensaje_y_cuentan_uno(conn):
+    """Un mensaje con un bloque por intención, tres filas con el mismo `telegram_message_id`, y
+    el cupo baja en uno. Pilla un lote que cuenta 3 en el cupo (versión incorrecta 8)."""
+    world = World(
+        conn,
+        FakeMessages(api_message(picks(("ofertas", "Uno"), ("regar", "Dos"), ("basura", "Tres")))),
+    )
+    world.at("2030-01-07T16:30")
+    assert world.sender.texts == ["Uno\n\nDos\n\nTres"]
+    assert world.notices() == [("ofertas", 1001), ("regar", 1001), ("basura", 1001)]
+    sent = sent_between(conn, *local_day_bounds(MONDAY, MADRID))
+    assert sent.message_count == 1
+    world.fake.reply = api_message(answer())
+    world.at("2030-01-07T16:45")
+    assert world.fake.requests[-1]["messages"][0]["content"].count('"messages_left":6') == 1
+    (_, speak, intent, reason) = world.rows()[0]
+    assert (speak, intent) == (1, "ofertas,regar,basura")
+    assert reason == f"{SECRET_REASON} [send ok]"
+
+
+def test_el_plan_en_un_lote_no_sale_y_los_demas_si(conn):
+    world = World(
+        conn, FakeMessages(api_message(picks(("plan_del_dia", None), ("basura", "Fuera"))))
+    )
+    world.at("2030-01-07T08:00")
+    assert world.sender.texts == ["Fuera"]
+    assert world.notices() == [("basura", 1001)]
+
+
+def test_un_lote_de_cuatro_no_sale(conn):
+    four = [("ofertas", "a"), ("regar", "b"), ("basura", "c"), ("insistir_gimnasio", "d")]
+    world = World(conn, FakeMessages(api_message(picks(*four))))
+    world.at("2030-01-07T16:30")
+    assert world.sender.texts == [] and world.notices() == []
+    assert world.reasons() == ["invalid_decision:too_many_picks"]
 
 
 # --- Uno a la vez, errores y logs ---------------------------------------------------------------

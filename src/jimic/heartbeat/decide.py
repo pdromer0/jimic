@@ -6,9 +6,11 @@ day at the end, in the user message. The answer is structured: `messages.create`
 schema of `HeartbeatDecision` in `output_config.format`, validated here, so a call that answers
 something invalid still has its usage counted (`messages.parse` would raise and lose it).
 
-- An answer that does not fit (an intention that is not active today, speaking without a
-  message, a message too long, or no valid JSON) is `invalid_decision:<why>`: nobody speaks
-  and it is not retried.
+- The model may pick up to `MAX_PICKS` intentions (decision 1.8-d); they go out in one message.
+  A pick that does not fit (an intention that is not active today or already picked, no message,
+  a message too long) is dropped with its code and the rest goes on. An answer that does not
+  fit as a whole (more than `MAX_PICKS`, no valid pick, or no valid JSON) is
+  `invalid_decision:<why>`: nobody speaks and it is not retried.
 - The plan and the close (decision 1.8-b) are decided and recorded, but nothing goes out until
   tasks 1.14 and 1.16 bring them.
 - If the API fails (RF-04), each `notice` and `key_task` whose default time falls in this
@@ -52,7 +54,9 @@ EFFORT = "low"
 CACHE_TTL = "1h"
 """Heartbeats are 15 minutes apart: a 5-minute cache would expire before every call."""
 MAX_MESSAGE = 400
-"""Telegram length (UTF-16) of one message: seven grouped (the most the cap lets wait) fit."""
+"""Telegram length (UTF-16) of one block: ten, joined by a blank line, fit in 4096."""
+MAX_PICKS = 3
+"""Intentions the model may pick in one heartbeat (decision 1.8-d)."""
 SLOT = timedelta(minutes=15)
 """A heartbeat's slot for the default times: `default_time <= now < default_time + SLOT`."""
 PENDING_TASK = {"daily_plan": "1.14", "day_close": "1.16"}
@@ -65,13 +69,20 @@ type CreateMessage = Callable[..., Awaitable[Message]]
 
 # The schema the model answers with (decision 1.8-a: text only, no buttons). No docstring: it
 # would go to the model as the schema's description.
+# `picks` has no `maxItems`: the code counts them, so an answer with too many still has its usage.
+class Pick(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    intent: str
+    message: str | None
+
+
 class HeartbeatDecision(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     speak: bool
-    intent: str | None
     reason: str
-    message: str | None
+    picks: list[Pick]
 
 
 @cache
@@ -166,8 +177,25 @@ def _invalid(why: str, usage: TokenUsage) -> Decision:
     return Decision(False, None, f"invalid_decision:{why}", usage=usage)
 
 
+def _problem(pick: Pick, active: dict[str, str], seen: set[str]) -> str | None:
+    """Why this pick cannot be used, or `None`. The plan and the close need no message."""
+    if pick.intent not in active:
+        return "unknown_intent"
+    if pick.intent in seen:
+        return "duplicate"
+    if active[pick.intent] in PENDING_TASK:
+        return None
+    text = (pick.message or "").strip()
+    if not text:
+        return "no_message"
+    if telegram_length(text) > MAX_MESSAGE:
+        return "too_long"
+    return None
+
+
 def judge(message: Message, state: DayState) -> Decision:
-    """What an answer of the model decides, after checking it against today's intentions."""
+    """What an answer of the model decides, after checking each pick against today's
+    intentions. The codes of what was dropped go after the model's reason."""
     usage = usage_of(message)
     try:
         answer = HeartbeatDecision.model_validate_json(_answer_text(message))
@@ -176,23 +204,35 @@ def judge(message: Message, state: DayState) -> Decision:
     if not answer.speak:
         logger.info("decision: silent")
         return Decision(False, None, answer.reason, usage=usage)
+    if len(answer.picks) > MAX_PICKS:
+        return _invalid("too_many_picks", usage)
     active = {intention.id: intention.type for intention in state.intentions}
-    if answer.intent not in active:
-        return _invalid("unknown_intent", usage)
-    pending = PENDING_TASK.get(active[answer.intent])
-    if pending is not None:
-        logger.info("decision: speak %s (pending %s)", answer.intent, pending)
-        reason = f"{answer.reason} (pendiente: {pending})"
-        return Decision(True, answer.intent, reason, usage=usage)
-    text = (answer.message or "").strip()
-    if not text:
-        return _invalid("no_message", usage)
-    if telegram_length(text) > MAX_MESSAGE:
-        return _invalid("too_long", usage)
-    logger.info("decision: speak %s", answer.intent)
-    return Decision(
-        True, answer.intent, answer.reason, (Outgoing(intent=answer.intent, text=text),), usage
+    seen: set[str] = set()
+    intents: list[str] = []
+    proposals: list[Outgoing] = []
+    pending: list[str] = []
+    dropped: list[str] = []
+    for number, pick in enumerate(answer.picks, start=1):
+        problem = _problem(pick, active, seen)
+        if problem is not None:
+            dropped.append(f"{number}:{problem}")
+            continue
+        seen.add(pick.intent)
+        intents.append(pick.intent)
+        task = PENDING_TASK.get(active[pick.intent])
+        if task is not None:
+            pending.append(task)
+        else:
+            proposals.append(Outgoing(intent=pick.intent, text=(pick.message or "").strip()))
+    notes = "".join(
+        f" ({label}: {', '.join(codes)})"
+        for label, codes in (("pendiente", pending), ("descartado", dropped))
+        if codes
     )
+    if not intents:
+        return _invalid(f"no_valid_pick{notes}", usage)
+    logger.info("decision: speak %s%s", ",".join(intents), notes)
+    return Decision(True, ",".join(intents), answer.reason + notes, tuple(proposals), usage)
 
 
 def template_text(intention: Intention, habits: dict[str, str]) -> str:

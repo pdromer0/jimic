@@ -28,6 +28,7 @@ from heartbeat_data import (
     day_state,
     intentions,
     madrid,
+    picks,
 )
 from pydantic import SecretStr
 
@@ -80,7 +81,8 @@ def test_la_peticion_lleva_el_bloque_fijo_con_cache_y_el_estado_al_final(conn):
     assert request["output_config"]["effort"] == EFFORT == "low"
     schema = request["output_config"]["format"]
     assert schema["type"] == "json_schema"
-    assert schema["schema"]["required"] == ["speak", "intent", "reason", "message"]
+    assert schema["schema"]["required"] == ["speak", "reason", "picks"]  # 1.8-d
+    assert schema["schema"]["$defs"]["Pick"]["required"] == ["intent", "message"]
     assert "buttons" not in schema["schema"]["properties"]  # 1.8-a
 
 
@@ -118,16 +120,20 @@ def test_no_hablar_guarda_el_motivo_y_no_propone_nada(conn):
 @pytest.mark.parametrize(
     ("reply", "code"),
     [
-        (answer(True, "inventada", SECRET_TEXT), "unknown_intent"),
-        (answer(True, "regar", SECRET_TEXT), "unknown_intent"),  # martes: no es de hoy
-        (answer(True, "ofertas", None), "no_message"),
-        (answer(True, "ofertas", "   "), "no_message"),
-        (answer(True, "ofertas", "🏋" * 201), "too_long"),
-        ('{"speak": true, "intent": "ofertas"', "unparsed"),
+        (answer(True, "inventada", SECRET_TEXT), "no_valid_pick (descartado: 1:unknown_intent)"),
+        # martes: regar no es de hoy
+        (answer(True, "regar", SECRET_TEXT), "no_valid_pick (descartado: 1:unknown_intent)"),
+        (answer(True, "ofertas", None), "no_valid_pick (descartado: 1:no_message)"),
+        (answer(True, "ofertas", "   "), "no_valid_pick (descartado: 1:no_message)"),
+        (answer(True, "ofertas", "🏋" * 201), "no_valid_pick (descartado: 1:too_long)"),
+        (picks(), "no_valid_pick"),
         (
-            {"speak": True, "intent": "ofertas", "reason": "x", "message": "y", "buttons": []},
-            "unparsed",
+            picks(*[("ofertas", "x"), ("basura", "y"), ("insistir_gimnasio", "z")] * 2),
+            "too_many_picks",
         ),
+        ('{"speak": true, "picks": [', "unparsed"),
+        ({**picks(("ofertas", "y")), "buttons": []}, "unparsed"),
+        ({"speak": True, "intent": "ofertas", "reason": "x", "message": "y"}, "unparsed"),
     ],
 )
 def test_una_decision_no_valida_no_habla_y_no_se_reintenta(conn, reply, code):
@@ -159,6 +165,64 @@ def test_el_plan_y_el_cierre_se_deciden_sin_enviar_nada(conn, intent, task, mess
     assert (decision.speak, decision.intent) == (True, intent)
     assert decision.reason == f"{SECRET_REASON} (pendiente: {task})"
     assert decision.proposals == ()
+
+
+# --- Varias intenciones en un latido (decisión 1.8-d) -----------------------------------------
+
+
+def test_tres_intenciones_en_un_latido_proponen_las_tres_en_orden(conn):
+    """Pilla un `judge` que solo mira el primer elemento."""
+    fake = FakeMessages(
+        api_message(picks(("ofertas", "uno"), ("basura", "dos"), ("insistir_gimnasio", "tres")))
+    )
+    decision, _ = decide(conn, "2030-01-07T16:30", fake)
+    assert (decision.speak, decision.intent) == (True, "ofertas,basura,insistir_gimnasio")
+    assert [(p.intent, p.text) for p in decision.proposals] == [
+        ("ofertas", "uno"),
+        ("basura", "dos"),
+        ("insistir_gimnasio", "tres"),
+    ]
+    assert decision.reason == SECRET_REASON
+
+
+def test_tres_elementos_valen_y_cuatro_no(conn):
+    """El tope es de 3 (`MAX_PICKS`); con 4, nadie habla y el uso se cuenta igual."""
+    four = [("ofertas", "a"), ("basura", "b"), ("insistir_gimnasio", "c"), ("regar", "d")]
+    decision, _ = decide(conn, "2030-01-07T16:30", FakeMessages(api_message(picks(*four[:3]))))
+    assert len(decision.proposals) == 3
+    decision, _ = decide(conn, "2030-01-07T16:30", FakeMessages(api_message(picks(*four))))
+    assert (decision.speak, decision.proposals) == (False, ())
+    assert decision.reason == "invalid_decision:too_many_picks"
+    assert decision.usage is not None
+
+
+def test_un_elemento_no_valido_cae_solo_y_el_resto_sigue(conn):
+    """Un `intent` repetido, uno inactivo y uno sin mensaje caen con su código y su número; los
+    otros salen. Pilla que un elemento malo invalide el lote entero."""
+    fake = FakeMessages(api_message(picks(("ofertas", "a"), ("ofertas", "b"), ("basura", "c"))))
+    decision, _ = decide(conn, "2030-01-07T16:30", fake)
+    assert [(p.intent, p.text) for p in decision.proposals] == [("ofertas", "a"), ("basura", "c")]
+    assert decision.reason == f"{SECRET_REASON} (descartado: 2:duplicate)"
+    fake = FakeMessages(api_message(picks(("inventada", "x"), ("ofertas", "a"), ("basura", None))))
+    decision, _ = decide(conn, "2030-01-07T16:30", fake)
+    assert decision.intent == "ofertas"
+    assert decision.reason == f"{SECRET_REASON} (descartado: 1:unknown_intent, 3:no_message)"
+
+
+def test_no_hablar_con_elementos_es_silencio(conn):
+    """`speak: false` manda: lo discreto."""
+    fake = FakeMessages(api_message(picks(("ofertas", SECRET_TEXT), speak=False)))
+    decision, _ = decide(conn, "2030-01-07T16:30", fake)
+    assert (decision.speak, decision.intent, decision.proposals) == (False, None, ())
+
+
+def test_el_plan_dentro_de_un_lote_no_se_propone_y_los_demas_si(conn):
+    """El plan sigue la 1.8-b dentro de un lote; el aviso que va con él, no."""
+    fake = FakeMessages(api_message(picks(("plan_del_dia", None), ("basura", SECRET_TEXT))))
+    decision, _ = decide(conn, "2030-01-07T08:00", fake)
+    assert decision.intent == "plan_del_dia,basura"
+    assert [p.intent for p in decision.proposals] == ["basura"]
+    assert decision.reason == f"{SECRET_REASON} (pendiente: 1.14)"
 
 
 # --- El plan B (RF-04) --------------------------------------------------------------------------
@@ -274,7 +338,7 @@ def test_los_logs_no_llevan_motivos_ni_mensajes(conn, caplog):
         decide(conn, "2030-01-07T16:30", FakeMessages(reply))
     assert SECRET_REASON not in caplog.text and SECRET_TEXT not in caplog.text
     assert "api_down (APIConnectionError)" in caplog.text
-    assert "invalid_decision:unknown_intent" in caplog.text
+    assert "invalid_decision:no_valid_pick (descartado: 1:unknown_intent)" in caplog.text
 
 
 def test_el_repr_de_la_decision_no_lleva_el_motivo(conn):

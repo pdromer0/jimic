@@ -17,6 +17,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from jimic.channel.message import TELEGRAM_TEXT_LIMIT, telegram_length
 from jimic.memory.notices import SentToday
 from jimic.memory.schemas import Intention, Intentions, Limits, Notice, Window
 from jimic.tools.calendar import CalendarDay
@@ -25,6 +26,9 @@ logger = logging.getLogger(__name__)
 
 URGENT_TYPES = frozenset({"daily_plan", "day_close", "key_task"})
 """They never wait in the group window. A `notice` is the only kind that does (1.7-b)."""
+
+SEPARATOR = "\n\n"
+"""Between the blocks of one message: a blank line (decision 1.8-d)."""
 
 WEEKDAYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
 """`date.weekday()` order, as `Notice.days` writes them."""
@@ -263,43 +267,71 @@ class _Pass:
         self.quota = self.quota.after_sending(is_close)
         self.last_sent_at = self.now
 
-    def proposal(self, item: Outgoing) -> None:
+    def refusal_in_batch(self, item: Outgoing, taken: set[str]) -> str | None:
         refusal = self.refusal_of(item)
         if refusal is None and self.queue.has(item.intent):
             refusal = "already_waiting"
-        if refusal is not None:
-            return self.decide("block", refusal, item)
-        intention = self.by_id[item.intent]
-        is_close = intention.type == "day_close"
+        if refusal is None and item.intent in taken:
+            refusal = "duplicate"
+        return refusal
+
+    def batch(self, proposals: Sequence[Outgoing]) -> None:
+        """What this heartbeat proposes, as one message (decision 1.8-d).
+
+        The urgent ones go out now. A `notice` goes with them if the group window has passed;
+        otherwise it waits. With the window passed, what waited goes in the same message too:
+        one heartbeat, one message, which counts 1.
+        """
+        urgent: list[Outgoing] = []
+        notices: list[Outgoing] = []
+        taken: set[str] = set()
+        for item in proposals:
+            refusal = self.refusal_in_batch(item, taken)
+            if refusal is not None:
+                self.decide("block", refusal, item)
+                continue
+            taken.add(item.intent)
+            kind = self.by_id[item.intent].type
+            (urgent if kind in URGENT_TYPES else notices).append(item)
+        released: list[Outgoing] = []
+        if self.window_open():
+            for item in self.queue.take_all():
+                refusal = self.refusal_of(item)
+                if refusal is None:
+                    released.append(item)
+                else:
+                    self.decide("block", refusal, item)
+        else:
+            for item in notices:
+                self.queue.add(item, self.day)
+                self.decide("wait", "group_window", item)
+            notices = []
+        self.message(urgent, released + notices, bool(released))
+
+    def message(self, urgent: list[Outgoing], others: list[Outgoing], released: bool) -> None:
+        """Send `urgent` and `others` together, as much as fits in one Telegram message: the
+        `notice` that does not fit waits for the next one."""
+        if not urgent and not others:
+            return
+        items: list[Outgoing] = []
+        length = 0
+        for item in urgent + others:
+            added = telegram_length(item.text) + (len(SEPARATOR) if items else 0)
+            if length + added <= TELEGRAM_TEXT_LIMIT:
+                items.append(item)
+                length += added
+            elif self.by_id[item.intent].type in URGENT_TYPES:
+                self.decide("block", "message_full", item)
+            else:
+                self.queue.add(item, self.day)
+                self.decide("wait", "message_full", item)
+        if not items:
+            return
+        is_close = any(self.by_id[item.intent].type == "day_close" for item in items)
         refusal = self.quota.refusal(is_close)
         if refusal is not None:
-            return self.decide("block", refusal, item)
-        if intention.type in URGENT_TYPES:
-            return self.send("ok", item, is_close=is_close)
-        if self.window_open() and not self.queue.items:
-            return self.send("ok", item)
-        self.queue.add(item, self.day)
-        if not self.window_open():
-            self.decide("wait", "group_window", item)
-        # With the window open and others waiting it joins them, just below.
-
-    def release(self) -> None:
-        """Everything waiting goes out together, as one message, once the window has passed."""
-        if not self.queue.items or not self.window_open():
-            return
-        ready: list[Outgoing] = []
-        for item in self.queue.take_all():
-            refusal = self.refusal_of(item)
-            if refusal is None:
-                ready.append(item)
-            else:
-                self.decide("block", refusal, item)
-        if not ready:
-            return
-        refusal = self.quota.refusal(is_close=False)
-        if refusal is not None:
-            return self.decide("block", refusal, *ready)
-        self.send("released", *ready)
+            return self.decide("block", refusal, *items)
+        self.send("released" if released else "ok", *items, is_close=is_close)
 
 
 def second_pass(
@@ -312,15 +344,11 @@ def second_pass(
 ) -> list[Verdict]:
     """The verdicts of this heartbeat for the proposals and for what waits. `queue` changes.
 
-    The model proposes one at most; the templates of a heartbeat with the API down can be
-    several, and they go through in order, each one seeing what the previous ones did. An
-    urgent message that goes out becomes the last proactive one, so the queue waits for the
-    window to pass again: grouping never sends two messages in one heartbeat.
+    The proposals (the model's picks, or the templates of a heartbeat with the API down) are
+    one batch: whatever goes out goes out as one message, so a heartbeat never sends two.
     """
     state = _Pass(now, intentions, limits, sent, queue)
-    for proposal in proposals:
-        state.proposal(proposal)
-    state.release()
+    state.batch(proposals)
     for verdict in state.verdicts:
         logger.info(
             "second pass: %s %s (%s)", verdict.action, ",".join(verdict.intents), verdict.reason

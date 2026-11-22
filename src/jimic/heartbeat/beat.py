@@ -22,7 +22,7 @@ from zoneinfo import ZoneInfo
 from jimic.channel.bot import SendError
 from jimic.clock import Clock, to_db
 from jimic.heartbeat.cycle import CycleResult, Decision, run_cycle
-from jimic.heartbeat.limits import Verdict, WaitingNotices, in_window
+from jimic.heartbeat.limits import SEPARATOR, Verdict, WaitingNotices, in_window
 from jimic.heartbeat.sources import Sources
 from jimic.heartbeat.state import DayState
 from jimic.memory import system_notices, usage
@@ -181,7 +181,7 @@ class Heartbeat:
                 continue
             try:
                 message_id = await self._sender.send_text(
-                    "\n\n".join(item.text for item in verdict.items)
+                    SEPARATOR.join(item.text for item in verdict.items)
                 )
             except SendError as error:
                 failures[index] = str(error)
