@@ -52,13 +52,20 @@ def purge_agent_files(agent_dir: Path, clock: Clock) -> int:
             if relative == Path(".") and name in KEEP:
                 continue
             path = folder / name
-            if path.lstat().st_mtime < cutoff:
-                path.unlink()
-                deleted += 1
+            try:
+                if path.lstat().st_mtime < cutoff:
+                    path.unlink()
+                    deleted += 1
+            except FileNotFoundError:
+                continue  # the engine removed it meanwhile
         for name in dirs:
             child = folder / name
-            if not child.is_symlink() and child.is_dir() and not any(child.iterdir()):
-                if not (relative == Path(".") and name in KEEP_DIRS):
+            if relative == Path(".") and name in KEEP_DIRS:
+                continue
+            try:
+                if not child.is_symlink() and child.is_dir() and not any(child.iterdir()):
                     child.rmdir()
+            except FileNotFoundError, OSError:
+                continue  # gone, or no longer empty: the engine is writing in it
     logger.info("purge: agent files=%d", deleted)
     return deleted

@@ -447,3 +447,24 @@ def test_la_purga_diaria_borra_tambien_lo_viejo_del_agente(tmp_path):
     finally:
         conn.close()
     assert not transcript.exists()
+
+
+def test_si_falla_la_purga_de_la_base_la_del_agente_sigue(tmp_path, monkeypatch):
+    """Hallazgo 6 de la revisión: cada purga por su cuenta."""
+    conn = open_database(tmp_path / "jimic.db")
+    runtime, _, _ = runtime_with(conn, [])
+    transcript = resolve_paths(os.environ).agent_dir / "projects" / "x" / "s.jsonl"
+    transcript.parent.mkdir(parents=True)
+    transcript.write_text("inventado")
+    old = (NOW - timedelta(days=8)).timestamp()
+    os.utime(transcript, (old, old))
+
+    def broken(conn, clock):
+        raise sqlite3.OperationalError("database is locked")
+
+    monkeypatch.setattr("jimic.runtime.purge", broken)
+    try:
+        asyncio.run(runtime._purge())
+    finally:
+        conn.close()
+    assert not transcript.exists()

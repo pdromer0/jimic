@@ -8,6 +8,8 @@ if one fails: the channel stops first, so no heartbeat runs while the rest close
 the group window lives in the `Heartbeat`, as long as the service.
 """
 
+import asyncio
+import logging
 import sqlite3
 from collections.abc import Callable
 from contextlib import AsyncExitStack
@@ -25,6 +27,8 @@ from jimic.memory.retention import purge
 from jimic.memory.schemas import Intentions, Limits
 from jimic.paths import Paths
 from jimic.tools.todoist import TodoistApi
+
+logger = logging.getLogger(__name__)
 
 PURGE_AT = time(4, 0)
 """Local time of the daily purge, inside the default quiet hours."""
@@ -112,8 +116,16 @@ class Runtime:
             raise
 
     async def _purge(self) -> None:
-        purge(self._conn, self._clock)
-        purge_agent_files(self._paths.agent_dir, self._clock)
+        """Each purge on its own: one that fails does not keep the other from running."""
+        try:
+            purge(self._conn, self._clock)
+        except Exception as error:
+            logger.error("purge failed (%s)", type(error).__name__)
+        try:
+            # Walking the folder of the agent touches the disk: in a thread, off the loop.
+            await asyncio.to_thread(purge_agent_files, self._paths.agent_dir, self._clock)
+        except Exception as error:
+            logger.error("purge of agent files failed (%s)", type(error).__name__)
 
     async def stop(self) -> None:
         await self._stack.aclose()

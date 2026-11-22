@@ -84,3 +84,17 @@ def test_las_carpetas_vacias_se_van_y_un_enlace_no_se_sigue(tmp_path):
 
 def test_sin_carpeta_no_hay_nada_que_purgar(tmp_path):
     assert purge_agent_files(tmp_path / "no-existe", FixedClock(NOW)) == 0
+
+
+def test_un_fichero_que_desaparece_a_mitad_no_para_la_purga(tmp_path, monkeypatch):
+    """Hallazgo 6 de la revisión: el motor puede borrar algo entre el listado y el borrado."""
+    write(tmp_path, "projects/x/a.jsonl", 9)
+    write(tmp_path, "projects/x/b.jsonl", 9)
+    real_walk = os.walk
+
+    def walk_with_a_ghost(*args, **kwargs):
+        for root, dirs, names in real_walk(*args, **kwargs):
+            yield root, dirs, ["fantasma.jsonl", *names]
+
+    monkeypatch.setattr(os, "walk", walk_with_a_ghost)
+    assert purge_agent_files(tmp_path, FixedClock(NOW)) == 2
