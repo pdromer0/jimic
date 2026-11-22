@@ -2077,3 +2077,190 @@ Telegram.
   «Todoist». La captura de la demo está en un comentario del PR.
 - Las métricas del PR se completan con las cifras del chat: 7 idas y vueltas y 1 ronda de
   revisión.
+
+### Tarea 1.12: memoria adaptativa
+
+**Qué se hizo.** Issue #26 (★), rama `feat/h1-memoria`, aprobada a las 16:51 del 22-nov-2026
+con doce ajustes del chat. Commits:
+- `refactor(memory)` de `LiveConfig`, sin tocar tests (7099d6b);
+- `feat(memory)`: migración 0005, `edits`, `discreet`, `changes` y la recarga (894b470);
+- `feat(agent)`: la regla de origen por ejecución y las propuestas con botón (45ffcf8);
+- `feat(execution)` del mensaje «Para tu memoria» (26161ad), y de `/memoria` y `/deshacer`
+  (c26e4db);
+- `feat(runtime)` (11cd831);
+- `feat(channel)` de la demo (53946c1);
+- `test(contrato)` (4a2ba65);
+- `docs(diseno)` (82148f5);
+- de la revisión propia, seis `fix` (37a8b6d, ee2fa00, 5e7c5cb, b642866, c295937, 6146b13) y un
+  `refactor` sin tocar tests (750e631).
+
+Este anexo es el último, `docs(hito-1)`.
+
+**Decisiones de la tarea** (en `diseno.md` como 102 a 105; la 102 y la 103, en el ADR 0005):
+- **1.12-a** · un cambio de memoria solo nace del mensaje actual de Pedro, en una ejecución
+  limpia, y solo lo escribe su [Guardar] (102).
+- **1.12-b** · `log_idea` sigue la misma regla y pasa a ser propuesta con [📝 Apuntar]; revisa la
+  100 (103).
+- **1.12-c** · el texto de los cinco ficheros va al final del *system prompt*, reconstruido en
+  cada petición (104). La decidió Pedro en esta sesión, con tres precisiones: no contaminan, tope
+  por fichero con aviso, y después de las instrucciones fijas.
+- **La recarga en caliente** de los YAML y la ventana `from == to` de una intención (105).
+
+**ADR.** No hay ADR nuevo: la regla de origen por ejecución y los ficheros en el prompt se
+revierten sin dificultad. Sí una sección de la 1.12 en «Qué cambió al implementarla» del 0005.
+
+**Decisiones del diff** (lo que el plan interpretaba, aprobado con el informe de `revisor-plan`,
+veredicto «dudas (10)», y los doce ajustes del chat):
+- **Paquetes:**
+  - `memory/edits.py`: las tres operaciones como parche exacto;
+  - `memory/discreet.py`: la regla asimétrica, tabla en CU-13;
+  - `memory/changes.py`: validar, guardar, deshacer y `changes`;
+  - `memory/live.py`: `LiveConfig`;
+  - `agent/memory_context.py`: el bloque del prompt;
+  - `execution/memory_message.py`, `commands.py`, `restore.py` y `summary.py`.
+- **`propose_change(file, operation, before, after, reason)`**:
+  - `add` añade al final del fichero;
+  - `replace` exige el «antes» una sola vez;
+  - `remove` de líneas enteras se lleva su salto de línea;
+  - lo que entra, y el «antes» que se busca, usan el salto del fichero (CRLF, ajuste 10 y
+    hallazgo 3).
+- **Los YAML se editan como texto**, no se vuelcan con `ruamel`, que solo los carga para
+  validarlos. Fuera del fragmento, el fichero no cambia ni un byte. Lo comprueba un test sobre la
+  plantilla de `limites.yaml`: escribe la línea esperada, conserva todos sus comentarios y
+  `jimic config check` lo da por bueno. No se dio la condición de parar por comentarios perdidos.
+- **La regla asimétrica**, campo a campo con los `Limits` ya validados:
+  - `quiet_hours`, por conjuntos de minutos, con `from == to` como el día entero;
+  - `tool_levels`, por nivel efectivo: la que falta cuenta como `blocked`;
+  - un cambio que no mueve ningún valor se rechaza;
+  - `warn_at` baja, aceptado en la aprobación.
+
+  Con un `limites.yaml` roto a mano, se dice que lo arregle Pedro (hallazgo 6).
+- **Regla de origen, tres capas:**
+  - la herramienta rechaza si la ejecución ya leyó;
+  - el *hook* marca la ejecución antes de dejar pasar la lectura;
+  - al acabar, se descarta lo propuesto si la ejecución leyó después, y el código lo dice.
+
+  El origen lo pone el código (el texto de Pedro, sin la hora). `after_external_content` se
+  conserva en cada elemento como dato informativo (ajuste 9).
+- **El mensaje** no se recorta: lo que no cabe entero no se ofrece, y el tope es por fichero
+  (ajuste 12). Es de clase `memory`, va sin fila global, admite como mucho 3 propuestas por
+  ejecución, y va como `Reply.more` tras un plan.
+- **Los botones del mensaje:**
+  - [Cambiar] cierra la propuesta («✏️ dime cómo lo quieres»);
+  - un [Guardar] que no escribe se resuelve como «no» (`Declined`, ajuste 11 y hallazgo 4) y deja
+    la aprobación en `rejected`.
+- **`changes`** guarda el parche (posición, quitado y puesto), el `sha256` del fichero antes y
+  después, la operación, la aprobación y, en una reversión, `revert_of`.
+  - Deshacer exige el fichero entero como lo dejó el cambio. Así, los cambios de un fichero se
+    deshacen del último al primero; una edición a mano, aunque sea en otra línea, bloquea el
+    deshacer; y en `ideas.md` solo se deshace la última idea.
+  - Deshacer en `limites.yaml` está permitido aunque relaje, y recarga al momento (ajuste 4).
+- **`ideas.md`**: [📝 Apuntar] lo crea con 0600 si no existe; deshacer la primera idea lo deja
+  vacío (ajuste 6). Un enlace simbólico se rechaza en los cinco ficheros y en `ideas.md`.
+- **El *system prompt*** va como `{"type": "custom", …, "snapshot": False}` (ajuste 1); el
+  revisor lo vio en el SDK instalado. Tope de 6000 caracteres por fichero.
+- **Los comandos.** `/memoria` y `/deshacer` los atiende el código, sin el agente, y cuentan como
+  mensaje de Pedro.
+  - `/memoria`: Haiku resume cuatro ficheros, y el código, los límites y los cambios. [📖 Ver]
+    envía el texto (`Show`) y sigue pendiente. Con el tope del día alcanzado, no llama a Haiku
+    (hallazgo 2).
+  - `/deshacer`: 10 cambios y los borrados de 30 días, en mensajes de 8. De los borrados se
+    enseñan como mucho 24, con «y N más antiguos».
+- **Recrear un borrado:**
+  - una entrada por tarea, la foto más reciente (ajuste 5);
+  - se lee la tarea antes: si sigue en Todoist, «sigue en Todoist: no la recreo», y no se vuelve
+    a ofrecer;
+  - reclamación antes del `await`;
+  - `writer.recreate`, con `auto_parse_labels=False` y la guardia de `dev`;
+  - la anotación en una sola sentencia (hallazgo 5).
+- **La recarga:**
+  - `LiveConfig.refresh()` al empezar cada latido (fecha, tamaño o inodo);
+  - `config_invalid` uno al día mientras siga inválido, y `memory_clipped`;
+  - `LiveConfig.load` toma la firma antes de leer (hallazgo 8).
+- **La ventana `from == to`** de una intención (ajuste 7) es el día entero, y no se le pasa al
+  modelo como pista.
+- **El doble del agente** gana `OneMessage`: varias llamadas en un mensaje del modelo, con todos
+  los *hooks* primero y las herramientas después, en el orden que se le diga.
+
+**Valores a mano** (código independiente, antes de implementar; los recalculó `revisor-plan`):
+- **`quiet_hours`**, con la vieja 23:00–07:00 (480 minutos):
+  - se aceptan 540, 540 y 1440;
+  - se rechazan 420, 120 y 960;
+  - del día entero a 23:00–07:00 no; de 01:00–05:00 a 23:00–06:00, sí.
+- **`add`:** `'a'` → `'a\nX\n'`, `''` → `'X\n'`.
+- **El mensaje:** el cambio de las 8:00 ocupa 355 en su peor estado. El tope por fichero es de
+  1909 a 1913 caracteres por lado, según el nombre (el plan decía 1911 para todos). 2000 y 2000
+  ya no caben.
+- **Cortes:** 6000 y 6001 caracteres; el de 30 días (`>=`).
+- **Caducidad:** 23:00Z y 22:00Z.
+- **Resultados:** 27, 27 y 25 caracteres.
+
+Todos, comprobados por los tests.
+
+**Contratos** (22-nov-2026, `JIMIC_CONTRATO=1`, `jimic-dev`, ficheros inventados en un temporal):
+- **«No me escribas antes de las 8»:** el agente propone `replace` de `quiet_hours` en
+  `limites.yaml` y se ofrece. [Guardar] escribe y la configuración viva queda en las 8:00. En el
+  segundo mensaje del día (sesión reanudada) dice «8»: ve el fichero nuevo (ajuste 1).
+  - **Caché** (ajuste 2): la primera ejecución leyó 6701 tokens de la caché y escribió 7037
+    (0,0211 $). La segunda, tras cambiar el fichero, leyó 2569 y escribió 4621 (0,0353 $).
+  - Cambiar un fichero invalida buena parte de la caché de la conversación. Se acepta, como dijo
+    Pedro.
+- **«Escríbeme 15 veces al día»:** Sonnet **no llamó a `propose_change`**, ni la primera vez ni
+  cuando se le pidió explícitamente. Contestó que eso se edita a mano. No se ofreció nada y el
+  fichero no cambió (0,0044 $ y 0,0078 $). El rechazo del código con su explicación queda probado
+  por los tests rápidos; ante el modelo real, el prompt frena antes. Para la 1.9: medirlo.
+- **Los contratos del agente y de la inyección de la 1.10 y la 1.11**, otra vez: en verde, y la
+  inyección, con cero propuestas de memoria (0,0114 $).
+
+**Medidas.** La N3, tras la revisión, en verde en 0:56: 1291 tests y 9 de contrato saltados
+(eran 1090 tras la 1.11); pre-commit 0:08, pytest 0:47 y gitleaks de la historia 0:01, con 43
+commits. Este anexo se escribió mientras corría y solo es documentación.
+
+**Versiones incorrectas** (aplicadas y deshechas con un script; el árbol quedó limpio). Predicción
+antes, observado después:
+
+| # | Versión | Predicción | Observado |
+| --- | --- | --- | --- |
+| 1 | La regla deja subir `max_deletions_per_day` | Rojo el de 5 → 8 (y su sentido en el paramétrico) | **4**: también el de dos campos, uno que relaja |
+| 2 | `propose_change` tras `read_tasks` | Rojos el de la 1.12-a y la inyección contaminada (2) | **3**: el de la herramienta, el de dos llamadas en un mensaje y el de fuera de una conversación. **La inyección de punta a punta no cae**: el descarte al final de la ejecución la tapa (segunda capa) |
+| 3 | [Guardar] no revalida | Rojos «cambiado entre medias» y «la regla contra el actual» (2) | **9**: también los de [📝 Apuntar], el del log y el de la cuarta estrategia de inyección |
+| 4 | Deshacer no comprueba el «después» | Rojo «ha cambiado» (1) | **4**: también «del último al primero», «solo la última idea» y el de `/deshacer` |
+| 5 | `log_idea` escribe sin botón | Rojos el de la propuesta y la inyección de `ideas.md` (2) | **3**: dos estrategias de inyección |
+| 6 | La recarga acepta un fichero inválido | Rojos «mantiene la última buena» y «un aviso al día» (2) | **3**: también «deja de avisar» |
+| 7 | El *hook* no marca la ejecución | Rojo el de dos llamadas en un mensaje (1) | **5**: las dos de la guardia, las dos del *hook* que marca y la de `OneMessage` |
+
+Además, cada corrección de la revisión se comprobó deshaciendo su código: sus tests nuevos fallan
+sin ella (la del hallazgo 5 no tiene rojo posible sin una caída del proceso entre Todoist y la
+base).
+
+**Revisión propia** (`/code-review medium`, 10 hallazgos: 7 corregidos y 3 explicados):
+- **Corregidos:**
+  - (2) `/memoria` llamaba a Haiku con el tope del día alcanzado (c295937);
+  - (3) un «antes» de varias líneas no aparecía en un fichero CRLF (37a8b6d);
+  - (4) un [Guardar] rechazado quedaba como [Cambiar] (ee2fa00);
+  - (5) la anotación de la recreación en dos sentencias (5e7c5cb);
+  - (6) un `limites.yaml` roto culpaba al cambio (b642866);
+  - (8) una edición entre la carga y la configuración viva se perdía (6146b13);
+  - (9) ayudas duplicadas, en un `refactor` sin tocar tests (750e631).
+- **Explicados:**
+  - (1) «se quitó la guardia del día»: es la 1.12-a y la 1.12-b de Pedro. Lo que llega a un botón
+    enseña el origen y el antes y el después exactos, y [Guardar] vuelve a pasar la regla
+    asimétrica (test de la cuarta estrategia).
+  - (7) `warn_at` baja: aceptado en la aprobación.
+  - (10) el doble estado fijo/vivo de tres clases: es deliberado, para que el `refactor` no
+    tocara los tests. Va a Pendiente.
+
+**Pendiente.**
+- **1.13:** crear los Markdown que faltan (hoy `propose_change` los rechaza con «aún no existe»).
+- **1.9:** medir con las evaluaciones lo que propone el agente con la memoria. Ante «15 veces al
+  día», el modelo ni llama a la herramienta.
+- **1.14:** el plan que pasa el latido al agente ejecuta sin `origin`: no habrá cambios de
+  memoria desde él.
+- **Cuando se toquen sus tests:** unificar el doble estado de `Conversation`, `Executor` y
+  `HaikuDecider` en un `LiveConfig` siempre (hallazgo 10).
+- **Uso real:** que una edición a mano bloquee el deshacer del fichero entero; y la caché
+  invalidada tras cada cambio de memoria.
+
+**Pruebas contra servicios reales** (regla «los tests no dejan basura»): nueve ejecuciones del
+agente contra la API de Anthropic (los dos contratos nuevos y los de la 1.10 y la 1.11), unos
+0,10 $, que no crean nada. Ni Todoist, ni Calendar, ni Telegram: no hay restos que comprobar.
