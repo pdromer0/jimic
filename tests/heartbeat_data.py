@@ -55,6 +55,7 @@ LIMITS: dict[str, Any] = {
     "quiet_hours": {"from": "23:00", "to": "07:00"},
     "silent_during_events": True,
     "group_window": "30m",
+    "quiet_while_chatting": "10m",
     "max_insist_per_task": 3,
     "max_deletions_per_day": 5,
     "budget": {

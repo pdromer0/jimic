@@ -203,13 +203,13 @@ def test_las_claves_de_pedro_no_salen_en_la_ruta(config_dir):
     )
     write(config_dir, "limites.yaml", text)
     assert report_of(config_dir, "limites.yaml").problems == (
-        Problem(22, "tool_levels: valor no permitido"),
         Problem(23, "tool_levels: valor no permitido"),
-        Problem(23, "tool_levels: valor no permitido"),
+        Problem(24, "tool_levels: valor no permitido"),
+        Problem(24, "tool_levels: valor no permitido"),
     )
     write(config_dir, "limites.yaml", template("limites.yaml") + "purpose: 1\n")
     assert report_of(config_dir, "limites.yaml").problems == (
-        Problem(23, "clave desconocida (no se muestra)"),
+        Problem(24, "clave desconocida (no se muestra)"),
     )
 
 
@@ -302,6 +302,33 @@ def test_guardar_sincroniza_el_fichero_antes_de_sustituirlo_y_la_carpeta_despues
     assert events == ["fsync fichero", "replace", "fsync carpeta"]
 
 
+@pytest.mark.parametrize(
+    ("value", "reason"),
+    [
+        ("10", "duración no válida (como 30m o 2h)"),
+        ("diez", "duración no válida (como 30m o 2h)"),
+    ],
+)
+def test_quiet_while_chatting_no_valido_da_fichero_y_linea(config_dir, value, reason):
+    """1.10-c: la clave nueva se valida como las demás duraciones, sin enseñar el valor."""
+    text = template("limites.yaml").replace(
+        "quiet_while_chatting: 10m", f"quiet_while_chatting: {value}"
+    )
+    write(config_dir, "limites.yaml", text)
+    report = report_of(config_dir, "limites.yaml")
+    assert report.status == "invalid"
+    assert report.problems == (Problem(8, f"quiet_while_chatting: {reason}"),)
+
+
+def test_sin_quiet_while_chatting_limites_no_vale(config_dir):
+    """Obligatoria, como todo `limites.yaml`: la zona protegida nunca cae a un valor de serie."""
+    lines = template("limites.yaml").splitlines(keepends=True)
+    write(config_dir, "limites.yaml", "".join(line for line in lines if "quiet_while" not in line))
+    assert report_of(config_dir, "limites.yaml").problems == (
+        Problem(4, "quiet_while_chatting: falta"),
+    )
+
+
 def test_guardar_un_documento_invalido_no_escribe_nada(config_dir):
     init(config_dir)
     path = config_dir / "limites.yaml"
@@ -311,7 +338,7 @@ def test_guardar_un_documento_invalido_no_escribe_nada(config_dir):
     with pytest.raises(PersonalFileError) as excinfo:
         save_yaml_file(path, doc)
     assert excinfo.value.problems == (
-        Problem(9, "max_deletions_per_day: debe ser un número entero"),
+        Problem(10, "max_deletions_per_day: debe ser un número entero"),
     )
     assert "zx90" not in str(excinfo.value)
     assert path.read_text(encoding="utf-8") == template("limites.yaml")

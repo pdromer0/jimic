@@ -31,6 +31,7 @@ from heartbeat_data import (
 
 from jimic.heartbeat.cycle import run_cycle
 from jimic.heartbeat.limits import WaitingNotices
+from jimic.memory.conversations import note_message
 from jimic.memory.database import open_database
 from jimic.tools.calendar import CalendarDay, GoogleCalendarReader
 from jimic.tools.todoist import TaskList
@@ -312,3 +313,10 @@ def test_ni_los_logs_ni_el_repr_llevan_titulos_textos_ni_nombres_de_calendarios(
         assert secret not in caplog.text
         assert secret not in repr(result)
         assert secret not in repr(silent)
+
+
+def test_el_ciclo_lee_la_ultima_hora_de_pedro_de_la_base(conn):
+    """1.10-c de punta a punta: la hora que anota la conversación llega a la segunda pasada."""
+    note_message(conn, date(2030, 1, 7), madrid("2030-01-07T16:25"))
+    result = cycle(conn, "2030-01-07T16:30", spy=SpyDecide(outgoing("basura")))
+    assert [(v.action, v.reason) for v in result.verdicts] == [("wait", "chatting")]

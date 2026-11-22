@@ -493,6 +493,60 @@ def test_la_cola_descarta_lo_de_otro_dia():
     assert [item.intent for item in queue.items] == ["basura"]
 
 
+# --- Mientras Pedro conversa (1.10-c) ---------------------------------------------------------
+
+
+def chat(conn, now: str, *intents: str, last: str, queue=None, lim=None):
+    return second_pass(
+        madrid(now),
+        tuple(outgoing(intent) for intent in intents),
+        intentions(PLAN, CLOSE, GYM, PLANTS, BINS, OFFERS),
+        lim if lim is not None else limits(),
+        sent(conn, MONDAY),
+        queue if queue is not None else WaitingNotices(),
+        madrid(last),
+    )
+
+
+def codes(verdicts):
+    return [(v.action, v.reason, v.intents) for v in verdicts]
+
+
+def test_un_aviso_5_minutos_despues_de_un_mensaje_de_pedro_espera_y_sale_despues(conn):
+    """Pedro escribe a las 10:10: a las 10:15 (5 min) el aviso espera; a las 10:30 (20 min)
+    sale. Pilla la 1.10-c ignorada (versión incorrecta 6)."""
+    queue = WaitingNotices()
+    assert codes(
+        chat(conn, "2030-01-07T10:15", "basura", last="2030-01-07T10:10", queue=queue)
+    ) == [("wait", "chatting", ("basura",))]
+    assert codes(chat(conn, "2030-01-07T10:30", last="2030-01-07T10:10", queue=queue)) == [
+        ("send", "released", ("basura",))
+    ]
+
+
+def test_mientras_conversa_la_key_task_sale_sola_y_la_cola_sigue_esperando(conn):
+    """Lo urgente no espera, pero no arrastra la cola mientras dure la conversación."""
+    queue = WaitingNotices()
+    chat(conn, "2030-01-07T10:15", "basura", last="2030-01-07T10:10", queue=queue)
+    assert codes(
+        chat(conn, "2030-01-07T10:15", "insistir_gimnasio", last="2030-01-07T10:14", queue=queue)
+    ) == [("send", "ok", ("insistir_gimnasio",))]
+    assert [item.intent for item in queue.items] == ["basura"]
+
+
+def test_a_los_10_minutos_justos_ya_no_espera(conn):
+    assert codes(chat(conn, "2030-01-07T10:15", "basura", last="2030-01-07T10:05")) == [
+        ("send", "ok", ("basura",))
+    ]
+
+
+def test_con_quiet_while_chatting_a_cero_no_espera_nunca(conn):
+    lim = limits(quiet_while_chatting="0m")
+    assert codes(chat(conn, "2030-01-07T10:15", "basura", last="2030-01-07T10:15", lim=lim)) == [
+        ("send", "ok", ("basura",))
+    ]
+
+
 # --- Privacidad -------------------------------------------------------------------------------
 
 

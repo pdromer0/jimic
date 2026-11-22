@@ -24,6 +24,7 @@ from jimic.heartbeat.limits import (
 )
 from jimic.heartbeat.sources import Sources
 from jimic.heartbeat.state import DayState, build_day_state
+from jimic.memory.conversations import last_message_at
 from jimic.memory.notices import sent_between
 from jimic.memory.schemas import Intentions, Limits
 from jimic.memory.usage import TokenUsage
@@ -115,5 +116,7 @@ async def run_cycle(
         queue,
     )
     decision = await decide(state)
-    verdicts = second_pass(now, decision.proposals, intentions, limits, sent, queue)
+    verdicts = second_pass(
+        now, decision.proposals, intentions, limits, sent, queue, last_message_at(conn)
+    )
     return CycleResult(None, dropped, state, decision, tuple(verdicts))

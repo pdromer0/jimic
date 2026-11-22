@@ -152,6 +152,9 @@ class Limits(_Strict):
     quiet_hours: Window
     silent_during_events: bool
     group_window: Duration
+    quiet_while_chatting: Duration
+    """While Pedro wrote less than this ago, a `notice` waits (decision 1.10-c); `0m` turns it
+    off. Raising it is more discreet."""
     max_insist_per_task: Count
     max_deletions_per_day: Count
     budget: Budget

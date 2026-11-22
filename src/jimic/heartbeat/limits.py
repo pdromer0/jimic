@@ -237,8 +237,10 @@ class _Pass:
         limits: Limits,
         sent: SentToday,
         queue: WaitingNotices,
+        last_chat: datetime | None,
     ) -> None:
         self.now = now
+        self.last_chat = last_chat
         self.day = now.date()
         self.limits = limits
         self.by_id = {intention.id: intention for intention in intentions.intentions}
@@ -260,6 +262,12 @@ class _Pass:
         if self.sent.count(intention.id) >= cap_per_day(intention, self.limits):
             return "insist_cap" if intention.type == "key_task" else "repeated"
         return None
+
+    def chatting(self) -> bool:
+        """Pedro wrote less than `quiet_while_chatting` ago (decision 1.10-c)."""
+        if self.last_chat is None:
+            return False
+        return self.now - self.last_chat < self.limits.quiet_while_chatting
 
     def window_open(self) -> bool:
         if self.last_sent_at is None:
@@ -285,9 +293,10 @@ class _Pass:
     def batch(self, proposals: Sequence[Outgoing]) -> None:
         """What this heartbeat proposes, as one message (decision 1.8-d).
 
-        The urgent ones go out now. A `notice` goes with them if the group window has passed;
-        otherwise it waits. With the window passed, what waited goes in the same message too:
-        one heartbeat, one message, which counts 1.
+        The urgent ones go out now. A `notice` goes with them if the group window has passed
+        and Pedro is not chatting (decision 1.10-c); otherwise it waits. With the window passed,
+        what waited goes in the same message too: one heartbeat, one message, which counts 1.
+        While Pedro chats, an urgent one goes out alone and the queue keeps waiting.
         """
         urgent: list[Outgoing] = []
         notices: list[Outgoing] = []
@@ -306,7 +315,8 @@ class _Pass:
             else:
                 (urgent if kind in URGENT_TYPES else notices).append(item)
         released: list[Outgoing] = []
-        if self.window_open():
+        window_open, chatting = self.window_open(), self.chatting()
+        if window_open and not chatting:
             for item in self.queue.take_all():
                 refusal = self.refusal_of(item)
                 if refusal is None:
@@ -314,9 +324,10 @@ class _Pass:
                 else:
                     self.decide("block", refusal, item)
         else:
+            reason = "group_window" if not window_open else "chatting"
             for item in notices:
                 self.queue.add(item, self.day)
-                self.decide("wait", "group_window", item)
+                self.decide("wait", reason, item)
             notices = []
         self.message(urgent, released + notices, bool(released))
 
@@ -353,13 +364,15 @@ def second_pass(
     limits: Limits,
     sent: SentToday,
     queue: WaitingNotices,
+    last_chat: datetime | None = None,
 ) -> list[Verdict]:
     """The verdicts of this heartbeat for the proposals and for what waits. `queue` changes.
+    `last_chat` is the last moment Pedro wrote, if any.
 
     The proposals (the model's picks, or the templates of a heartbeat with the API down) are
     one batch: whatever goes out goes out as one message, so a heartbeat never sends two.
     """
-    state = _Pass(now, intentions, limits, sent, queue)
+    state = _Pass(now, intentions, limits, sent, queue, last_chat)
     state.batch(proposals)
     for verdict in state.verdicts:
         logger.info(
