@@ -389,3 +389,18 @@ def test_los_logs_no_llevan_contenido(conn, tmp_path, caplog):
     assert SECRET in rendered.text  # se enseña a Pedro…
     assert caplog.records and SECRET not in caplog.text  # …pero no va al log
     assert DELETIONS_LINE in template("limites.yaml")
+
+
+def test_memoria_con_el_tope_del_dia_no_llama_a_haiku(conn, tmp_path):
+    """Hallazgo 2: como la conversación, `/memoria` no gasta más con el tope alcanzado."""
+    from decimal import Decimal
+
+    from jimic.execution.commands import CAPPED
+    from jimic.memory.usage import TokenUsage, record_cost
+
+    w = World(conn, tmp_path)
+    record_cost(conn, madrid(NOW).date(), "claude-sonnet-5-5", TokenUsage(0, 0), Decimal("3"))
+    reply = w.command("/memoria")
+    assert isinstance(reply, Reply) and reply.outgoing is not None
+    assert reply.outgoing.message.body == CAPPED
+    assert w.haiku.calls == 0

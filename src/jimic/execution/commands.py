@@ -32,7 +32,7 @@ from jimic.channel.message import (
 from jimic.channel.taps import Failed, HandlerOutcome, Show, TapHandler
 from jimic.clock import Clock
 from jimic.execution import restore
-from jimic.memory import changes, conversations, usage
+from jimic.memory import changes, conversations, system_notices, usage
 from jimic.memory.changes import ChangeRefused, ChangeRow
 from jimic.memory.live import LiveConfig
 from jimic.memory.personal import YAML_SCHEMAS
@@ -54,6 +54,7 @@ UNDO = Option(key="undo", label="↩️ Deshacer")
 MEMORY_HEADER = "Tu memoria"
 UNDO_HEADER = "Para deshacer"
 NO_SUMMARY = "No he podido resumir ahora: despliega cada sección."
+CAPPED = "Hoy he llegado a mi tope de gasto: te enseño las secciones sin resumen."
 NOTHING_TO_UNDO = "No hay nada que deshacer: ni cambios de memoria ni borrados de este mes."
 NO_CHANGES = "Aún no hay cambios de memoria."
 
@@ -182,10 +183,19 @@ class Commands:
 
     async def memory(self) -> Reply:
         texts = {name: self._read(name) for name, _ in SECTIONS[:4]}
-        lines, spent = await self._summarize(texts)
-        if spent is not None:
-            day = self._clock.now().astimezone(self._timezone).date()
-            usage.record(self._conn, day, self._summary_model, spent)
+        day = self._clock.now().astimezone(self._timezone).date()
+        budget = self._config.limits.budget
+        lines: dict[str, str] | None = None
+        capped = usage.spent_on(self._conn, day) >= budget.daily_cap_usd
+        if capped:
+            logger.info("memory summary: daily_cap")
+        else:
+            lines, spent = await self._summarize(texts)
+            if spent is not None:
+                usage.record(self._conn, day, self._summary_model, spent)
+                system_notices.check_budget(
+                    self._conn, budget, self._clock.now().astimezone(self._timezone)
+                )
         items = []
         for name, label in SECTIONS:
             line = limits_line(self._config) if name == "limites.yaml" else (lines or {}).get(name)
@@ -201,7 +211,7 @@ class Commands:
         )
         message = fit_titles(
             InteractiveMessage(
-                body=None if lines is not None else NO_SUMMARY,
+                body=None if lines is not None else CAPPED if capped else NO_SUMMARY,
                 header=MEMORY_HEADER,
                 items=tuple(items),
             )
