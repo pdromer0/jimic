@@ -125,7 +125,7 @@ class MemoryHandlers:
             )
         except ChangeRefused as refused:
             logger.info("memory: not saved (%s)", refused.code)
-            return Declined(refused.result)
+            return Declined(refused.result, NO.key)
         if proposed.file in YAML_SCHEMAS:
             self._config.reload()
         return NOTED if action == "idea" else SAVED

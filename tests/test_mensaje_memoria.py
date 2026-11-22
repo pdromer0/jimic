@@ -185,6 +185,9 @@ def test_guardar_con_el_fichero_cambiado_no_escribe_y_queda_rechazada(w):
     result = w.tap(approval, 1, "save")
     assert result.view is not None and "ha cambiado: no lo guardo" in result.view.text
     assert w.status(approval) == "rejected"
+    stored = store.load(w.conn, approval)
+    # Hallazgo 4: queda como un «no», no como si Pedro hubiera tocado [Cambiar].
+    assert stored is not None and stored.message.items[0].chosen == "no"
     assert file_sha(path) == edited and w.change_rows() == []
     assert w.config.limits.quiet_hours.start.hour == 23  # sin recargar: la última buena
 

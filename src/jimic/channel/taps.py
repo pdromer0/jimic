@@ -60,9 +60,11 @@ class Renew:
 class Declined:
     """The effect was looked at and not done, for good (task 1.12: [Guardar] on a file that
     changed): the item is resolved with `result`, as with its first option that is not a yes,
-    so the approval ends `rejected`, not `approved`."""
+    so the approval ends `rejected`, not `approved`. `option` names which one (the item's «no»,
+    not its «cambiar»); without it, or if it is not a no of the item, the first one."""
 
     result: str
+    option: str | None = None
 
 
 @dataclass(frozen=True)
@@ -102,8 +104,11 @@ async def _run(handler: TapHandler, item: Item, option: str, approval_id: int) -
         return Failed(f"unexpected:{type(error).__name__}")
 
 
-def _declined_option(item: Item) -> str | None:
-    return next((option.key for option in item.options if not option.approves), None)
+def _declined_option(item: Item, wanted: str | None) -> str | None:
+    noes = [option.key for option in item.options if not option.approves]
+    if wanted in noes:
+        return wanted
+    return noes[0] if noes else None
 
 
 def _apply(message: InteractiveMessage, outcomes: dict[int, tuple[str, HandlerOutcome]]):
@@ -114,7 +119,7 @@ def _apply(message: InteractiveMessage, outcomes: dict[int, tuple[str, HandlerOu
         elif isinstance(outcome, Show) and outcome.result is not None:
             done[index] = Outcome(option, outcome.result)
         elif isinstance(outcome, Declined):
-            declined = _declined_option(message.items[index])
+            declined = _declined_option(message.items[index], outcome.option)
             if declined is not None:
                 done[index] = Outcome(declined, outcome.result)
     updated = resolve(message, done)
