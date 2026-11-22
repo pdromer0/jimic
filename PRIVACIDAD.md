@@ -19,6 +19,11 @@ usuario. **No lee la descripción**, la ubicación ni los correos de los asisten
 - **En el equipo de quien ejecuta JimiC**: el PC o, más adelante, un servidor propio.
 - Para decidir y redactar, el contenido necesario pasa a la **API de Anthropic**, bajo sus
   condiciones comerciales: no entrena modelos con él.
+- **Los ficheros personales en la conversación.** Cada vez que el usuario escribe, el texto actual
+  de sus cinco ficheros personales (rutina, objetivos, preferencias, intenciones y límites, hasta
+  6000 caracteres cada uno) va con las instrucciones del agente a la API de Anthropic, para que el
+  agente pueda proponer cambios exactos. `ideas.md` no va. Con `/memoria`, cuatro de ellos
+  (todos menos los límites) van al modelo pequeño (Haiku) para resumirlos.
 - No se vende, no se comparte con terceros y no se usa para publicidad ni para entrenar modelos.
 
 ## Qué se guarda y cuánto tiempo
@@ -46,8 +51,15 @@ usuario. **No lee la descripción**, la ubicación ni los correos de los asisten
   descripción, fecha, duración, proyecto, etiquetas, prioridad), el motivo del borrado y la
   aprobación, para poder recrearla. Se borra a los 30 días. Todoist no tiene papelera: sin esa
   foto, lo borrado no se podría recuperar.
+- **Los cambios de memoria.** Un cambio en un fichero personal se escribe solo cuando el usuario
+  toca [Guardar], y queda en `changes` **para siempre** (hasta que el usuario lo borre): la fecha,
+  el fichero, el texto que se quitó y el que se puso, la huella del fichero y **el mensaje del
+  usuario del que nació** (su texto). Deshacer un cambio queda registrado igual.
 - **Las ideas** que el usuario pide anotar van, una por línea y con su fecha, a `ideas.md`, junto a
-  los ficheros personales; JimiC solo añade líneas, nunca reescribe el fichero.
+  los ficheros personales, **solo cuando toca [📝 Apuntar]**. Cada línea queda también en `changes`,
+  con el mensaje de origen, y se puede deshacer.
+- **Las tareas recreadas.** Si el usuario deshace un borrado con `/deshacer`, la base anota cuándo
+  y el identificador de la tarea nueva, junto a la foto, hasta que la foto se borra a los 30 días.
 - Cuando el latido pasa al agente el plan o el cierre del día, la base anota la intención y la
   hora (90 días), sin texto.
 - La base guarda también el **gasto en el modelo** (por llamada: el día, el modelo, cuántos tokens

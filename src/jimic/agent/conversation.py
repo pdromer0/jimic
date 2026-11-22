@@ -1,7 +1,10 @@
 """The conversation with Pedro: one session of the Agent SDK per local day (decision 1.10-a).
 
 `Conversation.respond` takes what Pedro wrote and returns the answer with what the run proposed
-and whether it read external content (`Turn`); `reply` returns only the text. It notes the
+and whether it read external content (`Turn`); `reply` returns only the text. Each run carries
+Pedro's text as the origin of what it proposes for the memory (decision 1.12-a) and gets the
+current text of his five files in its system prompt (1.12-c): a file cut there registers the
+system notice `memory_clipped`. It notes the
 moment at once
 (decision 1.10-c, also while the message waits for its turn), then runs **one turn at a time**:
 a lock keeps the order in which the messages arrived. Each run resumes today's session, or
@@ -28,6 +31,7 @@ from claude_agent_sdk import ClaudeAgentOptions, ClaudeSDKError, ResultError, Re
 from claude_agent_sdk.types import Message
 
 from jimic.agent.guard import guard_hooks
+from jimic.agent.memory_context import memory_block, stem
 from jimic.agent.options import build_options
 from jimic.agent.tools import RunState, ToolContext, build_server
 from jimic.clock import Clock
@@ -35,6 +39,7 @@ from jimic.config import Settings
 from jimic.heartbeat.decide import status_kind
 from jimic.heartbeat.sources import Sources
 from jimic.memory import conversations, system_notices, usage
+from jimic.memory.live import LiveConfig
 from jimic.memory.schemas import Limits
 from jimic.memory.usage import TokenUsage
 from jimic.paths import Paths
@@ -187,15 +192,23 @@ class Conversation:
         conn: sqlite3.Connection,
         sources: Sources,
         run_agent: RunAgent = sdk_query,
+        config: LiveConfig | None = None,
     ) -> None:
+        """`config` is the live configuration; without it, `limits` is a fixed one."""
         self._settings = settings
         self._paths = paths
+        self._config = config
         self._limits = limits
         self._clock = clock
         self._conn = conn
         self._sources = sources
         self._run_agent = run_agent
         self._lock = asyncio.Lock()
+
+    @property
+    def _active_limits(self) -> Limits:
+        """The limits now: the live ones, or the fixed ones."""
+        return self._config.limits if self._config is not None else self._limits
 
     def _now(self) -> datetime:
         return self._clock.now().astimezone(self._settings.timezone)
@@ -217,14 +230,19 @@ class Conversation:
 
     async def _turn(self, text: str, received: datetime) -> Turn:
         day = received.date()
-        if usage.spent_on(self._conn, day) >= self._limits.budget.daily_cap_usd:
+        if usage.spent_on(self._conn, day) >= self._active_limits.budget.daily_cap_usd:
             logger.info("agent: daily_cap")
-            system_notices.check_budget(self._conn, self._limits.budget, self._now())
+            system_notices.check_budget(self._conn, self._active_limits.budget, self._now())
             return Turn(DAILY_CAP_TEXT)
         agent_dir = self._paths.agent_dir
         agent_dir.mkdir(mode=0o700, exist_ok=True)
         session = conversations.session_of(self._conn, day)
-        run = RunState()
+        limits = self._active_limits
+        run = RunState(origin=text)
+        memory = memory_block(self._paths.config_dir)
+        if memory.clipped:
+            detail = ",".join(stem(name) for name in memory.clipped)
+            system_notices.detect(self._conn, "memory_clipped", day, self._now(), detail)
         context = ToolContext.of(
             self._sources,
             self._conn,
@@ -236,15 +254,19 @@ class Conversation:
         )
         options = build_options(
             self._settings,
-            self._limits,
+            limits,
             agent_dir,
             build_server(context),
             session,
-            guard_hooks(self._limits, self._conn, day),
+            guard_hooks(limits, self._conn, day, run),
+            memory.text,
         )
         outcome = await run_once(self._run_agent, f"{stamp(received)} {text}", options)
         self._bookkeeping(day, outcome, resumed=session is not None)
-        return Turn(self._answer(outcome), run if outcome.code == "ok" else None)
+        if outcome.code != "ok":
+            return Turn(self._answer(outcome))
+        run.close()
+        return Turn(self._answer(outcome), run)
 
     def _bookkeeping(self, day: date, outcome: Outcome, resumed: bool) -> None:
         now = self._now()
@@ -253,7 +275,7 @@ class Conversation:
             # the most a run may spend: the discreet count.
             usd = outcome.usd
             if usd is None:
-                usd = Decimal(str(self._limits.budget.max_session_usd))
+                usd = Decimal(str(self._active_limits.budget.max_session_usd))
             usage.record_cost(
                 self._conn,
                 day,
@@ -261,7 +283,7 @@ class Conversation:
                 outcome.usage or TokenUsage(0, 0),
                 usd,
             )
-            system_notices.check_budget(self._conn, self._limits.budget, now)
+            system_notices.check_budget(self._conn, self._active_limits.budget, now)
         if resumed and outcome.code.startswith(STUCK):
             # A session that fails when resumed (not the API, not a cap) must not block the rest
             # of the day: the next message starts another one.

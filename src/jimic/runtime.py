@@ -1,11 +1,12 @@
 """What the service runs between opening and closing the database (task 1.8).
 
 `Runtime.start` opens the sources, the client of the model, the conversation with the agent, the
-executor of what Pedro approves and the Telegram channel (Pedro's text goes to the assistant,
-the taps to the executor), then sweeps what expired while the service was down and schedules the
-heartbeat every 15 minutes (from the next quarter of an hour), the sweep of expired approvals
-every day at 00:01 (1.11-c) and the purge once a day: the database and the files of the agent
-older than 7 days. `Runtime.stop` undoes it in reverse order, every step even
+executor of what Pedro approves, the memory (its buttons, `/memoria` and `/deshacer`, task 1.12)
+and the Telegram channel (Pedro's text goes to the assistant, the taps to their handlers), all
+on one live configuration of the YAML files. Then it sweeps what expired while the service was
+down and schedules the heartbeat every 15 minutes (from the next quarter of an hour), the sweep
+of expired approvals every day at 00:01 (1.11-c) and the purge once a day: the database and the
+files of the agent older than 7 days. `Runtime.stop` undoes it in reverse order, every step even
 if one fails: the channel stops first, so no heartbeat runs while the rest closes. The queue of
 the group window lives in the `Heartbeat`, as long as the service.
 """
@@ -16,6 +17,7 @@ import sqlite3
 from collections.abc import Callable, Mapping
 from contextlib import AsyncExitStack
 from datetime import time
+from functools import partial
 
 from jimic.agent.conversation import Conversation
 from jimic.agent.transcripts import purge_agent_files
@@ -24,10 +26,14 @@ from jimic.channel.taps import TapHandler
 from jimic.clock import Clock
 from jimic.config import Settings
 from jimic.execution.assistant import Assistant
+from jimic.execution.commands import Commands
 from jimic.execution.execute import Executor
+from jimic.execution.memory_message import MEMORY_KIND, MemoryHandlers
+from jimic.execution.summary import summarize
 from jimic.heartbeat.beat import INTERVAL, Heartbeat, next_beat
 from jimic.heartbeat.decide import HaikuDecider, ModelApi, build_model_api
 from jimic.heartbeat.sources import open_sources
+from jimic.memory.live import LiveConfig
 from jimic.memory.retention import purge
 from jimic.memory.schemas import Intentions, Limits
 from jimic.paths import Paths
@@ -79,6 +85,9 @@ class Runtime:
         self._conn = conn
         self._intentions = intentions
         self._limits = limits
+        self.config = LiveConfig(intentions, limits, paths.config_dir)
+        """The live configuration: reloaded after a [Guardar] or a [Deshacer] of a YAML file,
+        and at the start of each heartbeat if a file changed (task 1.12)."""
         self._channel_factory = channel_factory
         self._model_factory = model_factory
         self._todoist_api = todoist_api
@@ -104,6 +113,7 @@ class Runtime:
                 clock=self._clock,
                 conn=self._conn,
                 sources=sources,
+                config=self.config,
             )
 
             executor = Executor(
@@ -112,6 +122,23 @@ class Runtime:
                 timezone=self._settings.timezone,
                 limits=self._limits,
                 todoist=sources.todoist,
+                config=self.config,
+            )
+            memory = MemoryHandlers(
+                conn=self._conn,
+                clock=self._clock,
+                config_dir=self._paths.config_dir,
+                config=self.config,
+            )
+            commands = Commands(
+                conn=self._conn,
+                clock=self._clock,
+                timezone=self._settings.timezone,
+                config_dir=self._paths.config_dir,
+                config=self.config,
+                todoist=sources.todoist,
+                summarize=partial(summarize, model.create, self._settings.heartbeat_model),
+                summary_model=self._settings.heartbeat_model,
             )
             assistant = Assistant(
                 conversation=conversation,
@@ -119,9 +146,11 @@ class Runtime:
                 conn=self._conn,
                 clock=self._clock,
                 timezone=self._settings.timezone,
+                commands=commands,
             )
+            handlers = executor.handlers | {MEMORY_KIND: memory.memory} | commands.handlers
             channel = self._channel_factory(
-                self._settings, self._conn, self._clock, assistant.reply, executor.handlers
+                self._settings, self._conn, self._clock, assistant.reply, handlers
             )
             heartbeat = Heartbeat(
                 clock=self._clock,
@@ -131,9 +160,10 @@ class Runtime:
                 sources=sources,
                 conn=self._conn,
                 decider=HaikuDecider(
-                    model.create, self._settings.heartbeat_model, self._intentions
+                    model.create, self._settings.heartbeat_model, self._intentions, self.config
                 ),
                 sender=channel,
+                config=self.config,
             )
             await channel.start()
             stack.push_async_callback(channel.stop)

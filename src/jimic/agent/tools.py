@@ -6,13 +6,22 @@ memory files (H1-1). The context has the readers, never the writer of Todoist.
 
 A tool never raises: a source that is down gives its code, a wrong argument a message for the
 agent and anything unexpected `unexpected:<Type>`, all as an error result the agent reads.
-Reading the calendar or the tasks marks today's session as having read external content (the
-origin rule of task 1.12, and the guard of `log_idea`) and marks this run (`RunState`), which
-decides whether a proposal may run at once (decision 1.11-b).
+Reading the calendar or the tasks marks this run (`RunState.contaminated`), which decides whether
+a proposal may run at once (decision 1.11-b) and whether the memory may change (1.12-a), and
+marks today's session (`after_external_content`, only informative). The guard marks both before
+the read runs.
 
-`propose_plan` does not save anything: it adds its items to the run, and the code shows them
-under the agent's answer when the run ends (decision 1.11-a). Several calls in one run add up,
-eight items at most and each task once.
+**The origin rule (decision 1.12-a).** A memory change, and an idea (1.12-b), is born only from
+Pedro's message of this run, in a clean run: `propose_change` and `log_idea` refuse once the run
+read the calendar or the tasks («pídele que te lo repita en otro mensaje»), and outside a
+conversation (`RunState.origin` is `None`). They write nothing: the change is checked against
+the file as it is now (`jimic.memory.changes`) and added to the run; the code shows it with
+[Guardar] or [📝 Apuntar] when the run ends, with Pedro's message as its origin, and only the
+button writes. If the run reads after proposing, the conversation drops what it proposed.
+
+`propose_plan` does not save anything either: it adds its items to the run, and the code shows
+them under the agent's answer when the run ends (decision 1.11-a). Several calls in one run add
+up, eight items at most and each task once.
 
 What the tools get and return (titles, ideas, proposals) never reaches a log: only the name of
 the tool and a code.
@@ -21,7 +30,6 @@ the tool and a code.
 import asyncio
 import json
 import logging
-import os
 import sqlite3
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
@@ -34,19 +42,20 @@ from claude_agent_sdk import McpSdkServerConfig, SdkMcpTool, create_sdk_mcp_serv
 from pydantic import BaseModel, ValidationError
 
 from jimic.agent.proposals import (
-    CHANGE_KIND,
     MAX_PLAN_ITEMS,
     DeleteItem,
     MemoryChange,
     MoveItem,
     PlanProposal,
     TaskSnapshot,
-    save_proposal,
 )
+from jimic.channel.message import MessageTooLong
 from jimic.clock import Clock
+from jimic.execution.memory_message import MAX_MEMORY_ITEMS, memory_message
 from jimic.execution.rules import FOR_THE_AGENT, refusal
 from jimic.heartbeat.sources import Sources
-from jimic.memory import conversations
+from jimic.memory import changes, conversations
+from jimic.memory.changes import IDEAS_FILE, ChangeRefused, Proposed
 from jimic.tools.apex import ApexReader
 from jimic.tools.apex_schema import ApexSnapshot
 from jimic.tools.calendar import CalendarDay, CalendarReader
@@ -60,7 +69,10 @@ CONTAMINATING = frozenset({"read_calendar", "read_tasks"})
 """What they return can be written by third parties (an invitation, a shared task): 6.2."""
 MAX_IDEA = 500
 """Characters of one line of `ideas.md`, after joining the whitespace."""
-IDEAS_FILE = "ideas.md"
+CONTAMINATED_TEXT = (
+    "En esta respuesta has leído el calendario o las tareas, así que no propongo cambios de"
+    " memoria ni ideas: pídele a Pedro que te lo repita en otro mensaje."
+)
 
 type Result = dict[str, Any]
 
@@ -75,11 +87,25 @@ class RunState:
     """One run of the agent (one message of Pedro): what it read and what it proposed."""
 
     contaminated: bool = False
-    """It called `read_calendar` or `read_tasks` (condition 2 of decision 1.11-b)."""
+    """It called `read_calendar` or `read_tasks` (condition 2 of decision 1.11-b, and 1.12-a)."""
     items: list[dict[str, Any]] = field(default_factory=list)
     """The items proposed with `propose_plan`, as data, with their snapshot."""
     requested_by_pedro: bool = True
     """Every `propose_plan` of the run said Pedro asked for it; meaningless without items."""
+    origin: str | None = None
+    """What Pedro wrote in this message, without the time; `None` outside a conversation (a
+    plan or a close the heartbeat hands over), where the memory never changes."""
+    memory: list[dict[str, Any]] = field(default_factory=list)
+    """The changes and ideas proposed, as data, checked against the files."""
+    memory_dropped: bool = False
+    """The run read after proposing: what it proposed for the memory was dropped."""
+
+    def close(self) -> None:
+        """At the end of the run: a run that read external content proposes nothing for the
+        memory, even what it proposed before reading (1.12-a, «en esta ejecución»)."""
+        if self.contaminated and self.memory:
+            self.memory = []
+            self.memory_dropped = True
 
 
 @dataclass(frozen=True)
@@ -255,16 +281,52 @@ def build_tools(ctx: ToolContext) -> list[SdkMcpTool[Any]]:
             " («hecho», «creado», «te lo creo»): di solo lo que propones y por qué."
         )
 
+    def memory_allowed() -> str:
+        """Pedro's message of this run, or `AgentInputError` (1.12-a)."""
+        run = ctx.run
+        if run.origin is None:
+            raise AgentInputError("Fuera de una conversación con Pedro no hay cambios de memoria.")
+        if run.contaminated:
+            raise AgentInputError(CONTAMINATED_TEXT)
+        if len(run.memory) >= MAX_MEMORY_ITEMS:
+            raise AgentInputError(
+                f"En esta respuesta ya hay {MAX_MEMORY_ITEMS} propuestas de memoria: no se ha"
+                " añadido nada"
+            )
+        return run.origin
+
+    def add_memory(entry: dict[str, Any], proposed: Proposed) -> None:
+        try:
+            changes.check(ctx.config_dir, proposed)
+        except ChangeRefused as refused:
+            logger.info("memory proposal refused (%s)", refused.code)
+            raise AgentInputError(refused.for_agent) from None
+        try:
+            memory_message([*ctx.run.memory, entry])
+        except MessageTooLong:
+            raise AgentInputError(
+                "Es demasiado largo para enseñárselo entero a Pedro en Telegram: propón un"
+                " cambio más corto."
+            ) from None
+        ctx.run.memory.append(entry)
+
     async def propose_change(args: dict[str, Any]) -> Result:
         change = _validated(MemoryChange, args)
-        payload = change.model_dump() | {
-            "after_external_content": conversations.read_external(ctx.conn, ctx.day)
-        }
-        approval = save_proposal(ctx.conn, ctx.clock, ctx.timezone, CHANGE_KIND, payload)
-        logger.info("proposal %d saved (%s)", approval, CHANGE_KIND)
+        origin = memory_allowed()
+        entry = (
+            {"action": "change"}
+            | change.model_dump()
+            | {
+                "origin": origin,
+                "after_external_content": conversations.read_external(ctx.conn, ctx.day),
+            }
+        )
+        add_memory(entry, Proposed(change.file, change.operation, change.before, change.after))
+        logger.info("memory change noted (%s, %s)", change.file, change.operation)
         return text_result(
-            f"Cambio {approval} guardado como propuesta. No se ha cambiado nada: cuéntaselo a"
-            " Pedro."
+            "Anotado. No se ha guardado nada: debajo de tu respuesta el código le enseñará a"
+            " Pedro el antes y el después con [Guardar] [Cambiar] [No], y solo su botón lo"
+            " guarda. No digas que está guardado ni que lo has cambiado."
         )
 
     async def log_idea(args: dict[str, Any]) -> Result:
@@ -273,8 +335,21 @@ def build_tools(ctx: ToolContext) -> list[SdkMcpTool[Any]]:
             raise AgentInputError("text está vacío")
         if len(text) > MAX_IDEA:
             raise AgentInputError(f"text pasa de {MAX_IDEA} caracteres")
-        append_line(ctx.config_dir / IDEAS_FILE, f"- {today().isoformat()} · {text}\n")
-        return text_result("Idea anotada en ideas.md.")
+        origin = memory_allowed()
+        line = f"- {today().isoformat()} · {text}"
+        entry = {
+            "action": "idea",
+            "text": text,
+            "line": line,
+            "origin": origin,
+            "after_external_content": conversations.read_external(ctx.conn, ctx.day),
+        }
+        add_memory(entry, Proposed(IDEAS_FILE, "add", None, line))
+        logger.info("idea noted")
+        return text_result(
+            "Anotada como propuesta: el código le pondrá a Pedro [📝 Apuntar] debajo de tu"
+            " respuesta, y solo su botón la escribe en ideas.md. No digas que está apuntada."
+        )
 
     day_schema = {
         "type": "object",
@@ -324,25 +399,24 @@ def build_tools(ctx: ToolContext) -> list[SdkMcpTool[Any]]:
         ),
         (
             "propose_change",
-            "Propone un cambio en un fichero de memoria de Pedro. Solo propone: no cambia nada.",
+            "Propone un cambio en un fichero de memoria de Pedro: add (solo after, al final),"
+            " replace (before exacto, una sola vez, y after) o remove (solo before). Solo"
+            " propone: lo guarda el botón de Pedro.",
             MemoryChange.model_json_schema(),
             propose_change,
         ),
-        ("log_idea", "Anota una idea de Pedro, de una línea, en ideas.md.", idea_schema, log_idea),
+        (
+            "log_idea",
+            "Propone anotar una idea de Pedro, de una línea, en ideas.md. Solo propone: la"
+            " escribe el botón de Pedro.",
+            idea_schema,
+            log_idea,
+        ),
     ]
     return [
         tool(name, description, schema)(guarded(name, run))
         for name, description, schema, run in definitions
     ]
-
-
-def append_line(path: Path, line: str) -> None:
-    """Add `line` at the end of `path` (created 0600 if missing); never rewrites what is there."""
-    fd = os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
-    try:
-        os.write(fd, line.encode("utf-8"))
-    finally:
-        os.close(fd)
 
 
 def build_server(ctx: ToolContext) -> McpSdkServerConfig:

@@ -7,6 +7,10 @@ memory and the non-essential traffic. Two layers decide each call: the `PreToolU
 `guard.py` (task 1.11), which sees every call and denies what is not in the table or not `free`
 in `tool_levels`, and `allowed_tools` with only the `free` ones, where `dontAsk` denies the rest.
 
+The system prompt is the fixed instructions of `prompt.md` and, after them, the text of Pedro's
+five personal files (decision 1.12-c), rebuilt on every request, also when the session of the
+day is resumed.
+
 The key goes in the `env` of the options, never in `os.environ`: JimiC only reads its `.env`.
 The options hold it, so they are never logged.
 """
@@ -17,6 +21,7 @@ from pathlib import Path
 from typing import Any
 
 from claude_agent_sdk import ClaudeAgentOptions, HookMatcher, McpSdkServerConfig
+from claude_agent_sdk.types import SystemPromptCustom
 
 from jimic.agent.tools import SERVER_NAME, model_name
 from jimic.config import Settings
@@ -50,6 +55,15 @@ def _discard(line: str) -> None:
     """The engine's stderr may carry content: it is read and dropped, never shown or logged."""
 
 
+def system_prompt(memory: str) -> SystemPromptCustom:
+    """The fixed instructions first and Pedro's files after them (decision 1.12-c), rebuilt on
+    every request (`snapshot=False`): with a plain text the session would keep the prompt of its
+    first request and send it again when resumed, so the agent would see the files of the
+    morning after a [Guardar]."""
+    text = prompt_text() if not memory else f"{prompt_text().rstrip()}\n\n{memory}"
+    return {"type": "custom", "prompt": text, "snapshot": False}
+
+
 def free_tools(limits: Limits) -> list[str]:
     """The names the model sees of the tools that are `free` in `tool_levels`, in table order."""
     return [model_name(name) for name in TOOL_NAMES if is_free(limits, name)]
@@ -62,9 +76,11 @@ def build_options(
     server: McpSdkServerConfig,
     resume: str | None,
     hooks: dict[Any, list[HookMatcher]],
+    memory: str = "",
 ) -> ClaudeAgentOptions:
-    """The options of one run; `resume` is today's session, if there is one, and `hooks` the
-    guard of this run (`guard.guard_hooks`)."""
+    """The options of one run; `resume` is today's session, if there is one, `hooks` the
+    guard of this run (`guard.guard_hooks`) and `memory` the text of Pedro's files
+    (`memory_context.memory_block`)."""
     return ClaudeAgentOptions(
         tools=[],
         allowed_tools=free_tools(limits),
@@ -73,7 +89,7 @@ def build_options(
         mcp_servers={SERVER_NAME: server},
         strict_mcp_config=True,
         setting_sources=[],
-        system_prompt=prompt_text(),
+        system_prompt=system_prompt(memory),
         model=settings.agent_model,
         max_turns=MAX_TURNS,
         max_budget_usd=limits.budget.max_session_usd,

@@ -1,8 +1,9 @@
 """La guardia del agente: el *hook* `PreToolUse` que ve cada llamada (decisiones 15 y 27).
 
 Deniega lo que está fuera de la tabla y lo que no es `free` en `tool_levels` (lo que falta,
-también), y `log_idea` cuando la sesión del día ya leyó contenido externo. Cuando permite, no
-opina (`{}`): `allowed_tools` sigue siendo una segunda capa.
+también). Al dejar pasar una lectura que contamina, marca la ejecución y la sesión del día antes
+de que corra (1.12-a). Cuando permite, no opina (`{}`): `allowed_tools` sigue siendo una
+segunda capa.
 """
 
 import asyncio
@@ -10,13 +11,14 @@ import logging
 from datetime import date
 
 import pytest
-from agent_data import SECRET_ARG, context
+from agent_data import SECRET_ARG, call_tool, context
 from claude_agent_sdk import HookMatcher
 from heartbeat_data import limits
+from memory_data import QUIET_LINE, write_personal
 
 from jimic.agent.guard import guard_hooks, make_guard
-from jimic.agent.tools import model_name
-from jimic.memory.conversations import mark_external
+from jimic.agent.tools import RunState, build_server, model_name
+from jimic.memory.conversations import mark_external, read_external
 from jimic.memory.database import open_database
 from jimic.memory.schemas import TOOL_NAMES
 
@@ -88,23 +90,24 @@ def test_una_que_falta_en_tool_levels_cuenta_como_bloqueada(conn, tmp_path):
     assert denied(ask(make_guard(missing, conn, day), model_name("propose_plan")))
 
 
-def test_log_idea_se_deniega_si_la_sesion_del_dia_ya_leyo_contenido_externo(conn, tmp_path):
-    """Pilla la marca por ejecución en lugar de la del día (ajuste 2 del chat): se lee en la
-    ejecución 1 y `log_idea` llega en la 2, con lo leído aún en el contexto de la sesión."""
-    ctx = context(conn, tmp_path)
-    guard_before = make_guard(limits(), conn, ctx.day)
-    assert ask(guard_before, model_name("log_idea")) == {}
-    mark_external(conn, ctx.day)  # la ejecución 1 leyó las tareas
-    guard_next_run = make_guard(limits(), conn, ctx.day)
-    assert denied(ask(guard_next_run, model_name("log_idea")))
-    assert ask(guard_next_run, model_name("propose_plan")) == {}
-
-
-def test_al_dia_siguiente_log_idea_vuelve_a_pasar(conn, tmp_path):
+def test_log_idea_ya_no_se_deniega_por_la_marca_del_dia(conn, tmp_path):
+    """La decisión 100, revisada por la 1.12-b: la sesión leyó en la ejecución 1 y `log_idea`
+    llega en la 2. El *hook* lo deja pasar; la herramienta aplica la regla de la ejecución."""
     ctx = context(conn, tmp_path)
     mark_external(conn, ctx.day)
-    tomorrow = context(conn, tmp_path, now="2030-01-08T09:00").day
-    assert ask(make_guard(limits(), conn, tomorrow), model_name("log_idea")) == {}
+    assert ask(make_guard(limits(), conn, ctx.day), model_name("log_idea")) == {}
+
+
+@pytest.mark.parametrize(
+    ("name", "marks"),
+    [("read_calendar", True), ("read_tasks", True), ("read_apex_today", False)],
+)
+def test_el_hook_marca_la_ejecucion_al_dejar_pasar_una_lectura(conn, tmp_path, name, marks):
+    ctx = context(conn, tmp_path)
+    run = RunState(origin="hola")
+    assert ask(make_guard(limits(), conn, ctx.day, run), model_name(name)) == {}
+    assert run.contaminated is marks
+    assert read_external(conn, ctx.day) is marks
 
 
 def test_otros_eventos_no_se_tocan(conn, tmp_path):
@@ -135,13 +138,30 @@ def test_los_hooks_ven_todas_las_herramientas_y_un_fallo_bloquea(conn, tmp_path)
     assert matcher.matcher is None and matcher.on_failure == "block" and len(matcher.hooks) == 1
 
 
-def test_dos_llamadas_en_un_mensaje_del_modelo_no_cuelan_log_idea(conn, tmp_path):
-    """Hallazgo 2 de la revisión: con `read_tasks` y `log_idea` en el mismo mensaje, el motor
-    pasa los dos *hooks* antes de ejecutar ninguna. La marca la pone ya el *hook* de la lectura."""
-    ctx = context(conn, tmp_path)
-    guard = make_guard(limits(), conn, ctx.day)
+@pytest.mark.parametrize("proposal", ["propose_change", "log_idea"])
+def test_dos_llamadas_en_un_mensaje_del_modelo_no_cuelan_la_memoria(conn, tmp_path, proposal):
+    """Versión incorrecta 7: con `read_tasks` y una propuesta de memoria en el mismo mensaje, el
+    motor pasa los dos *hooks* antes de ejecutar ninguna, y la propuesta puede ejecutarse antes
+    que la lectura. La marca de la ejecución la pone ya el *hook* de la lectura."""
+    config_dir = write_personal(tmp_path / "config")
+    run = RunState(origin="No me escribas antes de las 8")
+    ctx = context(conn, config_dir, run=run)
+    guard = make_guard(limits(), conn, ctx.day, run)
     assert ask(guard, model_name("read_tasks")) == {}
-    assert denied(ask(guard, model_name("log_idea")))
+    assert ask(guard, model_name(proposal)) == {}
+    args = (
+        {"text": "una idea"}
+        if proposal == "log_idea"
+        else {
+            "file": "limites.yaml",
+            "operation": "replace",
+            "before": QUIET_LINE,
+            "after": QUIET_LINE.replace('"07:00"', '"08:00"'),
+            "reason": "r",
+        }
+    )
+    _, is_error = asyncio.run(call_tool(build_server(ctx), proposal, args))
+    assert is_error and run.memory == []
 
 
 def test_una_lectura_que_no_se_puede_marcar_se_deniega(conn, tmp_path):

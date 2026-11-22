@@ -99,7 +99,7 @@ def demo_settings():
 def test_la_demo_ensena_una_propuesta_con_sus_filas_y_la_global_bajo_una_respuesta():
     """La forma que Pedro verá en el móvil (la captura de la 1.11): las etiquetas del formato
     del plan, la fila global sin el borrado y el texto de la respuesta encima."""
-    (kind, proposal), (undo_kind, undo) = demo.demo_messages(demo_settings())
+    (kind, proposal), (undo_kind, undo), *_ = demo.demo_messages(demo_settings())
     assert (kind, undo_kind) == ("plan", "undo")
     view = render(proposal, approval_id=1)
     assert [[b.label for b in row] for row in view.keyboard] == [
@@ -122,8 +122,36 @@ def test_la_demo_ensena_una_propuesta_con_sus_filas_y_la_global_bajo_una_respues
     ],
 )
 def test_los_toques_de_la_demo_solo_marcan_el_resultado(index, option, result):
-    (_, proposal), _ = demo.demo_messages(demo_settings())
+    (_, proposal), *_ = demo.demo_messages(demo_settings())
     assert asyncio.run(demo.demo_plan(proposal.items[index], option, 1)) == result
+
+
+def test_la_demo_ensena_un_cambio_con_guardar_y_un_deshacer():
+    """La captura de la 1.12: el antes y el después con [Guardar] [Cambiar] [No], la idea con
+    [📝 Apuntar], y `/deshacer` con un cambio y un borrado."""
+    *_, (memory_kind, memory), (list_kind, undo_list) = demo.demo_messages(demo_settings())
+    assert (memory_kind, list_kind) == ("memory", "undo_list")
+    view = render(memory, 3)
+    assert view.text.startswith(demo.MEMORY_ANSWER)
+    assert "Antes: quiet_hours: {from: &quot;23:00&quot;" not in view.text  # sin `quote`
+    assert 'Después: quiet_hours: {from: "23:00", to: "08:00"}' in view.text
+    assert [[b.label for b in row] for row in view.keyboard] == [
+        ["1 💾 Guardar", "1 ✏️ Cambiar", "1 ✖️ No"],
+        ["2 📝 Apuntar", "2 ✖️ No"],
+    ]
+    assert [[b.label for b in row] for row in render(undo_list, 4).keyboard] == [
+        ["1 ↩️ Deshacer"],
+        ["2 ↩️ Deshacer"],
+    ]
+
+
+@pytest.mark.parametrize(
+    ("option", "result"),
+    [("save", "💾 guardado"), ("edit", "✏️ dime cómo lo quieres"), ("no", "✖️ descartado")],
+)
+def test_los_toques_de_memoria_de_la_demo_solo_marcan_el_resultado(option, result):
+    *_, (_, memory), _ = demo.demo_messages(demo_settings())
+    assert asyncio.run(demo.demo_memory(memory.items[0], option, 1)) == result
 
 
 def test_con_dev_la_demo_arranca_el_canal_manda_el_plan_y_para_con_sigterm(
@@ -152,11 +180,11 @@ def test_con_dev_la_demo_arranca_el_canal_manda_el_plan_y_para_con_sigterm(
         stopper.join()
         signal.signal(signal.SIGTERM, previous)
     (channel,) = built
-    (kind, message, expires_at), (undo_kind, _, _) = channel.sent
-    assert (kind, undo_kind) == ("plan", "undo")
+    (kind, message, expires_at), *rest = channel.sent
+    assert [kind, *(sent[0] for sent in rest)] == ["plan", "undo", "memory", "undo_list"]
     assert message == demo.demo_messages(demo_settings())[0][1]
     assert channel.stopped
-    assert list(channel.handlers) == ["plan", "undo"]
+    assert list(channel.handlers) == ["plan", "undo", "memory", "undo_list"]
     # `expires_at` viene del reloj del sistema: una hora después de enviar, con holgura.
     assert (
         timedelta(minutes=59) < expires_at - datetime.now(expires_at.tzinfo) <= timedelta(hours=1)

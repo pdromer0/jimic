@@ -80,6 +80,21 @@ class TaskPhoto(BaseModel):
     priority: int
 
 
+class Recreation(BaseModel):
+    """What `/deshacer` gives back of a deleted task (task 1.12): its photo in `deleted_tasks`.
+    The comments do not come back, and the id is new."""
+
+    model_config = ConfigDict(frozen=True)
+
+    content: str = Field(repr=False)
+    description: str = Field(repr=False)
+    due: Due | None
+    duration_minutes: int | None
+    project_id: str = Field(repr=False)
+    labels: tuple[str, ...] = Field(repr=False)
+    priority: int
+
+
 class TaskList(BaseModel):
     """What Todoist says. When `available` is false only the reason is set."""
 
@@ -144,6 +159,10 @@ class TodoistWriter(Protocol):
         """Delete a task for good: Todoist has no bin."""
         ...
 
+    async def recreate(self, task: Recreation) -> TodoistTask:
+        """Create again a deleted task from its photo, with a new id and no comments."""
+        ...
+
 
 class TodoistApi(Protocol):
     """What this module uses of `TodoistAPIAsync`, so a double can stand in for it."""
@@ -168,6 +187,9 @@ class TodoistApi(Protocol):
         due_datetime: datetime | None = None,
         duration: int | None = None,
         duration_unit: Literal["minute", "day"] | None = None,
+        labels: list[str] | None = None,
+        priority: int | None = None,
+        auto_parse_labels: bool | None = None,
     ) -> Task: ...
 
     async def update_task(
@@ -371,6 +393,26 @@ class ApiTodoistWriter:
         )
         return _to_task(raw, self._timezone, has_subtasks=False)
 
+    async def recreate(self, task: Recreation) -> TodoistTask:
+        due_date, due_datetime = (None, None) if task.due is None else _split_due(task.due)
+        minutes = task.duration_minutes
+        raw = await _call(
+            self._api.add_task(
+                task.content,
+                description=task.description or None,
+                project_id=task.project_id,
+                due_date=due_date,
+                due_datetime=due_datetime,
+                duration=minutes,
+                duration_unit="minute" if minutes is not None else None,
+                labels=list(task.labels) or None,
+                priority=task.priority,
+                # The labels come from the photo: an `@word` in the title must not add another.
+                auto_parse_labels=False,
+            )
+        )
+        return _to_task(raw, self._timezone, has_subtasks=False)
+
     async def move(self, task_id: str, due: Due | None) -> None:
         if due is None:
             await self._clear_due(task_id)
@@ -468,6 +510,9 @@ class GuardedWriter:
         self, content: str, project_id: str | None, due: Due, duration_minutes: int | None = None
     ) -> TodoistTask:
         return await self._inner.create(content, self._project_id, due, duration_minutes)
+
+    async def recreate(self, task: Recreation) -> TodoistTask:
+        return await self._inner.recreate(task.model_copy(update={"project_id": self._project_id}))
 
     async def move(self, task_id: str, due: Due | None) -> None:
         await self._check(task_id)

@@ -131,6 +131,8 @@ def build_day_state(
         if not applies_on(intention, now.date()):
             continue
         window = intention.window if isinstance(intention, DailyPlan | DayClose) else None
+        if window is not None and window.start == window.end:
+            window = None  # the whole day (decision 80, pending of task 1.7): no hint
         active.append(
             ActiveIntention(
                 id=intention.id,

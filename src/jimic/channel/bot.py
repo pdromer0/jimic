@@ -108,6 +108,9 @@ class Reply:
     text: str | None = None
     outgoing: Outgoing | None = None
     refresh: tuple[int, ...] = ()
+    more: tuple[Outgoing, ...] = ()
+    """Interactive messages that go after the first one, without a body (the memory proposal
+    after a plan, task 1.12; the pages of `/deshacer`)."""
 
 
 type TextHandler = Callable[[Incoming], Awaitable[str | Reply]]
@@ -358,6 +361,8 @@ class TelegramChannel:
         if result.view is not None:
             await self._edit(query.message.message_id, result.view)
         await self._answer(query.id, self._toast(result.code))
+        for text in result.send:
+            await self._send_chunks(text)
 
     @staticmethod
     def _toast(code: str) -> str | None:
@@ -419,6 +424,8 @@ class TelegramChannel:
             await self._send_outgoing(reply.text, reply.outgoing)
         elif reply.text is not None:
             await self._send_chunks(reply.text)
+        for outgoing in reply.more:
+            await self._send_outgoing(None, outgoing)
 
     async def _send_chunks(self, text: str) -> bool:
         for chunk in reply_chunks(text):

@@ -44,6 +44,7 @@ from jimic.channel.message import (
     Option,
     claim,
 )
+from jimic.channel.taps import Show
 from jimic.memory.database import open_database
 
 NOW = datetime(2026, 11, 21, 19, 0, tzinfo=ZoneInfo("Europe/Madrid"))
@@ -764,6 +765,41 @@ def test_una_respuesta_con_mensaje_sale_en_uno_con_el_texto_como_cuerpo(
     assert keyboard_rows(params)[0] == ["1 Sí", "1 No"]
     (approval,) = conn.execute("SELECT kind, telegram_message_id FROM approvals").fetchall()
     assert approval == ("demo", 10)
+
+
+def test_los_mensajes_de_mas_salen_despues_sin_cuerpo(make_channel, request_double, conn):
+    """`Reply.more` (tarea 1.12): la memoria tras el plan, o las páginas de `/deshacer`."""
+
+    async def on_text(incoming: Incoming) -> Reply:
+        return Reply(
+            "Te propongo",
+            Outgoing("demo", make_message(), EXPIRES),
+            more=(Outgoing("memory", make_message(), EXPIRES),),
+        )
+
+    channel, application = make_channel(on_text=on_text)
+    drive(application, text_update("hola"))
+    first, second = request_double.params("sendMessage")
+    assert first["text"].startswith("Te propongo\n\n<b>Plan de prueba</b>")
+    assert second["text"].startswith("<b>Plan de prueba</b>")
+    kinds = conn.execute("SELECT kind FROM approvals ORDER BY id").fetchall()
+    assert kinds == [("demo",), ("memory",)]
+
+
+def test_un_toque_que_muestra_envia_su_texto_tras_editar(conn, clock, request_double, make_channel):
+    """`Show` (tarea 1.12): el despliegue de `/memoria` o el aviso de una tarea recreada."""
+
+    async def shows(item, option, approval_id):
+        return Show("El texto de <rutina.md>")
+
+    application = build_application(TOKEN, request_double)
+    channel = TelegramChannel(application, CHAT_ID, conn, clock, handlers={"demo": shows})
+    approval_id = send_and_drive(channel, application)
+    request_double.calls.clear()
+    drive(application, callback_update(f"{approval_id}:1:y", message_id=77))
+    assert request_double.methods() == ["editMessageText", "answerCallbackQuery", "sendMessage"]
+    (params,) = request_double.params("sendMessage")
+    assert params["text"] == "El texto de &lt;rutina.md&gt;"
 
 
 def test_si_no_caben_juntos_el_texto_sale_antes_y_la_propuesta_sin_cuerpo(

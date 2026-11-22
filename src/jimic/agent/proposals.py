@@ -2,24 +2,23 @@
 
 `propose_plan` validates here and adds its items to the run (task 1.11): when the run ends, the
 code shows them under the agent's answer with their buttons, or executes one at once (decision
-1.11-b). `propose_change` saves a pending row in `approvals`, without buttons until task 1.12.
-Nothing is executed by the tools. A move or a delete carries the snapshot of the task as the
+1.11-b). `propose_change` validates its arguments here and the change against the file in
+`jimic.memory.changes` (task 1.12); the code shows it with [Guardar]. Nothing is executed by the
+tools. A move or a delete carries the snapshot of the task as the
 code read it (title, due and project), which the rule of H1-2 compares before deleting.
 
 An approval expires at the end of the local day (RF-07). What a proposal says never reaches a
 log: only the kind, the id and the counts.
 """
 
-import json
 import re
-import sqlite3
 from datetime import date, datetime
-from typing import Annotated, Any, Literal, Self, get_args
+from typing import Annotated, Literal, Self, get_args
 from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
-from jimic.clock import Clock, local_day_bounds, to_db
+from jimic.clock import Clock, local_day_bounds
 from jimic.tools.todoist import TodoistTask
 
 MAX_PLAN_ITEMS = 8
@@ -29,7 +28,6 @@ MAX_TEXT = 500
 """Characters of a title or a reason; a memory change may be longer (`MAX_CHANGE_TEXT`)."""
 MAX_CHANGE_TEXT = 2000
 PLAN_KIND = "plan"
-CHANGE_KIND = "memory_change"
 PersonalFile = Literal[
     "rutina.md", "objetivos.md", "preferencias.md", "intenciones.yaml", "limites.yaml"
 ]
@@ -156,36 +154,43 @@ def same_due(a: str | None, b: str | None) -> bool:
     return first == second
 
 
+Fragment = Annotated[str, StringConstraints(min_length=1, max_length=MAX_CHANGE_TEXT)]
+"""Exact text: never stripped, since it is compared with the file as it is."""
+
+
 class MemoryChange(BaseModel):
-    """The arguments of `propose_change`; task 1.12 executes it."""
+    """The arguments of `propose_change` (CU-13): which file, which operation, the exact
+    fragment before and after, and why. `add` takes only `after`, `remove` only `before`."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     file: PersonalFile
     operation: Literal["add", "replace", "remove"]
-    text: Annotated[
-        str, StringConstraints(strip_whitespace=True, min_length=1, max_length=MAX_CHANGE_TEXT)
-    ]
+    before: Annotated[
+        Fragment | None,
+        Field(description="El texto exacto que hay ahora en el fichero (replace y remove)"),
+    ] = None
+    after: Annotated[
+        Fragment | None, Field(description="El texto nuevo, exacto (add y replace)")
+    ] = None
     reason: Text
+
+    @model_validator(mode="after")
+    def _fits_operation(self) -> Self:
+        needs_before = self.operation in ("replace", "remove")
+        needs_after = self.operation in ("add", "replace")
+        if needs_before != (self.before is not None) or needs_after != (self.after is not None):
+            raise ValueError(
+                "add lleva solo after, replace lleva before y after, remove solo before"
+            )
+        for fragment in (self.before, self.after):
+            if fragment is not None and not fragment.strip():
+                raise ValueError("before y after no pueden ser solo espacios")
+        if self.operation == "replace" and self.before == self.after:
+            raise ValueError("before y after son iguales: no cambia nada")
+        return self
 
 
 def expires_at(clock: Clock, timezone: ZoneInfo) -> datetime:
     """The end of the local day of now (RF-07)."""
     return local_day_bounds(clock.now().astimezone(timezone).date(), timezone)[1]
-
-
-def save_proposal(
-    conn: sqlite3.Connection, clock: Clock, timezone: ZoneInfo, kind: str, payload: dict[str, Any]
-) -> int:
-    """Save a pending approval of `kind` with `payload` and return its id."""
-    cursor = conn.execute(
-        "INSERT INTO approvals (created_at, expires_at, kind, payload) VALUES (?, ?, ?, ?)",
-        (
-            to_db(clock.now()),
-            to_db(expires_at(clock, timezone)),
-            kind,
-            json.dumps(payload, ensure_ascii=False),
-        ),
-    )
-    assert cursor.lastrowid is not None
-    return cursor.lastrowid

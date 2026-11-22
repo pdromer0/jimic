@@ -114,7 +114,7 @@ def test_el_modelo_y_los_topes(conn, tmp_path):
     assert opts.max_budget_usd == 0.5  # max_session_usd
     cmd = command(opts)
     assert cmd[cmd.index("--max-budget-usd") + 1] == "0.5"
-    assert opts.system_prompt == prompt_text()
+    assert opts.system_prompt == {"type": "custom", "prompt": prompt_text(), "snapshot": False}
 
 
 def test_el_env_lleva_la_clave_y_la_carpeta_propia(conn, tmp_path):

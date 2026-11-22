@@ -29,6 +29,8 @@ from jimic.heartbeat.limits import HANDOVER_TASK, SEPARATOR, Verdict, WaitingNot
 from jimic.heartbeat.sources import Sources
 from jimic.heartbeat.state import DayState
 from jimic.memory import system_notices, usage
+from jimic.memory.changes import FILE_OF_STEM, stem
+from jimic.memory.live import LiveConfig
 from jimic.memory.notices import record_handover
 from jimic.memory.schemas import Intentions, Limits
 
@@ -44,6 +46,20 @@ API_REJECTED_TEXT = (
     "⚠️ La API de Anthropic rechaza las peticiones ({code}): revisa CLAVE_ANTHROPIC,"
     f" MODELO_LATIDO y MODELO_AGENTE en el .env. {MEANWHILE}"
 )
+
+
+CONFIG_INVALID_TEXT = (
+    "⚠️ {files} no vale y sigo con su última versión buena. Para ver qué le pasa: jimic config check"
+)
+MEMORY_CLIPPED_TEXT = (
+    "⚠️ {files} es muy largo y solo le paso a JimiC el principio: acórtalo a mano para que lo"
+    " vea entero."
+)
+
+
+def _files(detail: str) -> str:
+    """The system notices keep the stem of a name (no dots there): back to the names."""
+    return " y ".join(FILE_OF_STEM.get(part, part) for part in detail.split(",") if part)
 
 
 class Sender(Protocol):
@@ -107,11 +123,13 @@ class Heartbeat:
         decider: Decider,
         sender: Sender,
         on_handover: OnHandover = log_handover,
+        config: LiveConfig | None = None,
     ) -> None:
+        """`config` is the live configuration of the service; without it, `limits` and
+        `intentions` are a fixed one."""
         self._clock = clock
         self._timezone = timezone
-        self._limits = limits
-        self._intentions = intentions
+        self._config = config if config is not None else LiveConfig.fixed(intentions, limits)
         self._sources = sources
         self._conn = conn
         self._decider = decider
@@ -119,6 +137,14 @@ class Heartbeat:
         self._on_handover = on_handover
         self.queue = WaitingNotices()
         self._running = False
+
+    @property
+    def _limits(self) -> Limits:
+        return self._config.limits
+
+    @property
+    def _intentions(self) -> Intentions:
+        return self._config.intentions
 
     def _now(self) -> datetime:
         return self._clock.now().astimezone(self._timezone)
@@ -140,7 +166,19 @@ class Heartbeat:
         finally:
             self._running = False
 
+    def _refresh(self, now: datetime) -> None:
+        """Hand edits of the YAML files reach this heartbeat (task 1.12): one that does not
+        validate leaves the last good version in use, and registers `config_invalid`."""
+        invalid = self._config.refresh()
+        if invalid:
+            detail = ",".join(stem(name) for name in invalid)
+            system_notices.detect(self._conn, "config_invalid", now.date(), now, detail)
+
     async def _beat(self, now: datetime) -> None:
+        try:
+            self._refresh(now)
+        except Exception as error:
+            logger.error("heartbeat config refresh failed (%s)", type(error).__name__)
         result = await run_cycle(
             clock=self._clock,
             timezone=self._timezone,
@@ -252,6 +290,10 @@ class Heartbeat:
             return API_REJECTED_TEXT.format(code=code) if kind == "rejected" else API_DOWN_TEXT
         if notice.kind == "budget":
             return self._budget_text(day)
+        if notice.kind == "config_invalid":
+            return CONFIG_INVALID_TEXT.format(files=_files(notice.detail))
+        if notice.kind == "memory_clipped":
+            return MEMORY_CLIPPED_TEXT.format(files=_files(notice.detail))
         parts = [entry.split(":", 1)[0] for entry in notice.detail.split(",")]
         names = [SOURCE_NAMES.get(part, part) for part in parts]
         lines = [f"⚠️ Ahora mismo no puedo leer {' ni '.join(names)}."]

@@ -474,18 +474,42 @@ prioridad diaria (por ejemplo, «revisar ofertas») entra también desde el H1: 
   a 2 entrenos por semana», «sé más directo»).
 - **Flujo:**
   1. En la conversación, el modelo detecta el cambio y llama a la herramienta
-     `propose_change(target, before, after, reason)`, con destino `objetivos.md`,
-     `preferencias.md`, `rutina.md` o `intenciones.yaml`.
-  2. El **código valida**: en la zona protegida (`limites.yaml`) solo acepta cambios que hacen a
-     JimiC más discreto; si el cambio relaja un límite, lo rechaza y explica que eso se edita a mano
-     (decisión 11); en `intenciones.yaml`, valida el esquema (solo plantillas que existen). Si Pedro pide
-     algo que el código no sabe hacer, JimiC se lo dice y lo apunta en `ideas.md`.
-  3. La **guardia** enseña el antes y el después con [Guardar] [Cambiar] [No].
-  4. [Guardar]: se escribe el fichero y el cambio queda registrado (fecha, antes, después y mensaje
-     de origen).
-  5. El latido siguiente ya usa la configuración nueva.
-- **Regla de origen:** solo cuenta un cambio que nace de un mensaje de Pedro, nunca del contenido
-  de una herramienta (correo, web).
+     `propose_change(file, operation, before, after, reason)`, con destino `objetivos.md`,
+     `preferencias.md`, `rutina.md`, `intenciones.yaml` o `limites.yaml`. El modelo ve el texto
+     actual de los cinco en su prompt (decisión 104). `add` añade `after` al final del fichero;
+     `replace` cambia `before`, que tiene que aparecer una sola vez, por `after`; `remove`
+     («olvida que…») quita `before`.
+  2. El **código valida** el fichero resultante, sin escribirlo: en `intenciones.yaml` y
+     `limites.yaml`, el esquema (solo plantillas que existen); en los Markdown, su estructura (7.2);
+     en la zona protegida (`limites.yaml`), además, la regla asimétrica (decisión 11, tabla de
+     abajo): si el cambio relaja un límite, lo rechaza y explica que eso se edita a mano. Si Pedro
+     pide algo que el código no sabe hacer, JimiC se lo dice y propone apuntarlo en `ideas.md`
+     (`log_idea`, con [📝 Apuntar]).
+  3. El código enseña el fichero y el antes y el después exactos, escapados y sin recortar (lo que
+     no cabe en un mensaje de Telegram no se ofrece), con [Guardar] [Cambiar] [No]. [Cambiar]
+     cierra la propuesta y le pide a Pedro que escriba cómo lo quiere.
+  4. [Guardar]: el código vuelve a validar contra el fichero **actual** (si el «antes» ya no está,
+     «ha cambiado: no lo guardo», y la aprobación queda rechazada), escribe solo ese fragmento de
+     forma atómica y registra el cambio (fecha, operación, antes, después, mensaje de origen y la
+     huella del fichero).
+  5. El servicio recarga los YAML al momento; una edición a mano llega al latido siguiente, y un
+     fichero que ya no vale deja la última versión buena y un aviso al día.
+- **Regla de origen** (decisiones 102 y 103): solo cuenta un cambio que nace del mensaje actual de
+  Pedro, en una ejecución que no leyó el calendario ni las tareas; el código adjunta ese mensaje
+  como origen. Fuera de una conversación no hay cambios de memoria.
+
+| Campo de `limites.yaml` | Más discreto (lo único que se acepta conversando) |
+| --- | --- |
+| `max_messages_per_day`, `max_insist_per_task`, `max_deletions_per_day` | Baja |
+| `quiet_hours` | La ventana nueva contiene a la vieja (`from == to`, el día entero) |
+| `silent_during_events` | Solo de `false` a `true` |
+| `group_window`, `quiet_while_chatting` | Sube |
+| `budget.*` (los cuatro) | Baja |
+| `tool_levels` | Solo de `free` a `blocked` (la que falta cuenta como `blocked`) |
+| `sensitive_categories` | Se rechaza cualquier cambio (llega en el H4) |
+
+Un cambio que solo toca comentarios o formato de `limites.yaml`, sin mover ningún valor, también
+se rechaza.
 - **Modelo:** Sonnet.
 - **Autonomía:** propone y espera.
 - **Aceptación:** un intento de relajar la zona protegida se rechaza con explicación, y uno que la
@@ -526,14 +550,20 @@ prioridad diaria (por ejemplo, «revisar ofertas») entra también desde el H1: 
 - **Actor:** Pedro.
 - **Disparador:** `/memoria`, `/deshacer` o una pregunta como «¿qué sabes de mí?».
 - **Flujo:**
-  1. `/memoria`: resumen corto por secciones (rutina, metas, preferencias, intenciones y últimos
-     cambios), con un botón para desplegar cada una.
+  1. `/memoria`: resumen corto por secciones (rutina, metas, preferencias e intenciones, de Haiku;
+     límites y últimos cambios, del código), con [📖 Ver] en cada una, que envía el texto del
+     fichero.
   2. `/deshacer`: los **últimos 10 cambios**, cada uno con su botón [Deshacer]; incluye los
-     borrados de tareas de los últimos 30 días, que se recrean con un ID nuevo (decisión 56). Lo
-     anterior se edita a mano o se pide conversando.
-  3. Al deshacer, se restaura el «antes» y la reversión queda registrada como un cambio más.
-- **«Olvida que…»** no es deshacer: es un cambio de CU-13 con el «después» vacío, y pasa por
-  [Guardar] como cualquier otro.
+     borrados de tareas de los últimos 30 días, uno por tarea, que se recrean con un ID nuevo y
+     sin comentarios, y se avisa (decisión 56). Una tarea que sigue en Todoist no se recrea. En
+     mensajes de 8 como mucho. Lo anterior se edita a mano o se pide conversando.
+  3. Al deshacer, se restaura el «antes» exacto solo si el fichero sigue entero como lo dejó el
+     cambio (si no, «ha cambiado: edítalo a mano»; así, los cambios de un fichero se deshacen del
+     último al primero), y la reversión queda registrada como un cambio más. Deshacer un cambio de
+     `limites.yaml` está permitido aunque relaje: devuelve lo que Pedro tenía a mano.
+- **«Olvida que…»** no es deshacer: es un `remove` de CU-13, y pasa por [Guardar] como cualquier
+  otro.
+- Los dos comandos los atiende el código, sin el agente.
 - **Datos:** los ficheros de memoria y el registro de cambios.
 - **Modelo:** Haiku para el resumen; el deshacer es código, sin modelo.
 - **Autonomía:** a petición de Pedro.
@@ -619,10 +649,11 @@ Los nodos morados son los únicos que razonan; todo lo demás es código determi
   Como el agente solo propone y el código ejecuta tras el botón o el mensaje de Pedro (decisión
   55), la regla se aplica al pie de la letra sin impedir el plan del día. Hay dos marcas:
   - **La de la ejecución** (un mensaje de Pedro) decide si lo que pidió se hace al momento
-    (decisión 97).
-  - **La de la sesión del día** es para lo que queda: la regla de origen de la memoria (1.12) y
-    `log_idea`, que se deniega en cuanto la sesión del día ha leído el calendario o las tareas
-    (decisión 100).
+    (decisión 97) y si puede nacer un cambio de memoria o una idea: la regla de origen solo los
+    acepta en una ejecución que no leyó el calendario ni las tareas, ni antes ni después de
+    proponerlos (decisiones 102 y 103). La pone el *hook* antes de dejar pasar la lectura.
+  - **La de la sesión del día** queda como dato informativo en cada propuesta de memoria
+    (`after_external_content`). Ya no deniega `log_idea` (la decisión 103 revisa la 100).
 
 ### 6.3 El ciclo de un latido
 
@@ -705,14 +736,16 @@ Herramientas del agente (decisión 55):
 | `read_tasks` | Tareas de hoy, vencidas y por proyecto | Libre; contamina (los títulos pueden venir de terceros) | API de Todoist |
 | `read_apex_today` | Entreno previsto y hecho; objetivos de APEX; resumen de los biométricos (decisión 73) | Libre | El lector de APEX (decisiones 17, 18 y 29) |
 | `propose_plan` | Propone crear, mover y borrar tareas, cada una con su motivo | Libre (solo propone) | — |
-| `propose_change` | Propone un cambio de memoria; lo escribe el código tras [Guardar] | Libre (solo propone) | Ficheros de memoria |
-| `log_idea` | Anota en `ideas.md` | Libre; se deniega si la sesión del día ya leyó contenido externo (decisión 100) | Fichero propio |
+| `propose_change` | Propone un cambio de memoria (`file`, `operation`, `before`, `after`, `reason`); el código lo valida y lo escribe tras [Guardar] | Libre (solo propone); solo en una ejecución limpia (decisión 102) | Ficheros de memoria |
+| `log_idea` | Propone apuntar una idea en `ideas.md`; la escribe el código tras [📝 Apuntar] | Libre (solo propone); solo en una ejecución limpia (decisión 103) | Fichero propio |
 
 Funciones del código, que el agente no puede llamar: crear, mover, cerrar y borrar tareas en
 Todoist (con las reglas de la decisión 56) y escribir la memoria. Las ejecuta la aprobación
 asíncrona tras el botón o el mensaje de Pedro, o un botón de acción predefinida.
 
-Rutina, objetivos y preferencias no son herramientas: van siempre en el contexto.
+Rutina, objetivos y preferencias no son herramientas: van siempre en el contexto. Desde la 1.12
+van los cinco ficheros personales, con su texto actual, al final del *system prompt* del agente
+(decisión 104).
 
 **Por qué herramientas propias y no el MCP oficial de Todoist** (decisión 16): el latido lee
 Todoist decenas de veces al día y decide sin un modelo que interprete, así que necesita el contrato
@@ -823,9 +856,12 @@ en `~/.config/jimic/`, puede leerlos y editarlos, pero no publicar nada ni leer 
 | `rutina.md` | El modelo | Markdown con secciones fijas: horario base, comidas, jornada, fines de semana | Pedro, a mano o conversando |
 | `objetivos.md` | El modelo y el código (para medir) | Markdown: una sección por área con su meta y prioridad; una línea por objetivo `[medible]`, `[declarado]` o `[enlazado]` (1.5) | Pedro, a mano o conversando |
 | `preferencias.md` | El modelo | Lista de frases cortas y la tabla de iconos de las tareas habituales (decisión 59) | Pedro, a mano o conversando |
-| `intenciones.yaml` | El código | YAML con esquema; incluye la sección `habits`, la lista de hábitos (decisión 66) | Pedro, a mano o conversando, con validación |
-| `limites.yaml` | El código | YAML con esquema; **zona protegida** | Pedro a mano; conversando, solo más discreto (decisión 11) |
-| `ideas.md` | Pedro | Lista con fecha | JimiC |
+| `intenciones.yaml` | El código, y el modelo en su prompt (decisión 104) | YAML con esquema; incluye la sección `habits`, la lista de hábitos (decisión 66) | Pedro, a mano o conversando, con validación |
+| `limites.yaml` | El código, y el modelo en su prompt (decisión 104) | YAML con esquema; **zona protegida** | Pedro a mano; conversando, solo más discreto (decisión 11) |
+| `ideas.md` | Pedro | Lista con fecha | JimiC, con el [📝 Apuntar] de Pedro (decisión 103) |
+
+Los cinco primeros van, con su texto actual, al final del *system prompt* del agente en cada
+ejecución, con un tope de 6000 caracteres por fichero; `ideas.md` no va (decisión 104).
 
 **Claves en inglés, comentarios y textos en español** (decisión 20). `jimic config init` genera los
 dos YAML con un comentario en español junto a cada clave y nunca sobrescribe un fichero; los tres
@@ -926,13 +962,13 @@ del agente (decisión 55).
 | `decisions` | Cada decisión del latido: hablar sí o no, intención, motivo | Auditoría, «¿por qué me escribes esto?», evaluaciones | 90 días |
 | `notices` | Cada aviso y su desenlace: respondido, ignorado, botón | No repetir, escalar, % de ignorados | 1 año |
 | `approvals` | Acciones pendientes de botón, con caducidad | Aprobación asíncrona | 30 días |
-| `changes` | Cada cambio de memoria: fichero, antes, después, mensaje de origen, revertido | `/deshacer`, `/memoria`, auditoría | Siempre |
+| `changes` | Cada cambio de memoria: fichero, operación, el parche exacto (posición, antes y después), la huella `sha256` del fichero antes y después, mensaje de origen, aprobación, revertido y, en una reversión, el cambio que revierte (tarea 1.12) | `/deshacer`, `/memoria`, auditoría | Siempre |
 | `day_plans` | El plan confirmado de cada día | Cierre del día; objetivo «plan antes de las 9:00» | 1 año |
 | `day_ratings` | La valoración del 1 al 5 | Revisión semanal | 1 año |
 | `plan_items` | Cada tarea del plan confirmado: hecha, «la haré», pendiente o movida, y si se marcó antes de su hora (decisiones 62 y 68) | Cierre del día; «plan cumplido», calculado a la mañana siguiente | 1 año |
-| `deleted_tasks` | La foto de cada tarea borrada (contenido, fecha, proyecto, etiquetas, motivo, aprobación) | `/deshacer` de un borrado (decisión 56) | 30 días |
+| `deleted_tasks` | La foto de cada tarea borrada (contenido, fecha, proyecto, etiquetas, motivo, aprobación) y, si `/deshacer` la recreó, cuándo y con qué ID nuevo (tarea 1.12) | `/deshacer` de un borrado (decisión 56) | 30 días |
 | `model_usage` | Cada llamada al modelo: día, modelo, tokens y dólares (tarea 1.8) | El contador de gasto (10.3) | 1 año |
-| `system_notices` | Cada aviso del sistema: tipo, periodo, un código y los momentos (decisión 86) | Uno por tipo y día (el del presupuesto, al mes) | 1 año |
+| `system_notices` | Cada aviso del sistema: tipo, periodo, un código y los momentos (decisión 86). Desde la 1.12, también un YAML personal que no vale (`config_invalid`) y un fichero recortado en el prompt del agente (`memory_clipped`) | Uno por tipo y día (el del presupuesto, al mes) | 1 año |
 | `handovers` | Cada plan o cierre que el latido pasa al agente: intención y momento (decisión 94) | Que cuente como atendido hoy | 90 días |
 | `conversations` | La conversación de cada día: el identificador de la sesión del SDK, la hora del último mensaje de Pedro y si la sesión leyó contenido externo (decisiones 89 a 91) | Reanudar la sesión del día; esperar mientras Pedro conversa; la regla de origen | 7 días |
 
@@ -1046,6 +1082,11 @@ Y, de la tarea 1.10, cuatro más con su test (la orden que construye el SDK inst
 | `allowed_tools` con las seis y `permission_mode="dontAsk"` | Que algo no aprobado se ejecute: se deniega sin preguntar. Desde la 1.11 lleva solo las `free` de `tool_levels`, como segunda capa bajo el hook |
 | `strict_mcp_config=True` | Cargar otros servidores MCP de la máquina |
 | `stderr` con un manejador que descarta, `max_turns=12` y `max_budget_usd=max_session_usd` en cada ejecución | Que la salida de error del motor, que puede llevar contenido, acabe en la del servicio; un bucle o un gasto sin tope |
+
+Y, de la tarea 1.12, el *system prompt* como `{"type": "custom", "prompt": …, "snapshot": False}`:
+las instrucciones fijas y, tras ellas, los cinco ficheros personales (decisión 104), reconstruido
+en cada petición. Con un texto fijo, la sesión guarda el prompt de su primera petición y lo
+reenvía al reanudar (SDK 0.2.187).
 
 ### 9.3 Despliegue
 
@@ -1488,8 +1529,12 @@ cuando haya casos reales de sobra y si Pedro lo considera necesario; exige evalu
 | 97 | Lo que Pedro pide en un mensaje se ejecuta al momento, con [Deshacer], solo si se cumplen cuatro condiciones (1.11-b): el agente lo marcó con `requested_by_pedro`; la ejecución no llamó a `read_calendar` ni a `read_tasks`; es **un** elemento, crear o mover; y un mover no es de una recurrente. Si falta una, sale con botones; borrar nunca. [Deshacer] devuelve la fecha anterior (también «sin fecha», con `no date`) o borra lo creado, y antes comprueba que la tarea sigue como la dejó JimiC | La marca de la ejecución no ve lo leído antes en la sesión del día (1.10-a): lo acota el tope de una acción visible, que se deshace con un toque y nunca es un borrado. Decisión de Pedro del 22-nov-2026; la comprobación del [Deshacer], de la revisión del plan, y la quinta condición que el plan proponía la quitó el contrato | [0005](decisiones/0005-la-guardia.md) |
 | 98 | Todo lo que ofrece una aprobación, también [Deshacer], caduca al acabar el día local (1.11-c). El barrido de las 00:01, y al arrancar el servicio, edita los mensajes caducados (lo pendiente dice «caducado», o «Deshacer caducado», y lo que estaba en curso, «sin confirmar: mira Todoist») y les quita los botones. Un toque repetido nunca ejecuta dos veces: el elemento se reclama («en curso») antes del efecto | RF-07, y los pendientes de la 1.4. Decisión de Pedro del 22-nov-2026 | [0005](decisiones/0005-la-guardia.md) |
 | 99 | El «sí» escrito de un borrado (1.11-d): `si`, `vale`, `borrala` u `ok` como mensaje completo, en minúsculas y sin acentos. Solo vale si el último mensaje que envió JimiC (de cualquier clase, en memoria) es el de ese borrado, o si Pedro lo cita con «Responder»; y si ese mensaje tiene un único borrado pendiente, sin caducar. No pasa por el agente | Un «vale» a otra pregunta («¿vas al gimnasio?») no puede borrar una tarea. Decisión de Pedro en la revisión del plan de la 1.11 (22-nov-2026) | [0005](decisiones/0005-la-guardia.md) |
-| 100 | `log_idea` se deniega en cuanto la sesión del día ha leído el calendario o las tareas (la contaminación al pie de la letra, 6.2): `ideas.md` es memoria y lo leído sigue en el contexto de la sesión | Es la única herramienta del agente que escribe. Decisión de Pedro en la revisión del plan de la 1.11 (22-nov-2026) | [0005](decisiones/0005-la-guardia.md) |
+| 100 | ~~`log_idea` se deniega en cuanto la sesión del día ha leído el calendario o las tareas (la contaminación al pie de la letra, 6.2)~~ **Revisada por la 103.** `ideas.md` es memoria y lo leído sigue en el contexto de la sesión | Era la única herramienta del agente que escribía. Decisión de Pedro en la revisión del plan de la 1.11 (22-nov-2026) | [0005](decisiones/0005-la-guardia.md) |
 | 101 | Un aviso del latido que Telegram rechaza se descarta con su código en `decisions` (pendiente de la 1.8): no cuenta en el cupo ni en el tope por intención, así que el latido siguiente puede volver a elegirlo | Un reintento a ciegas saldría viejo y tendría que volver a pasar los límites. Del plan de la 1.11, aceptado por Pedro | — |
+| 102 | **Un cambio de memoria solo nace del mensaje actual de Pedro, en una ejecución limpia, y se escribe solo con su [Guardar]** (1.12-a). `propose_change` se rechaza si la ejecución ha leído el calendario o las tareas: lo marca el *hook* antes de dejar pasar la lectura. Si la ejecución lee después de proponer, el código descarta lo propuesto y lo dice. El código adjunta como origen el texto del mensaje (el agente no lo escribe), y fuera de una conversación no hay cambios. El código valida el fichero resultante (esquema, estructura y regla asimétrica, tabla de CU-13) y lo vuelve a validar contra el fichero actual al tocar [Guardar]. Se escribe solo el fragmento, así que el resto del fichero, comentarios incluidos, no cambia ni un byte. Deshacer exige el fichero entero como lo dejó el cambio | Solo aprende de Pedro (decisión 8) sin depender de que el modelo no obedezca una inyección: lo que nace de contenido externo nunca llega a un botón en la misma ejecución, y lo que llega enseña el antes, el después y el fichero. Decisión de Pedro del 22-nov-2026, con los ajustes de la revisión del plan | [0005](decisiones/0005-la-guardia.md) |
+| 103 | **`log_idea` sigue la regla de la 102 y pasa a ser propuesta, con [📝 Apuntar]** (1.12-b, revisa la 100). El *hook* ya no lo deniega por la marca del día. `ideas.md` solo se escribe al tocar el botón (lo crea, 0600, si no existe), y la línea queda en `changes`: se puede deshacer | Una sola regla para todo lo que cambia la memoria, y `log_idea` vuelve a servir tras leer el calendario por la mañana. Decisión de Pedro del 22-nov-2026 | [0005](decisiones/0005-la-guardia.md) |
+| 104 | **El texto actual de los cinco ficheros personales va al final del *system prompt* del agente** (1.12-c), después de las instrucciones fijas y reconstruido en cada petición (`snapshot=False`), también al reanudar la sesión. Son datos de Pedro, no contenido externo: no contaminan. Tope de 6000 caracteres por fichero; el que lo pasa se recorta, con una nota al agente y el aviso del sistema `memory_clipped`, uno al día. `ideas.md` no va | Sin el texto, el agente no puede citar un «antes» exacto. La memoria semántica la lee el modelo (1.6). Con un texto fijo, la sesión reenvía el prompt de su primera petición y el agente vería los ficheros de la mañana tras un [Guardar]. Decisión de Pedro del 22-nov-2026 (la caché, medida en el contrato) | — |
+| 105 | Los YAML personales se recargan sin reiniciar: tras un [Guardar] o un [Deshacer], al momento; una edición a mano, al empezar el latido siguiente (cambia la fecha, el tamaño o el inodo). Uno que no vale deja la última versión buena y manda `config_invalid`, uno al día mientras siga así, con `jimic config check`. Además, una ventana de intención con `from == to` es el día entero, como la decisión 80, y para el modelo es lo mismo que no tener pista (pendiente de la 1.7) | Que lo guardado se use enseguida, sin que un fichero roto deje a JimiC sin límites. Tarea 1.12 | — |
 
 ### Correspondencia con las decisiones candidatas de la referencia
 
