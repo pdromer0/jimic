@@ -1,0 +1,342 @@
+"""La conversación con el agente: sesión del día, un turno a la vez, tope, gasto y fallos.
+
+El SDK es un doble (`FakeAgent`) con tope que devuelve mensajes de verdad del SDK; no se arranca
+ningún subproceso (la guarda `no_real_agent` lo impediría). Todo es inventado.
+"""
+
+import asyncio
+import logging
+from datetime import UTC, date, datetime
+from decimal import Decimal
+
+import pytest
+from agent_data import (
+    AGENT_ANSWER,
+    PEDRO_MESSAGE,
+    FakeAgent,
+    agent_sources,
+    result_message,
+)
+from claude_agent_sdk import CLINotFoundError, ProcessError, ResultError
+from conftest import VALID_ENV, FixedClock
+from heartbeat_data import MADRID, limits, madrid
+
+from jimic.agent.conversation import (
+    API_DOWN_TEXT,
+    CAPPED_TEXT,
+    DAILY_CAP_TEXT,
+    FAILED_TEXT,
+    Conversation,
+)
+from jimic.config import Settings
+from jimic.memory import conversations
+from jimic.memory.database import open_database
+from jimic.memory.usage import TokenUsage, record_cost
+from jimic.paths import Paths
+
+
+@pytest.fixture
+def conn(tmp_path):
+    connection = open_database(tmp_path / "jimic.db")
+    yield connection
+    connection.close()
+
+
+class World:
+    """A conversation with its doubles, and a clock the test moves."""
+
+    def __init__(self, conn, tmp_path, agent: FakeAgent | None = None, **limit_changes):
+        self.conn = conn
+        self.clock = FixedClock(madrid("2030-01-07T10:15"))
+        self.agent = agent if agent is not None else FakeAgent()
+        self.paths = Paths("prod", tmp_path / "config", tmp_path / "data")
+        self.paths.config_dir.mkdir()
+        self.paths.data_dir.mkdir()
+        self.conversation = Conversation(
+            settings=Settings.model_validate(VALID_ENV),
+            paths=self.paths,
+            limits=limits(**limit_changes),
+            clock=self.clock,
+            conn=conn,
+            sources=agent_sources(),
+            run_agent=self.agent,
+        )
+
+    def say(self, text: str = "Hola", at: str | datetime | None = None) -> str:
+        if at is not None:
+            self.clock.moment = at if isinstance(at, datetime) else madrid(at)
+        return asyncio.run(self.conversation.reply(text))
+
+    def usage_rows(self) -> list[tuple]:
+        return self.conn.execute(
+            "SELECT day, model, input_tokens, output_tokens, cache_read_tokens,"
+            " cache_write_tokens, usd FROM model_usage ORDER BY id"
+        ).fetchall()
+
+    def notices(self) -> list[tuple]:
+        return self.conn.execute("SELECT kind, detail FROM system_notices ORDER BY id").fetchall()
+
+
+def utc(moment: str) -> datetime:
+    return datetime.fromisoformat(moment).replace(tzinfo=UTC)
+
+
+# --- La respuesta y la sesión del día (1.10-a) -------------------------------------------------
+
+
+def test_un_mensaje_llega_al_agente_con_la_hora_y_vuelve_su_respuesta(conn, tmp_path):
+    world = World(conn, tmp_path)
+    assert world.say("¿Qué tengo hoy?") == AGENT_ANSWER
+    ((prompt, options),) = world.agent.runs
+    assert prompt == "[lun 07/01 10:15] ¿Qué tengo hoy?"
+    assert options.resume is None
+    assert conversations.session_of(conn, date(2030, 1, 7)) == "sesion-1"
+
+
+def test_el_segundo_mensaje_del_dia_reanuda_la_sesion(conn, tmp_path):
+    world = World(conn, tmp_path)
+    world.say(at="2030-01-07T10:15")
+    world.say(at="2030-01-07T22:59")
+    assert world.agent.resumed == [None, "sesion-1"]
+
+
+@pytest.mark.parametrize(
+    ("first", "second", "resumes"),
+    [
+        # 23:59 y 00:01 en invierno: otro día.
+        (utc("2030-01-07T22:59"), utc("2030-01-07T23:01"), False),
+        # 31-mar: 23:00 CEST y 00:30 CEST del 1-abr (22:30Z). Un desfase fijo +1 lo pondría el 31.
+        (utc("2030-03-31T21:00"), utc("2030-03-31T22:30"), False),
+        # 27-oct: 09:00 CET y 23:30 CET (22:30Z), el mismo día. Un desfase fijo +2 lo pasaría al 28.
+        (utc("2030-10-27T08:00"), utc("2030-10-27T22:30"), True),
+        # 31-mar: 01:30 CET y 03:30 CEST, el mismo día.
+        (utc("2030-03-31T00:30"), utc("2030-03-31T01:30"), True),
+    ],
+)
+def test_la_sesion_es_la_del_dia_local_tambien_con_el_cambio_de_hora(
+    conn, tmp_path, first, second, resumes
+):
+    """Pilla una sesión que no cambia de día (versión incorrecta 4) o que cuenta el día con un
+    desfase fijo o en UTC."""
+    world = World(conn, tmp_path)
+    world.say(at=first.astimezone(MADRID))
+    world.say(at=second.astimezone(MADRID))
+    assert world.agent.resumed == [None, "sesion-1" if resumes else None]
+
+
+def test_si_el_motor_no_puede_reanudar_la_sesion_se_olvida(conn, tmp_path):
+    """Un fichero de sesión perdido no puede dejar el resto del día sin conversación."""
+    world = World(
+        conn,
+        tmp_path,
+        FakeAgent([result_message()], ProcessError("x", 1), [result_message(session="sesion-2")]),
+    )
+    world.say(at="2030-01-07T10:15")
+    assert world.say(at="2030-01-07T10:20") == FAILED_TEXT
+    world.say(at="2030-01-07T10:25")
+    assert world.agent.resumed == [None, "sesion-1", None]
+    assert conversations.session_of(conn, date(2030, 1, 7)) == "sesion-2"
+
+
+def test_la_carpeta_del_agente_es_privada(conn, tmp_path):
+    world = World(conn, tmp_path)
+    world.say()
+    assert (world.paths.agent_dir.stat().st_mode & 0o777) == 0o700
+    assert world.agent.runs[0][1].cwd == world.paths.agent_dir
+
+
+# --- Un turno a la vez -------------------------------------------------------------------------
+
+
+def test_un_turno_a_la_vez_y_en_orden_y_la_hora_se_anota_al_llegar(conn, tmp_path):
+    """Pedro escribe dos veces mientras el agente piensa: el segundo espera su turno, sale
+    después del primero y su hora ya está anotada mientras espera (1.10-c)."""
+    world = World(conn, tmp_path)
+    world.agent.gate = asyncio.Event()
+
+    async def scenario():
+        first = asyncio.create_task(world.conversation.reply("primero"))
+        while not world.agent.runs:
+            await asyncio.sleep(0)
+        world.clock.moment = madrid("2030-01-07T10:16")
+        second = asyncio.create_task(world.conversation.reply("segundo"))
+        for _ in range(20):
+            await asyncio.sleep(0)
+        assert len(world.agent.runs) == 1
+        assert conversations.last_message_at(conn) == madrid("2030-01-07T10:16")
+        assert world.agent.gate is not None
+        world.agent.gate.set()
+        return await first, await second
+
+    assert asyncio.run(scenario()) == (AGENT_ANSWER, AGENT_ANSWER)
+    assert world.agent.most_active == 1
+    assert [prompt.split("] ")[1] for prompt, _ in world.agent.runs] == ["primero", "segundo"]
+
+
+# --- El gasto -----------------------------------------------------------------------------------
+
+
+def test_cada_ejecucion_suma_el_coste_del_sdk_con_el_modelo_del_agente(conn, tmp_path):
+    world = World(conn, tmp_path)
+    world.say()
+    assert world.usage_rows() == [
+        ("2030-01-07", VALID_ENV["MODELO_AGENTE"], 4, 39, 3588, 3812, 0.0123)
+    ]
+
+
+def test_sin_coste_del_sdk_cuenta_el_tope_de_la_sesion(conn, tmp_path):
+    world = World(conn, tmp_path, FakeAgent([result_message(cost=None)]))
+    world.say()
+    assert world.usage_rows()[0][-1] == 0.5
+
+
+def test_una_ejecucion_cortada_por_su_tope_tambien_cuenta(conn, tmp_path):
+    world = World(
+        conn,
+        tmp_path,
+        FakeAgent([result_message(None, subtype="error_max_turns", is_error=True, cost=0.2)]),
+    )
+    assert world.say() == CAPPED_TEXT
+    assert world.usage_rows()[0][-1] == 0.2
+
+
+def spend(conn, day: str, usd: str) -> None:
+    record_cost(conn, date.fromisoformat(day), "modelo-inventado", TokenUsage(0, 0), Decimal(usd))
+
+
+@pytest.mark.parametrize(("spent", "calls"), [("2.999", 1), ("3.0", 0), ("3.0001", 0)])
+def test_con_el_tope_diario_alcanzado_no_se_llama_al_sdk(conn, tmp_path, spent, calls):
+    """`daily_cap_usd` de 3 $: con 2,999 se llama; con 3 o más, ni una llamada."""
+    world = World(conn, tmp_path)
+    spend(conn, "2030-01-07", spent)
+    reply = world.say()
+    assert len(world.agent.runs) == calls
+    assert (reply == DAILY_CAP_TEXT) is (calls == 0)
+
+
+def test_el_tope_diario_es_de_hoy_y_mañana_se_sigue(conn, tmp_path):
+    world = World(conn, tmp_path)
+    spend(conn, "2030-01-07", "3.0")
+    assert world.say(at="2030-01-07T20:00") == DAILY_CAP_TEXT
+    assert world.say(at="2030-01-08T08:00") == AGENT_ANSWER
+
+
+def test_con_tope_diario_cero_nunca_se_llama(conn, tmp_path):
+    world = World(
+        conn,
+        tmp_path,
+        budget={
+            "monthly_target_usd": 30.0,
+            "warn_at": 0.8,
+            "daily_cap_usd": 0.0,
+            "max_session_usd": 0.5,
+        },
+    )
+    assert world.say() == DAILY_CAP_TEXT
+    assert world.agent.runs == []
+
+
+def test_con_el_tope_alcanzado_se_anota_el_aviso_del_presupuesto_si_toca(conn, tmp_path):
+    world = World(conn, tmp_path)
+    spend(conn, "2030-01-03", "21.0")
+    spend(conn, "2030-01-07", "3.0")
+    world.say()
+    assert world.notices() == [("budget", "")]
+
+
+def test_tras_una_ejecucion_se_mira_el_presupuesto_del_mes(conn, tmp_path):
+    world = World(conn, tmp_path)
+    spend(conn, "2030-01-03", "23.99")
+    world.say()
+    assert world.notices() == [("budget", "")]
+
+
+# --- Los fallos ---------------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("script", "text", "code"),
+    [
+        (
+            [result_message("API Error: 529", is_error=True, api_status=529)],
+            API_DOWN_TEXT,
+            "agent:api:529",
+        ),
+        (
+            [result_message(None, subtype="error_max_turns", is_error=True)],
+            CAPPED_TEXT,
+            "agent:max_turns",
+        ),
+        (
+            [result_message(None, subtype="error_max_budget_usd", is_error=True)],
+            CAPPED_TEXT,
+            "agent:max_budget",
+        ),
+        ([result_message(None)], FAILED_TEXT, "agent:no_result"),
+        ([], FAILED_TEXT, "agent:no_result"),
+        (
+            ProcessError(PEDRO_MESSAGE, 1, PEDRO_MESSAGE),
+            FAILED_TEXT,
+            "agent:process:ProcessError",
+        ),
+        (CLINotFoundError(), FAILED_TEXT, "agent:process:CLINotFoundError"),
+        (
+            ResultError(
+                PEDRO_MESSAGE,
+                {"subtype": "success", "api_error_status": 500, "result": AGENT_ANSWER},
+            ),
+            API_DOWN_TEXT,
+            "agent:api:500",
+        ),
+        (RuntimeError(PEDRO_MESSAGE), FAILED_TEXT, "agent turn failed (RuntimeError)"),
+    ],
+)
+def test_cada_fallo_da_su_frase_fija_y_un_codigo_en_el_log(
+    conn, tmp_path, caplog, script, text, code
+):
+    caplog.set_level(logging.DEBUG)
+    world = World(conn, tmp_path, FakeAgent(script))
+    assert world.say(PEDRO_MESSAGE) == text
+    assert code in caplog.text
+    assert PEDRO_MESSAGE not in caplog.text and AGENT_ANSWER not in caplog.text
+
+
+@pytest.mark.parametrize(
+    ("status", "detail"),
+    [(529, "down:agent_http_529"), (429, "down:agent_http_429"), (401, "rejected:agent_http_401")],
+)
+def test_la_api_caida_anota_el_aviso_del_sistema(conn, tmp_path, status, detail):
+    world = World(
+        conn, tmp_path, FakeAgent([result_message("API Error", is_error=True, api_status=status)])
+    )
+    world.say()
+    assert world.notices() == [("api_down", detail)]
+
+
+def test_el_resultado_que_llega_antes_del_error_manda(conn, tmp_path):
+    """El motor emite el resultado fallido y después sale con `ResultError`: se usa el resultado."""
+    world = World(
+        conn,
+        tmp_path,
+        FakeAgent(
+            [
+                result_message(None, subtype="error_max_turns", is_error=True, cost=0.3),
+                ResultError("x", {}),
+            ]
+        ),
+    )
+    assert world.say() == CAPPED_TEXT
+    assert world.usage_rows()[0][-1] == 0.3
+
+
+# --- Los logs -----------------------------------------------------------------------------------
+
+
+def test_los_logs_no_llevan_el_mensaje_la_respuesta_ni_la_clave(conn, tmp_path, caplog):
+    caplog.set_level(logging.DEBUG)
+    world = World(conn, tmp_path)
+    world.say(PEDRO_MESSAGE)
+    assert PEDRO_MESSAGE not in caplog.text
+    assert AGENT_ANSWER not in caplog.text
+    assert VALID_ENV["CLAVE_ANTHROPIC"] not in caplog.text
+    assert "agent: ok" in caplog.text

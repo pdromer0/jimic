@@ -8,6 +8,7 @@ import threading
 import time
 from datetime import datetime, timedelta
 from datetime import time as dt_time
+from decimal import Decimal
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -23,6 +24,7 @@ from jimic.heartbeat.decide import ModelApi
 from jimic.logs import LOG_FILE
 from jimic.memory import personal
 from jimic.memory.database import load_migrations, open_database, schema_version
+from jimic.memory.usage import PRICES, Price
 from jimic.paths import resolve_paths
 from jimic.runtime import Runtime
 
@@ -314,13 +316,14 @@ def test_jimic_run_no_arranca_sin_los_yaml_pero_si_sin_los_markdown(capsys, monk
     assert "no se pudo arrancar Telegram" in capsys.readouterr().err
 
 
-def test_jimic_run_no_arranca_con_un_modelo_sin_precio_de_cache(capsys):
-    """Sonnet tiene precio, pero aún no el de su caché, y cada latido la usa (hallazgo 1 de la
-    revisión propia)."""
-    write_setup({**VALID_ENV, "MODELO_LATIDO": "claude-sonnet-5-5"})
+def test_jimic_run_no_arranca_con_un_modelo_sin_precio_de_cache(capsys, monkeypatch):
+    """Un modelo con precio pero sin el de su caché, que cada latido usa (hallazgo 1 de la
+    revisión propia de la 1.8)."""
+    monkeypatch.setitem(PRICES, "modelo-sin-cache", Price(input=Decimal(1), output=Decimal(1)))
+    write_setup({**VALID_ENV, "MODELO_LATIDO": "modelo-sin-cache"})
     assert jimic.cli.main(["run"]) == 2
     assert capsys.readouterr().err == (
-        "jimic: el modelo claude-sonnet-5-5 no tiene precio de caché en jimic.memory.usage\n"
+        "jimic: el modelo modelo-sin-cache no tiene precio de caché en jimic.memory.usage\n"
     )
 
 

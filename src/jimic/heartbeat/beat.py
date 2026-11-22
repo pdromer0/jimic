@@ -41,8 +41,8 @@ HINTS = {"calendar:auth": "Para volver a darle permiso: jimic google autorizar"}
 MEANWHILE = "Mientras tanto, tus avisos salen a su hora por defecto con un texto sencillo."
 API_DOWN_TEXT = f"⚠️ No consigo hablar con el modelo: la API de Anthropic no responde. {MEANWHILE}"
 API_REJECTED_TEXT = (
-    "⚠️ La API de Anthropic rechaza las peticiones ({code}): revisa CLAVE_ANTHROPIC y"
-    f" MODELO_LATIDO en el .env. {MEANWHILE}"
+    "⚠️ La API de Anthropic rechaza las peticiones ({code}): revisa CLAVE_ANTHROPIC,"
+    f" MODELO_LATIDO y MODELO_AGENTE en el .env. {MEANWHILE}"
 )
 
 

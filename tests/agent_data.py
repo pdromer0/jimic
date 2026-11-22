@@ -5,12 +5,14 @@ uses with the engine, so what a test sees is what the model would see. `SpyWrite
 for the writer of Todoist and records every call: the agent must never reach it.
 """
 
+import asyncio
 import json
 import sqlite3
+from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
 
-from claude_agent_sdk import McpSdkServerConfig
+from claude_agent_sdk import ClaudeAgentOptions, McpSdkServerConfig, ResultMessage
 
 # The bridge is internal to the SDK, but it is the path the engine's requests take.
 from claude_agent_sdk._internal.sdk_mcp_bridge import SdkMcpBridge
@@ -129,3 +131,85 @@ def approvals(conn: sqlite3.Connection) -> list[tuple[str, dict, str, str]]:
             "SELECT kind, payload, status, expires_at FROM approvals ORDER BY id"
         )
     ]
+
+
+# --- The SDK ------------------------------------------------------------------------------------
+
+MAX_RUNS = 50
+"""Runs `FakeAgent` accepts in one test."""
+PEDRO_MESSAGE = "Mensaje-de-Pedro-que-no-va-al-log"
+AGENT_ANSWER = "Respuesta-del-agente-que-no-va-al-log"
+
+
+def result_message(
+    text: str | None = AGENT_ANSWER,
+    session: str = "sesion-1",
+    cost: float | None = 0.0123,
+    subtype: str = "success",
+    is_error: bool = False,
+    api_status: int | None = None,
+    usage: dict[str, Any] | None = None,
+) -> ResultMessage:
+    """A real `ResultMessage` of the SDK, invented."""
+    return ResultMessage(
+        subtype=subtype,
+        duration_ms=10,
+        duration_api_ms=8,
+        is_error=is_error,
+        num_turns=2,
+        session_id=session,
+        total_cost_usd=cost,
+        usage=usage
+        if usage is not None
+        else {
+            "input_tokens": 4,
+            "output_tokens": 39,
+            "cache_read_input_tokens": 3588,
+            "cache_creation_input_tokens": 3812,
+            "cache_creation": {"ephemeral_5m_input_tokens": 3812, "ephemeral_1h_input_tokens": 0},
+        },
+        result=text,
+        api_error_status=api_status,
+    )
+
+
+type Script = list[Any] | BaseException
+
+
+class FakeAgent:
+    """Stands in for `claude_agent_sdk.query`: records each run and yields its script (a list
+    of messages, or an error to raise after them). It has a cap, and a gate to keep a run
+    thinking."""
+
+    def __init__(self, *scripts: Script) -> None:
+        self.scripts = list(scripts) or [[result_message()]]
+        self.runs: list[tuple[str, ClaudeAgentOptions]] = []
+        self.gate: asyncio.Event | None = None
+        self.active = 0
+        self.most_active = 0
+
+    async def _run(self, prompt: str, options: ClaudeAgentOptions) -> AsyncIterator[Any]:
+        self.runs.append((prompt, options))
+        if len(self.runs) > MAX_RUNS:
+            raise AssertionError(f"the agent ran more than {MAX_RUNS} times")
+        script = self.scripts[min(len(self.runs), len(self.scripts)) - 1]
+        self.active += 1
+        self.most_active = max(self.most_active, self.active)
+        try:
+            if self.gate is not None:
+                await self.gate.wait()
+            if isinstance(script, BaseException):
+                raise script
+            for message in script:
+                if isinstance(message, BaseException):
+                    raise message
+                yield message
+        finally:
+            self.active -= 1
+
+    def __call__(self, prompt: str, options: ClaudeAgentOptions) -> AsyncIterator[Any]:
+        return self._run(prompt, options)
+
+    @property
+    def resumed(self) -> list[str | None]:
+        return [options.resume for _, options in self.runs]

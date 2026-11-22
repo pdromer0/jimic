@@ -12,6 +12,9 @@ from decimal import Decimal
 
 PRICES_SEEN = date(2026, 11, 19)
 """When the prices below were read (Anthropic's pricing page; published on 7-oct-2026)."""
+SONNET_CACHE_SEEN = date(2026, 11, 22)
+"""When the cache prices of Sonnet 5.5 were read there (task 1.10): 0.05x the input to read,
+1.25x and 2x to write, and no surcharge for long prompts."""
 
 PER_TOKEN = Decimal(1_000_000)
 """Prices are in dollars per million tokens."""
@@ -42,8 +45,13 @@ PRICES: dict[str, Price] = {
         long_prompt=100_000,
         long_factor=Decimal(5),
     ),
-    # For task 1.10: its cache prices and long prompts are confirmed there.
-    "claude-sonnet-5-5": Price(input=Decimal(2), output=Decimal(10)),
+    "claude-sonnet-5-5": Price(
+        input=Decimal(2),
+        output=Decimal(10),
+        cache_read=Decimal("0.10"),
+        cache_write_5m=Decimal("2.50"),
+        cache_write_1h=Decimal(4),
+    ),
 }
 
 
@@ -113,6 +121,14 @@ def cost(model: str, usage: TokenUsage) -> Decimal:
 def record(conn: sqlite3.Connection, day: date, model: str, usage: TokenUsage) -> Decimal:
     """Add the row of one call (its local day) and return its dollars."""
     usd = cost(model, usage)
+    record_cost(conn, day, model, usage, usd)
+    return usd
+
+
+def record_cost(
+    conn: sqlite3.Connection, day: date, model: str, usage: TokenUsage, usd: Decimal
+) -> None:
+    """Add the row of one run whose dollars someone else counted: the Agent SDK's estimate."""
     conn.execute(
         "INSERT INTO model_usage (day, model, input_tokens, output_tokens, cache_read_tokens,"
         " cache_write_tokens, usd) VALUES (?, ?, ?, ?, ?, ?, ?)",
@@ -126,7 +142,6 @@ def record(conn: sqlite3.Connection, day: date, model: str, usage: TokenUsage) -
             float(usd),
         ),
     )
-    return usd
 
 
 def spent_on(conn: sqlite3.Connection, day: date) -> float:
