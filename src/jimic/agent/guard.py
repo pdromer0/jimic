@@ -7,7 +7,9 @@ Deny by default (6.5 of the design):
   it, is denied (`blocked`);
 - `log_idea` is denied once today's session has read external content (`contaminated`,
   decision 100): `ideas.md` is memory, and what was read stays in the context of the session,
-  so the day's mark counts, not only this run's.
+  so the day's mark counts, not only this run's. The hook writes that mark itself when it lets
+  `read_calendar` or `read_tasks` through, before they run: with both calls in one message of
+  the model, both hooks come before either tool, and the tool's own mark would be too late.
 
 When it allows, the hook returns `{}`: no opinion, so `allowed_tools` and `dontAsk` still decide
 as a second layer. A `permissionDecision: "allow"` would skip them. The matcher goes with
@@ -25,7 +27,7 @@ from typing import Any
 from claude_agent_sdk import HookContext, HookMatcher
 from claude_agent_sdk.types import HookInput, HookJSONOutput
 
-from jimic.agent.tools import model_name
+from jimic.agent.tools import CONTAMINATING, model_name
 from jimic.memory import conversations
 from jimic.memory.schemas import TOOL_NAMES, Limits
 
@@ -35,6 +37,7 @@ OURS = {model_name(name): name for name in TOOL_NAMES}
 REASONS = {
     "outside_table": "Esa herramienta no existe para JimiC.",
     "blocked": "Esa herramienta está bloqueada en limites.yaml.",
+    "unmarked": "No puedo leer eso ahora mismo.",
     "contaminated": (
         "Hoy esta sesión ya ha leído el calendario o las tareas, así que no anoto ideas:"
         " dile a Pedro que la apunte él en ideas.md."
@@ -62,6 +65,11 @@ def decide(limits: Limits, conn: sqlite3.Connection, day: date, tool_name: str) 
         return "blocked"
     if ours == "log_idea" and conversations.read_external(conn, day):
         return "contaminated"
+    if ours in CONTAMINATING:
+        try:
+            conversations.mark_external(conn, day)
+        except LookupError:
+            return "unmarked"  # a read that cannot be marked must not happen
     return None
 
 

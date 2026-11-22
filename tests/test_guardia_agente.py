@@ -7,6 +7,7 @@ opina (`{}`): `allowed_tools` sigue siendo una segunda capa.
 
 import asyncio
 import logging
+from datetime import date
 
 import pytest
 from agent_data import SECRET_ARG, context
@@ -132,3 +133,18 @@ def test_los_hooks_ven_todas_las_herramientas_y_un_fallo_bloquea(conn, tmp_path)
     assert list(hooks) == ["PreToolUse"]
     assert isinstance(matcher, HookMatcher)
     assert matcher.matcher is None and matcher.on_failure == "block" and len(matcher.hooks) == 1
+
+
+def test_dos_llamadas_en_un_mensaje_del_modelo_no_cuelan_log_idea(conn, tmp_path):
+    """Hallazgo 2 de la revisión: con `read_tasks` y `log_idea` en el mismo mensaje, el motor
+    pasa los dos *hooks* antes de ejecutar ninguna. La marca la pone ya el *hook* de la lectura."""
+    ctx = context(conn, tmp_path)
+    guard = make_guard(limits(), conn, ctx.day)
+    assert ask(guard, model_name("read_tasks")) == {}
+    assert denied(ask(guard, model_name("log_idea")))
+
+
+def test_una_lectura_que_no_se_puede_marcar_se_deniega(conn, tmp_path):
+    """Sin la fila del día (nadie anotó el mensaje), la lectura no se deja pasar."""
+    guard = make_guard(limits(), conn, date(2031, 1, 1))
+    assert denied(ask(guard, model_name("read_calendar")))
