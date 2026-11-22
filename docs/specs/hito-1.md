@@ -1799,3 +1799,17 @@ Predicción antes, observado después:
 Anthropic (dos del agente y una de Haiku), que no crean nada en ningún servicio. Ni Todoist, ni
 Calendar, ni Telegram: no hay restos que comprobar. Lo que el motor escribió va a las carpetas
 temporales de pytest (que guarda las tres últimas), con datos inventados.
+
+**Ajustes de la revisión** (el chat, en el PR #44; una ronda):
+- **El orden de los mensajes** (ab7651c): `_converse` esperaba el «escribiendo…», una llamada de
+  red, antes de llamar a la conversación. Con dos mensajes seguidos, si Telegram contestaba antes
+  al del segundo, este cogía el turno primero, y la hora de llegada se retrasaba lo que tardase
+  esa llamada. Ahora la tarea de `on_text` se crea en el manejador, al llegar el mensaje, y
+  «escribiendo…» va en su propia tarea. Con solo eso, la respuesta del primero aún podía salir
+  detrás de la del segundo si su «escribiendo…» seguía en el aire; por eso cada turno envía después
+  del anterior. Consecuencia: una respuesta inmediata ya no lleva «escribiendo…», y dos tests que lo
+  pedían con una respuesta inmediata dejan de hacerlo (el test lento lo sigue comprobando). Test
+  nuevo: el «escribiendo…» del primer mensaje tarda más que el del segundo y las respuestas salen en
+  el orden de llegada; sin el arreglo sale `['dos', 'uno']`.
+- N3 de la ronda: 931 tests, 0:31 en total (pre-commit 0:11, pytest 0:19, gitleaks de la
+  historia 0:01).
