@@ -181,3 +181,33 @@ def test_los_logs_no_llevan_los_ficheros(conn, tmp_path, caplog):
     )
     w.respond("Hola")
     assert caplog.records and MARKER not in caplog.text
+
+
+def test_tras_recargar_el_agente_y_la_guardia_ven_el_valor_nuevo_sin_latido(conn, tmp_path):
+    """Ajuste 4: lo que hace [Guardar] o [Deshacer] sobre un YAML (`LiveConfig.reload`) llega a
+    la ejecución siguiente: `allowed_tools` y el *hook* leen la configuración en cada turno."""
+    from jimic.memory.live import LiveConfig
+
+    agent = FakeAgent([result_message()], [ToolCall("read_tasks", {}), result_message()])
+    w = World(conn, tmp_path, agent)
+    live = LiveConfig.load(w.paths.config_dir)
+    w.conversation = Conversation(
+        settings=Settings.model_validate(VALID_ENV),
+        paths=w.paths,
+        limits=limits(),
+        clock=w.clock,
+        conn=conn,
+        sources=agent_sources(),
+        run_agent=agent,
+        config=live,
+    )
+    w.respond("Hola")
+    assert "mcp__jimic__read_tasks" in (agent.runs[0][1].allowed_tools or [])
+    path = w.paths.config_dir / "limites.yaml"
+    path.write_text(
+        path.read_text().replace("read_tasks: free", "read_tasks: blocked"), encoding="utf-8"
+    )
+    live.reload()
+    w.respond("¿Qué tengo?")
+    assert "mcp__jimic__read_tasks" not in (agent.runs[1][1].allowed_tools or [])
+    assert [outcome.denied for outcome in agent.tool_outcomes] == [True]

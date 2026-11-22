@@ -106,10 +106,12 @@ def _describe(intention: Intention, habits: dict[str, str]) -> dict[str, Any]:
         "default_time": intention.default_time.strftime("%H:%M"),
         "priority": intention.priority,
     }
-    if isinstance(intention, DailyPlan | DayClose) and intention.window is not None:
+    window = intention.window if isinstance(intention, DailyPlan | DayClose) else None
+    # `from == to` is the whole day (decision 80, pending of task 1.7): the same as no hint.
+    if window is not None and window.start != window.end:
         entry["window"] = {
-            "from": intention.window.start.strftime("%H:%M"),
-            "to": intention.window.end.strftime("%H:%M"),
+            "from": window.start.strftime("%H:%M"),
+            "to": window.end.strftime("%H:%M"),
         }
     if isinstance(intention, KeyTask):
         entry["habit"] = habits.get(intention.habit, intention.habit)

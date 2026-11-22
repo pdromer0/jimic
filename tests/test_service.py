@@ -422,11 +422,12 @@ def test_el_runtime_programa_el_latido_alineado_y_la_purga_y_para_en_orden(tmp_p
     assert events == ["channel start", "sweep", "channel stop", "model close"]
     assert todoist.closed
     assert runtime.heartbeat is not None
-    # El texto de Pedro va al asistente (1.11) y los toques, al ejecutor; nunca al agente solo.
+    # El texto de Pedro va al asistente (1.11) y los toques, al ejecutor, a la memoria y a los
+    # comandos (1.12); nunca al agente solo.
     assert runtime.assistant is not None and runtime.executor is not None
     assert channel.on_text == runtime.assistant.reply
-    assert channel.handlers == runtime.executor.handlers
-    assert set(channel.handlers) == {"plan", "undo"}
+    assert runtime.executor.handlers.items() <= channel.handlers.items()
+    assert set(channel.handlers) == {"plan", "undo", "memory", "memory_view", "undo_list"}
 
 
 def test_si_el_canal_no_arranca_el_runtime_cierra_el_modelo_y_las_fuentes(tmp_path):

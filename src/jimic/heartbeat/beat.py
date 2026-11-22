@@ -47,6 +47,28 @@ API_REJECTED_TEXT = (
 )
 
 
+CONFIG_INVALID_TEXT = (
+    "⚠️ {files} no vale y sigo con su última versión buena. Para ver qué le pasa: jimic config check"
+)
+MEMORY_CLIPPED_TEXT = (
+    "⚠️ {files} es muy largo y solo le paso a JimiC el principio: acórtalo a mano para que lo"
+    " vea entero."
+)
+FILE_NAMES = {
+    "rutina": "rutina.md",
+    "objetivos": "objetivos.md",
+    "preferencias": "preferencias.md",
+    "intenciones": "intenciones.yaml",
+    "limites": "limites.yaml",
+}
+"""The system notices keep the stem of a name (no dots there): back to the name."""
+
+
+def _files(detail: str, default_suffix: str = "") -> str:
+    names = [FILE_NAMES.get(stem, stem + default_suffix) for stem in detail.split(",") if stem]
+    return " y ".join(names)
+
+
 class Sender(Protocol):
     async def send_text(self, text: str) -> int: ...
 
@@ -151,7 +173,19 @@ class Heartbeat:
         finally:
             self._running = False
 
+    def _refresh(self, now: datetime) -> None:
+        """Hand edits of the YAML files reach this heartbeat (task 1.12): one that does not
+        validate leaves the last good version in use, and registers `config_invalid`."""
+        invalid = self._config.refresh()
+        if invalid:
+            detail = ",".join(name.split(".", 1)[0] for name in invalid)
+            system_notices.detect(self._conn, "config_invalid", now.date(), now, detail)
+
     async def _beat(self, now: datetime) -> None:
+        try:
+            self._refresh(now)
+        except Exception as error:
+            logger.error("heartbeat config refresh failed (%s)", type(error).__name__)
         result = await run_cycle(
             clock=self._clock,
             timezone=self._timezone,
@@ -263,6 +297,10 @@ class Heartbeat:
             return API_REJECTED_TEXT.format(code=code) if kind == "rejected" else API_DOWN_TEXT
         if notice.kind == "budget":
             return self._budget_text(day)
+        if notice.kind == "config_invalid":
+            return CONFIG_INVALID_TEXT.format(files=_files(notice.detail, ".yaml"))
+        if notice.kind == "memory_clipped":
+            return MEMORY_CLIPPED_TEXT.format(files=_files(notice.detail))
         parts = [entry.split(":", 1)[0] for entry in notice.detail.split(",")]
         names = [SOURCE_NAMES.get(part, part) for part in parts]
         lines = [f"⚠️ Ahora mismo no puedo leer {' ni '.join(names)}."]
