@@ -2,8 +2,13 @@
 
 Un ADR registra una decisión difícil de revertir, que afecta a varias partes o con alternativas
 razonables. Un ADR aceptado no se reescribe: si cambia, se escribe otro y el antiguo pasa a
-`Sustituida por NNNN`. Nombre `NNNN-titulo.md`, con el número que figura en la columna ADR del
+`Sustituida por NNNN`. Solo crece «Qué cambió al implementarla», con cada cambio que trae una
+tarea posterior. Nombre `NNNN-titulo.md`, con el número que figura en la columna ADR del
 registro de `docs/diseno.md`; los ADR se numeran en orden y uno puede recoger varias decisiones.
+
+Un ADR lo escribe la tarea que toma la decisión. Al cerrar un hito, `/cerrar-hito` propone uno
+para cada decisión del hito que lo necesite y aún no lo tenga, y Pedro elige cuáles se escriben
+([paso `adr-y-releases`](../proceso/pasos/adr-y-releases.md)).
 
 ## Plantilla
 
