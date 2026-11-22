@@ -17,11 +17,11 @@ from datetime import date, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from jimic.agent.proposals import PLAN_KIND as PLAN_KIND  # one constant, re-exported
 from jimic.agent.proposals import due_value, parse_due
 from jimic.channel.message import GlobalOption, InteractiveMessage, Item, Option, fit_titles
 from jimic.tools.todoist import Due
 
-PLAN_KIND = "plan"
 UNDO_KIND = "undo"
 PROPOSAL_HEADER = "Te propongo"
 DONE_HEADER = "✅ Hecho"

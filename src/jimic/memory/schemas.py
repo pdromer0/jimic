@@ -163,6 +163,13 @@ class Limits(_Strict):
     sensitive_categories: Annotated[dict[str, str], Field(max_length=0)]
 
 
+def is_free(limits: Limits, name: str) -> bool:
+    """Whether the agent's tool `name` is `free` in `tool_levels`: one that is missing counts as
+    blocked (6.5 of the design). The guard and `allowed_tools` both ask here."""
+    levels = {str(tool): level for tool, level in limits.tool_levels.items()}
+    return levels.get(name) == "free"
+
+
 SCHEMA_MODELS: tuple[type[BaseModel], ...] = (
     Window,
     Habit,

@@ -29,7 +29,7 @@ from claude_agent_sdk.types import HookInput, HookJSONOutput
 
 from jimic.agent.tools import CONTAMINATING, model_name
 from jimic.memory import conversations
-from jimic.memory.schemas import TOOL_NAMES, Limits
+from jimic.memory.schemas import TOOL_NAMES, Limits, is_free
 
 logger = logging.getLogger(__name__)
 
@@ -60,8 +60,7 @@ def decide(limits: Limits, conn: sqlite3.Connection, day: date, tool_name: str) 
     ours = OURS.get(tool_name)
     if ours is None:
         return "outside_table"
-    levels = {str(name): level for name, level in limits.tool_levels.items()}
-    if levels.get(ours) != "free":  # missing counts as blocked
+    if not is_free(limits, ours):
         return "blocked"
     if ours == "log_idea" and conversations.read_external(conn, day):
         return "contaminated"

@@ -21,7 +21,7 @@ from claude_agent_sdk import ClaudeAgentOptions, HookMatcher, McpSdkServerConfig
 from jimic.agent.tools import SERVER_NAME, model_name
 from jimic.config import Settings
 from jimic.heartbeat.decide import API_URL
-from jimic.memory.schemas import TOOL_NAMES, Limits
+from jimic.memory.schemas import TOOL_NAMES, Limits, is_free
 
 MAX_TURNS = 12
 """Turns of one run (one message of Pedro): three reads, a proposal and the answer fit with room
@@ -52,8 +52,7 @@ def _discard(line: str) -> None:
 
 def free_tools(limits: Limits) -> list[str]:
     """The names the model sees of the tools that are `free` in `tool_levels`, in table order."""
-    levels = {str(name): level for name, level in limits.tool_levels.items()}
-    return [model_name(name) for name in TOOL_NAMES if levels.get(name) == "free"]
+    return [model_name(name) for name in TOOL_NAMES if is_free(limits, name)]
 
 
 def build_options(
