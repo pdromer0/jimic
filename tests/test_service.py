@@ -355,9 +355,13 @@ class FakeRuntimeChannel:
     async def send_text(self, text: str) -> int:
         raise AssertionError("the runtime test sends nothing")
 
-    def wired(self, on_text):
+    def wired(self, on_text, handlers):
         self.on_text = on_text
+        self.handlers = handlers
         return self
+
+    async def sweep(self) -> None:
+        self.events.append("sweep")
 
     def schedule_every(self, task, interval, first, name) -> None:
         self.scheduled.append((name, interval, first))
@@ -383,7 +387,9 @@ def runtime_with(conn, events, fail_start=False):
         conn,
         intentions(),
         limits(),
-        channel_factory=lambda settings, conn, clock, on_text: channel.wired(on_text),  # pyright: ignore[reportArgumentType] - a double of the channel
+        channel_factory=lambda settings, conn, clock, on_text, handlers: channel.wired(  # pyright: ignore[reportArgumentType] - a double of the channel
+            on_text, handlers
+        ),
         model_factory=lambda settings: ModelApi(FakeMessages().create, close_model),
         todoist_api=todoist,
     )
@@ -409,14 +415,18 @@ def test_el_runtime_programa_el_latido_alineado_y_la_purga_y_para_en_orden(tmp_p
         conn.close()
     assert channel.scheduled == [
         ("latido", timedelta(minutes=15), datetime(2026, 11, 19, 9, 15, tzinfo=madrid)),
+        ("caducadas", dt_time(0, 1, tzinfo=madrid)),
         ("purga", dt_time(4, 0, tzinfo=madrid)),
     ]
-    assert events == ["channel start", "channel stop", "model close"]
+    # Lo caducado con el servicio parado se barre al arrancar (1.11-c).
+    assert events == ["channel start", "sweep", "channel stop", "model close"]
     assert todoist.closed
     assert runtime.heartbeat is not None
-    # El texto de Pedro va a la conversación del agente (1.10), envuelto en lo que recibe el canal.
-    assert runtime.conversation is not None
-    assert channel.on_text is not None
+    # El texto de Pedro va al asistente (1.11) y los toques, al ejecutor; nunca al agente solo.
+    assert runtime.assistant is not None and runtime.executor is not None
+    assert channel.on_text == runtime.assistant.reply
+    assert channel.handlers == runtime.executor.handlers
+    assert set(channel.handlers) == {"plan", "undo"}
 
 
 def test_si_el_canal_no_arranca_el_runtime_cierra_el_modelo_y_las_fuentes(tmp_path):
