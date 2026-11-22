@@ -32,7 +32,7 @@ from jimic.execution.rules import RESULTS, refusal
 from jimic.memory.database import transaction
 from jimic.memory.schemas import Limits
 from jimic.tools.failures import ToolFailure
-from jimic.tools.todoist import TaskPhoto, TodoistTools
+from jimic.tools.todoist import TASK_NOT_FOUND, TaskPhoto, TodoistTools
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +40,7 @@ DELETED = "✓ borrada"
 GONE = "ya no existe"
 CAP_REACHED = "tope de borrados de hoy"
 CHANGED = "ha cambiado: ¿la borro así?"
+NOT_FOUND = frozenset({TASK_NOT_FOUND, "http_404"})
 AMBIGUOUS = frozenset({"timeout", "network"})
 """Failures after which the deletion may or may not have happened."""
 
@@ -139,6 +140,10 @@ async def delete(
     try:
         await todoist.writer.delete(task_id)
     except ToolFailure as error:
+        if error.code in NOT_FOUND:
+            # Someone else deleted it in between: not ours, and nothing to undo.
+            _take_back(conn, row_id)
+            return GONE
         state = await _state_after(todoist, task_id) if error.code in AMBIGUOUS else "exists"
         if state == "gone":
             logger.info("deletion confirmed after %s", error.code)

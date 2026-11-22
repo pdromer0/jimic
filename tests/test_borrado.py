@@ -266,3 +266,21 @@ def test_dejala_no_toca_nada(conn):
     world.tap(approval, 1, "keep")
     assert world.message(approval).items[0].result == "🆗 se queda"
     assert world.writes() == [] and world.status(approval) == "rejected"
+
+
+class GoneOnDelete(YieldingApi):
+    """La tarea desaparece entre la foto y el borrado: `delete_task` da 404."""
+
+    async def delete_task(self, task_id: str) -> bool:
+        self.tasks.clear()
+        return await super().delete_task(task_id)
+
+
+def test_si_la_tarea_desaparece_antes_de_borrarla_dice_que_ya_no_existe(conn):
+    """Hallazgo 3 de la revisión: un 404 al borrar no es «falló», y la foto de algo que no
+    borró JimiC no se queda (contaría en el tope)."""
+    world = with_api(conn, GoneOnDelete([todoist_task("t1")]))
+    approval, _ = world.show([world.delete_entry("t1")])
+    world.tap(approval, 1, "del")
+    assert world.message(approval).items[0].result == "ya no existe"
+    assert world.photos() == []
