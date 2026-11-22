@@ -381,3 +381,12 @@ def test_se_lee_el_texto_exacto_sin_traducir_saltos(config_dir):
     (config_dir / "rutina.md").write_bytes(b"a\r\nb")
     assert changes.read_text(config_dir, "rutina.md") == "a\r\nb"
     assert os.path.exists(config_dir / "rutina.md")
+
+
+def test_con_limites_roto_a_mano_se_dice_que_lo_arregle_pedro(config_dir):
+    """Hallazgo 6: el fichero actual no se puede leer; la culpa no es del cambio propuesto."""
+    path = config_dir / "limites.yaml"
+    path.write_text(template("limites.yaml").replace("budget:", "budget: ["), encoding="utf-8")
+    with pytest.raises(ChangeRefused) as raised:
+        changes.check(config_dir, quiet("08:00"))
+    assert "Pedro tiene que arreglarlo a mano" in raised.value.for_agent

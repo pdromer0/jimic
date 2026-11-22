@@ -135,7 +135,12 @@ def _invalid(name: str, problems: list[Problem]) -> ChangeRefused:
 
 
 def _limits(text: str) -> Limits | None:
-    doc = _yaml_doc(LIMITS_FILE, text)
+    """The limits of the file as it is now, or `None` if it does not load or validate (it is
+    the current file that is wrong, not the change)."""
+    try:
+        doc = parse_yaml(text.removeprefix(BOM))
+    except YamlSyntaxError:
+        return None
     if validate_yaml(LIMITS_FILE, doc):
         return None
     return Limits.model_validate(doc)
@@ -151,16 +156,17 @@ def validate(name: str, old_text: str, new_text: str) -> None:
         if problems:
             raise _invalid(name, problems)
         return
-    problems = validate_yaml(name, _yaml_doc(name, new_text))
-    if problems:
-        raise _invalid(name, problems)
-    if name != LIMITS_FILE:
-        return
-    old = _limits(old_text)
-    if old is None:
+    old = _limits(old_text) if name == LIMITS_FILE else None
+    if name == LIMITS_FILE and old is None:
+        # The rule compares with the values of now: without them, nothing can be judged.
         raise ChangeRefused(
             "invalid", "limites.yaml no es válido ahora mismo: Pedro tiene que arreglarlo a mano."
         )
+    problems = validate_yaml(name, _yaml_doc(name, new_text))
+    if problems:
+        raise _invalid(name, problems)
+    if old is None:
+        return
     new = Limits.model_validate(_yaml_doc(name, new_text))
     verdict = judge(old, new)
     if verdict.relaxed:
