@@ -844,3 +844,30 @@ def test_un_toque_sobre_lo_que_esta_en_curso_avisa(make_channel, request_double,
     drive(application, callback_update(f"{approval_id}:1:y"))
     assert request_double.methods() == ["answerCallbackQuery"]
     assert request_double.params("answerCallbackQuery")[0]["text"] == IN_PROGRESS
+
+
+def test_si_pedro_escribio_despues_del_ultimo_envio_el_si_no_responde_a_ese(make_channel):
+    """Hallazgo 1 de la revisión: Pedro escribe «no, mejor borra Y» tras la propuesta A y,
+    antes de que salga la respuesta, «sí». Ese «sí» no puede confirmar el borrado de A."""
+    seen: list[Incoming] = []
+    gate = asyncio.Event()
+
+    async def on_text(incoming: Incoming) -> str:
+        seen.append(incoming)
+        if incoming.text != "sí":
+            await gate.wait()
+        return "respuesta"
+
+    channel, application = make_channel(on_text=on_text)
+
+    async def scenario():
+        async with application:
+            await channel.send("demo", make_message(), EXPIRES)  # A, id 10
+            for number, text in enumerate(("no, mejor borra Y", "sí"), start=1):
+                update = to_update(text_update(text, update_id=number), application.bot)
+                await application.process_update(update)
+            gate.set()
+            await channel.drain()
+
+    asyncio.run(scenario())
+    assert [incoming.last_sent for incoming in seen] == [10, None]

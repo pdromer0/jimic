@@ -17,7 +17,8 @@ the answer goes as escaped HTML, without previews. An answer may carry an intera
 the answer as its body (decision 1.11-a), and approvals to edit (the written «sí»).
 
 The channel remembers the id of the last message it sent, of any kind (decision 1.11-d): the
-written «sí» only counts as an answer to it. It lives in memory: after a restart there is none.
+written «sí» only counts as an answer to it, and not if Pedro wrote something else in between
+(the answer to that may still be on its way). It lives in memory: after a restart there is none.
 """
 
 import asyncio
@@ -196,6 +197,9 @@ class TelegramChannel:
         self._running = False
         self.last_sent: int | None = None
         """The id of the last message sent (decision 1.11-d); in memory only."""
+        self._pedro_wrote_since = False
+        """Pedro wrote after `last_sent` went out: a «sí» now answers his message, not that one
+        (even if the answer to his message has not gone out yet)."""
         application.add_handler(CallbackQueryHandler(self._handle_tap))
         application.add_handler(MessageHandler(filters.ALL, self._handle_message))
         application.add_error_handler(self._handle_error)
@@ -264,7 +268,7 @@ class TelegramChannel:
             logger.error("telegram send failed (%s)", _code(error))
             raise SendError(_code(error)) from None
         store.set_message_id(self._conn, approval_id, sent.message_id)
-        self.last_sent = sent.message_id
+        self._sent(sent.message_id)
         logger.info("interactive message sent for approval %d", approval_id)
         return approval_id
 
@@ -304,9 +308,13 @@ class TelegramChannel:
         except TelegramError as error:
             logger.error("telegram send failed (%s)", _code(error))
             raise SendError(_code(error)) from None
-        self.last_sent = sent.message_id
+        self._sent(sent.message_id)
         logger.info("text message sent")
         return sent.message_id
+
+    def _sent(self, message_id: int) -> None:
+        self.last_sent = message_id
+        self._pedro_wrote_since = False
 
     def _jobs(self) -> JobQueue:
         job_queue = self._app.job_queue
@@ -377,8 +385,9 @@ class TelegramChannel:
         incoming = Incoming(
             message.text,
             reply_to=None if reply_to is None else reply_to.message_id,
-            last_sent=self.last_sent,
+            last_sent=None if self._pedro_wrote_since else self.last_sent,
         )
+        self._pedro_wrote_since = True
         # `on_text` starts here, before any wait on the network: the conversation notes the
         # moment and takes its place in the order of the turns as the message arrives.
         answer = asyncio.ensure_future(self._on_text(incoming))
@@ -423,7 +432,7 @@ class TelegramChannel:
             except TelegramError as error:
                 logger.error("telegram send failed (%s)", _code(error))
                 return False
-            self.last_sent = sent.message_id
+            self._sent(sent.message_id)
         return True
 
     async def _send_outgoing(self, text: str | None, outgoing: Outgoing) -> None:
