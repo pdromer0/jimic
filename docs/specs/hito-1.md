@@ -1813,3 +1813,101 @@ temporales de pytest (que guarda las tres últimas), con datos inventados.
   el orden de llegada; sin el arreglo sale `['dos', 'uno']`.
 - N3 de la ronda: 931 tests, 0:31 en total (pre-commit 0:11, pytest 0:19, gitleaks de la
   historia 0:01).
+
+### Tarea P4: módulo `adr-y-releases`
+
+**Qué se hizo.** Issue #24, rama `chore/p4-adr-y-releases`, PR #45. Commits:
+- `chore(adr-y-releases)` (0758048): instala `docs/proceso/pasos/adr-y-releases.md` con
+  `instalar.py` y le aplica un parche local;
+- `feat(gh)` (a9a753f): `scripts/gh.sh crear-release`;
+- `docs(cerrar-hito)` (0b165ee): engancha el paso;
+- `docs(decisiones)` (4850272): el README dice qué crece en un ADR aceptado;
+- `docs(modulos)` (b4874c2): el módulo pasa a `piloto`;
+- `fix(gh)` (d73aed0): dos hallazgos de la revisión;
+- `docs(hito-1)`: este anexo.
+
+**Decisiones del diff.**
+- **El paso lleva un parche local** sobre la plantilla, en dos puntos:
+  - `gh release create` pasa a `scripts/gh.sh crear-release`, como manda `tarea.md`;
+  - los ADR que faltan se proponen al cierre y Pedro elige cuáles se escriben (P4-a), en vez
+    de «uno por cada decisión».
+
+  La plantilla queda como referencia, y `instalar.py --simular` ahora se niega con «ya existe
+  con otro contenido».
+- **Freno de la Release** (decisión de Pedro del 22-nov, en el plan): `crear-release` crea un
+  **borrador**, y solo si la etiqueta ya está en GitHub y no hay otra Release con ella, contando
+  los borradores. Pedro la revisa y la publica desde la web. `settings.json` no cambia:
+  `scripts/gh.sh *` ya estaba en el `allow`.
+- **Cuándo se crea:** la etiqueta solo existe tras la fusión. Por eso la Release se crea en la
+  sesión de `/sincronizar` del PR de cierre, a petición de Pedro, y no en la de `/cerrar-hito`.
+  La skill lo dice en «Tras la fusión».
+- **La etiqueta**, estricta: `v0.N-hitoN`, con N de 0 a 99, sin ceros a la izquierda y la misma
+  N en las dos partes.
+- **Las notas**, solo en `docs/releases/ETIQUETA.md`, revisadas en el PR de cierre y con enlaces
+  absolutos fijados a la etiqueta: en una Release, los relativos se rompen. La carpeta no se
+  crea ahora; la estrena la 1.17.
+- **«Qué cambió al implementarla»** es la única sección que crece en un ADR aceptado. Así, la
+  1.11 escribe el de la guardia y el cierre lo pone al día sin romper «no se reescribe».
+- Sin tests de pytest, igual que `gh.sh` y `tablero.sh`. La prueba en seco es manual, con un
+  `gh` falso en el scratchpad, fuera del repositorio. Ese `gh` registra sus argumentos, responde
+  según variables de entorno y se corta a las 10 llamadas.
+
+**Valores a mano** (ejecutados con `python3 -I`, independientes del script):
+- El patrón acepta `v0.0-hito0`, `v0.1-hito1` y `v0.12-hito12`.
+- Rechaza `v0.1-hito2`, `v0.01-hito01`, `v1.1-hito1`, `v0.1-hito`, `0.1-hito1`, `"v0.1-hito1 "`,
+  `"v0.1-hito1\n"` y `""`. Bash da lo mismo.
+- `uso()` pasa de las líneas 7–14 a las 7–15: 9 subcomandos.
+- En `modulos.md` cambia 1 de las 20 filas de módulos.
+
+**Prueba en seco** (17 casos, todos en verde):
+- Salen con 64: la etiqueta (8 casos), el título vacío, el número de argumentos (2) y la ruta de
+  las notas (4: fichero inexistente, `.env`, notas fuera de `docs/releases/`, `./docs/...`).
+- Salen con 1 y **sin POST**: la etiqueta no está, y ya hay una Release.
+- El caso bueno hace 3 llamadas: `git/ref/tags/v0.1-hito1`, la lista de Releases y el POST, con
+  `tag_name`, `name`, `body=@docs/releases/v0.1-hito1.md` y `draft=true`.
+- El caso `.env` no prueba nada aquí: no hay `.env` en la raíz y lo para la comprobación del
+  fichero (ver E).
+- Contra GitHub, solo lecturas: `v0.9-hito9` da el 404 de `gh` y después «no está en GitHub o no
+  se pudo comprobar», con salida 1 y sin POST.
+- Ningún POST real hasta la 1.17: no se crea nada que limpiar.
+
+**Versiones incorrectas** (predicción frente a observado; cada una aplicada y deshecha):
+- A, sin `-F draft=true`: predije que solo fallaría el caso bueno. Así fue («sin-draft»).
+- B, sin comprobar la etiqueta: predije que solo fallaría «etiqueta no está», con POST. Así fue.
+- C, el patrón sin la igualdad de N: predije que solo fallaría «N distinta». Así fue.
+- D, `uso()` con `7,14p`: predije que solo fallaría «`uso()` muestra crear-release». Así fue.
+- E, sin comprobar la ruta de las notas, tras la revisión: fallan «notas fuera de releases» y
+  «ruta con ./». «.env» sigue pasando, porque el fichero no existe, como se explica arriba.
+
+**Medidas.** N3: en verde en 0:32 (pre-commit 0:08, pytest 0:23, gitleaks de la historia 0:01,
+31 commits), tras la revisión propia; el anexo, solo documentación, se escribió mientras corría. Tiempo de pared del plan aprobado (13:17) a la apertura del PR: en
+la sección de métricas del PR.
+
+**Revisión** (`/code-review medium`): 9 hallazgos, 2 corregidos, 6 explicados y 1 pendiente.
+- Corregidos en `fix(gh)`:
+  - Se podía subir cualquier fichero como cuerpo, incluido uno de secretos. Ahora solo
+    `docs/releases/ETIQUETA.md`.
+  - Un 403 de la nube se confundía con una etiqueta que falta. Ahora se ve el error de `gh`.
+- Explicados:
+  - «Es una escritura sin preguntar, el disparador de `guardia`»: es una escritura acotada y
+    validada, como `abrir-pr` y `editar-pr`, solo en borrador, que no ve el público. El freno lo
+    eligió Pedro.
+  - «La etiqueta puede apuntar a otro commit»: la crea Pedro y revisa el borrador antes de
+    publicarlo.
+  - «Comprobar y crear no es atómico»: solo importa con dos sesiones a la vez, y un borrador de
+    más se borra desde la web.
+  - «Repositorio fijo en el paso»: es la sustitución de `<dueño>/<repo>` de `instalar.py`.
+  - «`disparadores.sh` no mide el piloto»: igual que con los otros tres pilotos, el cierre decide
+    con las comprobaciones del módulo.
+  - «Los pasos de "Tras la fusión" se pierden con el `/clear`»: es el mismo hallazgo que el
+    pendiente.
+- Pendiente: `/sincronizar` no recuerda la Release, que queda a la memoria de Pedro. Arreglarlo
+  choca con el plan («`sincronizar` no se toca»).
+
+**Pendiente.**
+- ¿Recuerda `/sincronizar` la etiqueta y la Release cuando el PR cierra un hito (rama
+  `docs/hN-cierre`)? Destino: la revisión del chat de este PR, o la 1.17.
+- Primer POST real de `crear-release`: comprobar que el borrador **no crea** la etiqueta y que
+  las notas llegan enteras. Destino: la 1.17.
+- El parche del paso y el freno del borrador. Destino: la plantilla del módulo en el método, con
+  el criterio de los parches locales que dejó pendiente la P3.
