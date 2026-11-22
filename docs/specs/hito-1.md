@@ -1539,3 +1539,132 @@ tests nuevos fallan sin ella (3 rojos).
 **Pruebas contra servicios reales** (regla «los tests no dejan basura»): ninguna. Las pruebas de
 esta tarea no llaman a Telegram ni a Todoist ni a Calendar; no hay restos que comprobar, ni
 mensajes fijados ni comandos configurados en los bots.
+
+### Tarea 1.8: decisión del latido
+
+**Qué se hizo.** Issue #21 (★), rama `feat/h1-latido`, aprobada a las 20:13 del 21-nov-2026.
+Commits: `chore(deps)` de `anthropic` 2.12.0 (1f67eb0), `feat(memory)` del contador y los avisos
+del sistema (da0bcee), `feat(heartbeat)` de `Decision` y las varias propuestas (bf742a7), de la
+decisión con Haiku (4dfe4eb) y del latido (795f7fe), `feat(channel)` (28d1460), `feat(service)`
+(e69d6c0), `test(contrato)` (982d4e8), `docs(diseno)` (37c823d), `docs(privacidad)` (bdcf383) y,
+de la revisión propia, cinco `fix` (fd70c29, c4c3820, d26010c, 006a4af, 3c31a36) y un `refactor`
+sin tocar tests (e3741da). Este anexo es el último, `docs(hito-1)`.
+
+**Decisiones de la tarea** (las notas del issue, de Pedro, 21-nov-2026; en `diseno.md` como 84 a
+88):
+- **1.8-a** · mensajes del latido solo de texto; el esquema no tiene `buttons` (decisión 84).
+- **1.8-b** · el plan y el cierre se deciden y se registran (`speak = 1`, «pendiente: 1.14» o
+  «1.16») sin enviar nada ni escribir `notices`; con la API caída, sin plantilla (decisión 85).
+- **1.8-c** · avisos del sistema fuera del cupo: API caída, fuente no disponible y presupuesto; uno
+  por tipo y día (el del presupuesto, al mes), respetan `quiet_hours` y no van a `notices`
+  (decisión 86).
+- **Caché de 1 h** (decisión 87, del plan aprobado): con latidos cada 15 min, la de 5 min
+  caducaría siempre antes de la siguiente llamada y saldría más cara que sin caché.
+- **`messages.create` validado en el código** (decisión 88, de Pedro en la sesión): en `anthropic`
+  2.12.0, `messages.parse` valida dentro de la llamada y, si la respuesta no encaja, lanza y pierde
+  el uso. Era una condición de parada del plan; se paró y se preguntó.
+
+**Decisiones del diff** (lo que el plan interpretaba; se aprobó tal cual con el informe de
+`revisor-plan`, veredicto «dudas (11)», delante):
+- Piezas: `heartbeat/decide.py` (`HeartbeatDecision`, `HaikuDecider`, `judge`, plantillas),
+  `heartbeat/prompt.md` (el bloque fijo), `heartbeat/beat.py` (`Heartbeat`, `next_beat`),
+  `memory/usage.py` (`PRICES` con su fecha, `cost`, `spent_on`, `spent_in_month`),
+  `memory/system_notices.py`, la migración 0002 (`model_usage` y `system_notices`) y `runtime.py`
+  (lo que corre dentro del servicio). `decide` devuelve una `Decision` (con el motivo oculto en el
+  `repr`) y `second_pass` acepta varias propuestas: el plan B puede traer dos plantillas.
+- La fila de `decisions` es lo que se decidió (Haiku o el plan B); lo que hace después la segunda
+  pasada va **añadido al motivo** como códigos (`[send ok]`, `[block insist_cap]`,
+  `[send released]`, `send_failed:<código>`). Sin tocar el esquema.
+- No válido = `invalid_decision:<unknown_intent|no_message|too_long|unparsed>`, sin reintento ni
+  plantilla. El tope del mensaje es de 400 en UTF-16, como mide Telegram: `revisor-plan` vio que
+  la justificación del plan (en caracteres) no valía; en UTF-16, los 7 que como mucho esperan
+  juntos caben en 4096.
+- API caída = cualquier `anthropic.APIError` tras los 2 reintentos del SDK (20 s de timeout). Tras
+  la revisión, el aviso distingue lo que se rechaza (un 4xx que no sea 408, 409 ni 429).
+- El bloque fijo lleva las intenciones que aplican hoy; esfuerzo `low` (el más bajo de la API) con
+  el pensamiento adaptativo por defecto de Haiku 5.5.
+- `system_notices`: `kind`, `period` (día o mes), `detail` (códigos, con un `CHECK` que no deja
+  pasar texto), `detected_at`, `sent_at` y `UNIQUE (kind, period)`; 1 año. `ON CONFLICT … DO
+  NOTHING`, no `INSERT OR IGNORE`, que también se tragaría el `CHECK` (lo cazó el test).
+- Uno a la vez: guarda propia (fila `overlap`) y `max_instances=2`, `coalesce`,
+  `misfire_grace_time=60`. PTB espera al *callback*, así que APScheduler cuenta el latido como
+  instancia mientras dura (leído en el código instalado).
+- `jimic run` no arranca si un YAML no vale (con el informe de `config check`; los Markdown no
+  cuentan) ni si `MODELO_LATIDO` no tiene precio de entrada, salida y caché. La purga, a diario a
+  las 4:00 locales. La clave y la URL de la API se pasan explícitas: con `api_key` el SDK no lee
+  credenciales del entorno, pero sí `ANTHROPIC_BASE_URL`.
+- Una guarda nueva en `conftest.py` (`no_real_anthropic`) hace fallar cualquier test rápido que
+  intente llamar a Anthropic de verdad (lección de la 1.4).
+
+**Valores a mano** (código independiente, antes de implementar; los recalculó `revisor-plan`): 96
+latidos y 64 despiertos; con la reunión de 10:00 a 11:00, 60 llamadas. Tramos: 16:30 → 16:30;
+16:37 y 16:40 → 16:45; 23:50 → ninguno. Llamada tipo (2000 fijos, 2500 de estado, 100 de salida):
+0,0007 $ la primera con caché de 1 h (0,00055 con la de 5 min), 0,00032 con la caché leída, 0,0005
+sin caché. El día de 60 llamadas con 1 h: **2 escrituras y 58 lecturas = 0,01996 $** (el plan decía
+1 + 59 = 0,01958; `revisor-plan` vio que el hueco de 75 min de la reunión deja caducar la caché, y
+el test usa su cifra); con 5 min, 0,033 (todas escriben); sin caché, 0,03. Frontera de 100 000:
+100 000 de entrada y 200 de salida, 0,0101; con 100 001, 0,0505005. Aviso del presupuesto a los
+24 $ de 30. Todos, comprobados por los tests.
+
+**Contrato de Haiku** (21-nov-2026, `JIMIC_CONTRATO=1`, clave de `jimic-dev`, una llamada con el
+estado inventado): bloque fijo de **1668 tokens** (pasa los 512 de la caché mínima y no llega a
+4000); 796 de entrada, **504 de salida** (el pensamiento adaptativo: el plan suponía 100), 2050
+escritos en la caché de 1 h; 0,0007416 $; respuesta válida con `effort: low`. Con lo medido, una
+llamada con la caché leída sale por unos 0,00035 $ y el día de ejemplo por unos 0,022 $ (10.2 del
+diseño, al día).
+
+**Medidas.** `DayState.to_json` del contrato: 1706 bytes. La N3 (tras la revisión): 792 tests (3 de contrato
+saltados; eran 693 tras la 1.4), 0:21 en total (pre-commit 0:07, pytest 0:14, gitleaks de la
+historia 0:00); este anexo se escribió mientras corría y solo es documentación.
+
+**Versiones incorrectas** (aplicadas y deshechas con un script, sin dejar nada en el árbol).
+Predicción antes, observado después:
+
+| # | Versión | Predicción | Observado |
+| --- | --- | --- | --- |
+| 1 | Un latido cortado no deja fila | Rojos: el día de ejemplo y la fila en UTC (2) | Igual (2) |
+| 2 | La plantilla sale en todos los latidos tras su hora | Rojos: el de 16:45 de `test_decision` y el de «solo a las 16:45» (2) | **13**: los datos tienen el gimnasio a las 13:00 y, a las 16:30, su plantilla también sale; caen todos los que comparan la lista exacta. El mismo defecto desde más sitios |
+| 3 | El aviso del sistema escribe en `notices` | Rojos: «no van a `notices`», 16:30, solo 16:45 y plan y cierre con la API caída (4) | Igual (4) |
+| 4 | El plan sale sin la 1.14 | Rojos: los 4 de `test_decision` y los 2 de `test_latido` (6) | Igual (6) |
+| 5 | Sin `cache_control` | Rojo: la forma de la petición (1) | Igual (1) |
+| 6 | El contador ignora la lectura de caché | Rojos: 4 de `test_gasto` y 1 de `test_latido` (5) | **6**: también el de Sonnet sin precio de caché, que sin ese término nunca se consulta |
+
+En el plan, la fila 2 era la del test bueno: con la API caída a las 16:30 y a las 16:45, la segunda
+pasada pararía la de las 16:45 por repetida y el test pasaría sin probar nada. Por eso a las 16:30
+la API responde. Además, cada corrección de la revisión se comprobó deshaciendo el código: sus
+tests nuevos fallan sin ella.
+
+**Revisión** (`/code-review medium`). 10 hallazgos: 7 corregidos y 3 explicados (2 de ellos, con
+Pendiente).
+- Corregidos: (1) el arranque exige también el precio de caché, porque con Sonnet cada latido
+  pagaba y no contaba (fd70c29); (2) y (5) se envía y se registra antes de contar, y un fallo al
+  contar o al registrar un aviso del sistema ya no pierde lo que esperaba ni deja dos filas
+  (c4c3820); (4) un 401, 403, 404 o 400 se avisa como rechazo con el tipo y apunta al `.env`
+  (d26010c); (6) el aviso del presupuesto dice el porcentaje real (006a4af); (9) la plantilla y el
+  esquema, una vez por proceso (e3741da); (10) un fichero que cambia entre la comprobación y la
+  carga da el informe, no una traza (3c31a36).
+- Explicados: (7) el bloque fijo sí llega al mínimo de la caché: 1668 tokens, y el contrato vio la
+  escritura; (3) y (8), con Pendiente.
+
+**Pendiente.**
+- **1.11:** un envío que Telegram rechaza se pierde (hallazgo 3; §2.13 del plan aprobado): no
+  vuelve a la cola, y la plantilla de su tramo ya no sale. Si molesta, reintentar en el siguiente
+  latido lo que falló. Y la barrida de las aprobaciones caducadas (pendiente de la 1.4).
+- **1.9:** las intenciones van dos veces, en el bloque fijo y en el estado con `left_today`
+  (hallazgo 8). Medir con las evaluaciones si sobra la copia del estado.
+- **1.10:** el «gastado hoy» (`spent_on`) para `daily_cap_usd`, y el precio de caché de Sonnet 5.5
+  (el anexo B dice 0,10 $; está sin poner en `PRICES`).
+- **Del informe de `revisor-plan`, sin cambiar** (aprobado tal cual): un aviso o una tarea clave
+  cuya hora por defecto cae en un latido cortado (evento, cupo, solape) no tiene plantilla ese día;
+  la plantilla de una `key_task` no mira si ya está hecha; un aviso del sistema que espera al día
+  siguiente caduca, y con el silencio de serie (23:00 a 7:00) eso pasa siempre que cae en él; los
+  que esperan salen también en un latido cortado por evento; con `UNIQUE (kind, period)`, si cae
+  una segunda fuente el mismo día, no se avisa. El motivo de Haiku puede citar un biométrico y va a
+  `decisions` (H1-19 dice «nunca a SQLite»): el prompt le pide que no lo haga; si las evaluaciones
+  de la 1.9 lo ven, hará falta más.
+- **2.2:** degradar la foto de APEX por series (pendiente de la 1.6). La foto no se guarda en
+  `decisions`.
+
+**Pruebas contra servicios reales** (regla «los tests no dejan basura»): una llamada a la API de
+Anthropic (el contrato), que no crea nada en ningún servicio. Ni Todoist, ni Calendar, ni Telegram:
+no hay restos que comprobar.

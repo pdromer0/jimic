@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 from ruamel.yaml.comments import CommentedMap
 
+from jimic.memory import personal
 from jimic.memory.personal import (
     PersonalFileError,
     check,
@@ -324,3 +325,31 @@ def test_guardar_con_un_nombre_que_no_es_de_los_dos_yaml_da_un_error_claro(confi
     with pytest.raises(ValueError, match=r"^limites\.yml no es un fichero YAML personal$"):
         save_yaml_file(config_dir / "limites.yml", parse_yaml(template("limites.yaml")))
     assert list(config_dir.iterdir()) == []
+
+
+def test_un_fichero_que_cambia_entre_la_comprobacion_y_la_carga_da_el_informe(
+    tmp_path, monkeypatch
+):
+    """Revisión propia, hallazgo 10: si un editor guarda `limites.yaml` justo después de
+    comprobarlo, `jimic run` no sale con una traza de Pydantic (que puede citar el valor)."""
+    personal.init(tmp_path)
+    real_check = personal.check
+
+    def check_then_break(config_dir):
+        reports = real_check(config_dir)
+        limits_file = config_dir / "limites.yaml"
+        limits_file.write_text(limits_file.read_text().replace(": 8 ", ": ocho "))
+        return reports
+
+    monkeypatch.setattr(personal, "check", check_then_break)
+    with pytest.raises(personal.PersonalFilesInvalid) as error:
+        personal.load_personal(tmp_path)
+    assert "limites.yaml: no es válido" in str(error.value)
+    assert "ocho" not in str(error.value)
+
+
+def test_cargar_los_ficheros_de_la_plantilla_da_sus_modelos(tmp_path):
+    personal.init(tmp_path)
+    intentions, limits = personal.load_personal(tmp_path)
+    assert [i.id for i in intentions.intentions] == ["plan_del_dia", "cierre_del_dia"]
+    assert limits.max_messages_per_day == 8

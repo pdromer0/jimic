@@ -1,0 +1,97 @@
+"""What the service runs between opening and closing the database (task 1.8).
+
+`Runtime.start` opens the sources, the client of the model and the Telegram channel, then
+schedules the heartbeat every 15 minutes (from the next quarter of an hour) and the purge once a
+day. `Runtime.stop` undoes it in reverse order, every step even if one fails: the channel stops
+first, so no heartbeat runs while the rest closes. The queue of the group window lives in the
+`Heartbeat`, as long as the service.
+"""
+
+import sqlite3
+from collections.abc import Callable
+from contextlib import AsyncExitStack
+from datetime import time
+
+from jimic.channel.bot import TelegramChannel, build_channel
+from jimic.clock import Clock
+from jimic.config import Settings
+from jimic.heartbeat.beat import INTERVAL, Heartbeat, next_beat
+from jimic.heartbeat.decide import HaikuDecider, ModelApi, build_model_api
+from jimic.heartbeat.sources import open_sources
+from jimic.memory.retention import purge
+from jimic.memory.schemas import Intentions, Limits
+from jimic.paths import Paths
+from jimic.tools.todoist import TodoistApi
+
+PURGE_AT = time(4, 0)
+"""Local time of the daily purge, inside the default quiet hours."""
+
+
+type ChannelFactory = Callable[[Settings, sqlite3.Connection, Clock], TelegramChannel]
+type ModelFactory = Callable[[Settings], ModelApi]
+
+
+class Runtime:
+    def __init__(
+        self,
+        settings: Settings,
+        paths: Paths,
+        clock: Clock,
+        conn: sqlite3.Connection,
+        intentions: Intentions,
+        limits: Limits,
+        *,
+        channel_factory: ChannelFactory = build_channel,
+        model_factory: ModelFactory = build_model_api,
+        todoist_api: TodoistApi | None = None,
+    ) -> None:
+        self._settings = settings
+        self._paths = paths
+        self._clock = clock
+        self._conn = conn
+        self._intentions = intentions
+        self._limits = limits
+        self._channel_factory = channel_factory
+        self._model_factory = model_factory
+        self._todoist_api = todoist_api
+        self._stack = AsyncExitStack()
+        self.heartbeat: Heartbeat | None = None
+
+    async def start(self) -> None:
+        """Raises what the channel raises (`ChannelError`), with everything opened closed."""
+        stack = self._stack
+        try:
+            sources = await stack.enter_async_context(
+                open_sources(self._settings, self._paths, self._clock, self._todoist_api)
+            )
+            model = self._model_factory(self._settings)
+            stack.push_async_callback(model.close)
+            channel = self._channel_factory(self._settings, self._conn, self._clock)
+            heartbeat = Heartbeat(
+                clock=self._clock,
+                timezone=self._settings.timezone,
+                limits=self._limits,
+                intentions=self._intentions,
+                sources=sources,
+                conn=self._conn,
+                decider=HaikuDecider(
+                    model.create, self._settings.heartbeat_model, self._intentions
+                ),
+                sender=channel,
+            )
+            await channel.start()
+            stack.push_async_callback(channel.stop)
+            channel.schedule_every(heartbeat.beat, INTERVAL, next_beat(self._clock.now()), "latido")
+            channel.schedule_daily(
+                self._purge, PURGE_AT.replace(tzinfo=self._settings.timezone), "purga"
+            )
+            self.heartbeat = heartbeat
+        except BaseException:
+            await stack.aclose()
+            raise
+
+    async def _purge(self) -> None:
+        purge(self._conn, self._clock)
+
+    async def stop(self) -> None:
+        await self._stack.aclose()

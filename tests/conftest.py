@@ -20,7 +20,7 @@ CONTRACT = os.environ.get("JIMIC_CONTRATO") == "1"
 VALID_ENV = {
     "ENTORNO": "prod",
     "ZONA_HORARIA": "Europe/Madrid",
-    "MODELO_LATIDO": "modelo-latido-de-prueba",
+    "MODELO_LATIDO": "claude-haiku-5-5",
     "MODELO_AGENTE": "modelo-agente-de-prueba",
     "CLAVE_ANTHROPIC": "test-clave-anthropic-123",
     "TOKEN_TELEGRAM": "test-token-telegram-456",
@@ -28,7 +28,8 @@ VALID_ENV = {
     "TOKEN_TODOIST": "test-token-todoist-789",
     "RUTA_APEX": "/datos/inventados/apex.json",
 }
-"""Un `.env` válido de producción con valores inventados y fáciles de buscar en un texto."""
+"""Un `.env` válido de producción con valores inventados y fáciles de buscar en un texto. El
+modelo del latido es uno de verdad: `jimic run` no arranca con uno sin precio."""
 
 
 def write_env(values: dict[str, str]) -> Path:
@@ -81,6 +82,22 @@ def no_real_telegram(monkeypatch):
         raise AssertionError("un test ha intentado hablar con Telegram de verdad")
 
     monkeypatch.setattr("telegram.request.HTTPXRequest.do_request", refuse)
+
+
+@pytest.fixture(autouse=True)
+def no_real_anthropic(request, monkeypatch):
+    """Ningún test rápido habla con la API de Anthropic: una petición real falla en voz alta.
+
+    Los dobles (`FakeMessages`) no pasan por aquí; el contrato de Haiku, que es `slow`, sí
+    llama de verdad y por eso queda fuera.
+    """
+    if request.node.get_closest_marker("slow"):
+        return
+
+    async def refuse(self, *args, **kwargs):
+        raise AssertionError("un test ha intentado hablar con Anthropic de verdad")
+
+    monkeypatch.setattr("anthropic._base_client.AsyncAPIClient.request", refuse)
 
 
 @pytest.fixture

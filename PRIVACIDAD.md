@@ -30,6 +30,10 @@ usuario. **No lee la descripción**, la ubicación ni los correos de los asisten
   según la tabla; las decisiones del latido, 90 días). La excepción es el historial de cambios de
   memoria (`changes`), que se guarda siempre, hasta que el usuario lo borre. Las transcripciones
   locales del agente se borran a los 7 días.
+- La base guarda también el **gasto en el modelo** (por llamada: el día, el modelo, cuántos tokens
+  y cuántos dólares; ni el texto enviado ni el recibido) y el **registro de los avisos del
+  sistema** (el tipo, como «API caída», un código como `calendar:auth` y la hora; sin texto). Los
+  dos, un año.
 - Los registros técnicos (logs) no llevan contenido: ni títulos de eventos ni mensajes.
 
 ## Cómo retirar el permiso y borrar los datos

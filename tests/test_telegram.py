@@ -2,7 +2,7 @@
 
 import asyncio
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -329,6 +329,60 @@ def test_el_log_de_todo_un_recorrido_no_lleva_contenido_ni_chat_ni_token(
         drive(application, callback_update(f"{approval_id}:1:y", chat_id=OTHER_CHAT_ID))
     for secret in (SECRET_TITLE, SECRET_TEXT, TOKEN, str(CHAT_ID), str(OTHER_CHAT_ID)):
         assert secret not in caplog.text
+
+
+def test_un_texto_del_latido_va_sin_formato_ni_teclado_y_devuelve_su_id(
+    make_channel, request_double
+):
+    """Lo que escribe el modelo va tal cual: con HTML, un `<` lo rompería."""
+    channel, application = make_channel()
+    ids: list[int] = []
+
+    async def before():
+        ids.append(await channel.send_text("a < b & c"))
+
+    drive(application, before=before)
+    assert ids == [10]
+    (params,) = request_double.params("sendMessage")
+    assert params["text"] == "a < b & c"
+    assert "parse_mode" not in params and "reply_markup" not in params
+    assert request_double.methods() == ["sendMessage"]
+
+
+def test_un_texto_que_telegram_rechaza_levanta_send_error(make_channel, request_double):
+    channel, application = make_channel()
+    request_double.failures["sendMessage"] = (403, "Forbidden: bot was blocked by the user")
+
+    async def before():
+        with pytest.raises(SendError):
+            await channel.send_text("hola")
+
+    drive(application, before=before)
+
+
+def test_los_trabajos_no_se_solapan_sin_registro_ni_se_ponen_al_dia(make_channel):
+    """Leído del `JobQueue` de verdad, sin arrancarlo: cada 15 min desde el primero alineado,
+    sin acumular lo perdido y con un margen de un minuto."""
+    channel, application = make_channel()
+    first = datetime(2026, 11, 21, 19, 15, tzinfo=ZoneInfo("Europe/Madrid"))
+
+    async def nothing() -> None:
+        return None
+
+    async def before():
+        every = channel.schedule_every(nothing, timedelta(minutes=15), first, "latido")
+        daily = channel.schedule_daily(
+            nothing, time(4, 0, tzinfo=ZoneInfo("Europe/Madrid")), "purga"
+        )
+        for job in (every, daily):
+            assert job.job.max_instances == 2
+            assert job.job.coalesce is True
+            assert job.job.misfire_grace_time == 60
+        assert every.job.trigger.interval == timedelta(minutes=15)
+        assert every.job.trigger.start_date == first
+        assert [job.name for job in application.job_queue.jobs()] == ["latido", "purga"]
+
+    drive(application, before=before)
 
 
 def test_build_application_deja_httpx_en_warning():

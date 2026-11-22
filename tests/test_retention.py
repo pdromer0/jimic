@@ -63,6 +63,23 @@ def add_day(conn: sqlite3.Connection, day: str) -> None:
     conn.execute("INSERT INTO day_ratings (day, rating, rated_at) VALUES (?, 3, ?)", (day, moment))
 
 
+def add_system_notice(conn: sqlite3.Connection, detected_at: str) -> None:
+    """Each row gets its own period, so `UNIQUE (kind, period)` never gets in the way."""
+    (rows,) = conn.execute("SELECT COUNT(*) FROM system_notices").fetchone()
+    conn.execute(
+        "INSERT INTO system_notices (kind, period, detected_at) VALUES ('api_down', ?, ?)",
+        (f"2000-01-{rows + 1:02d}", detected_at),
+    )
+
+
+def add_usage(conn: sqlite3.Connection, day: str) -> None:
+    conn.execute(
+        "INSERT INTO model_usage (day, model, input_tokens, output_tokens, cache_read_tokens,"
+        " cache_write_tokens, usd) VALUES (?, 'modelo-inventado', 1, 1, 0, 0, 0.0)",
+        (day,),
+    )
+
+
 def column_values(conn: sqlite3.Connection, table: str, column: str) -> list[str]:
     return [row[0] for row in conn.execute(f"SELECT {column} FROM {table} ORDER BY {column}")]
 
@@ -74,12 +91,19 @@ def column_values(conn: sqlite3.Connection, table: str, column: str) -> list[str
         (add_notice, "notices", "sent_at", "2025-07-15T10:00:00+00:00", "09:59:59"),
         (add_approval, "approvals", "created_at", "2026-06-15T10:00:00+00:00", "09:59:59"),
         (add_deleted_task, "deleted_tasks", "deleted_at", "2026-06-15T10:00:00+00:00", "09:59:59"),
+        (
+            add_system_notice,
+            "system_notices",
+            "detected_at",
+            "2025-07-15T10:00:00+00:00",
+            "09:59:59",
+        ),
     ],
 )
 def test_cada_tabla_borra_lo_anterior_a_su_corte_y_guarda_la_frontera(
     conn, add, table, column, cutoff, second_before
 ):
-    """Pilla una retención equivocada (90, 365, 30, 30 días) o `<=` en vez de `<`."""
+    """Pilla una retención equivocada (90, 365, 30, 30, 365 días) o `<=` en vez de `<`."""
     before = cutoff.replace("10:00:00", second_before)
     add(conn, before)
     add(conn, cutoff)
@@ -107,10 +131,11 @@ def test_el_corte_es_absoluto_aunque_cruce_un_cambio_de_hora(conn):
 )
 def test_las_tablas_por_dia_guardan_365_dias_locales(conn, now, deleted_day, kept_day):
     """Pilla el día en UTC (a las 00:30 de Madrid aún es el día anterior en UTC) y el 29-F."""
-    add_day(conn, deleted_day)
-    add_day(conn, kept_day)
+    for day in (deleted_day, kept_day):
+        add_day(conn, day)
+        add_usage(conn, day)
     deleted = purge(conn, FixedClock(now))
-    for table in ("plan_items", "day_ratings", "day_plans"):
+    for table in ("plan_items", "day_ratings", "day_plans", "model_usage"):
         assert deleted[table] == 1
         assert column_values(conn, table, "day") == [kept_day]
 
@@ -133,7 +158,9 @@ def test_una_base_vacia_se_purga_sin_error(conn):
         "notices": 0,
         "approvals": 0,
         "deleted_tasks": 0,
+        "system_notices": 0,
         "plan_items": 0,
         "day_ratings": 0,
         "day_plans": 0,
+        "model_usage": 0,
     }

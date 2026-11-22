@@ -1,9 +1,11 @@
 """The service: start, wait until told to stop, and stop cleanly.
 
-`run` is what `jimic run` calls: it finds the folders, validates the `.env`, and runs the
-`asyncio` loop until SIGINT or SIGTERM. `serve` is the body, stopped by an event, which is how
-tests drive it. The channel (Telegram) starts after the database and stops before it closes,
-inside this same loop. Stopping closes SQLite and flushes the logs.
+`run` is what `jimic run` calls: it finds the folders, validates the `.env` and the two YAML
+personal files, checks that the heartbeat model has a price, and runs the `asyncio` loop until
+SIGINT or SIGTERM. `serve` is the body, stopped by an event, which is how tests drive it. What
+runs inside (`jimic.runtime`: the sources, the model, Telegram, the heartbeat) starts after the
+database and stops before it closes, inside this same loop. Stopping closes SQLite and flushes
+the logs.
 """
 
 import asyncio
@@ -13,12 +15,14 @@ import sqlite3
 from collections.abc import Callable, Mapping
 from typing import Protocol
 
-from jimic.channel.bot import build_channel
 from jimic.clock import Clock, SystemClock
 from jimic.config import load_settings
 from jimic.logs import logging_to
 from jimic.memory.database import open_database
+from jimic.memory.personal import load_personal
+from jimic.memory.usage import require_cache_prices
 from jimic.paths import Paths, resolve_paths
+from jimic.runtime import Runtime
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +30,8 @@ STOP_SIGNALS = (signal.SIGINT, signal.SIGTERM)
 
 
 class Channel(Protocol):
-    """What the service needs from the channel: start listening and stop (safe to repeat)."""
+    """What the service runs inside: start it, and stop it (safe to repeat). The Telegram
+    channel of the demo, or the whole runtime of `jimic run`."""
 
     async def start(self) -> None: ...
 
@@ -91,17 +96,23 @@ async def serve_until_signal(
             loop.remove_signal_handler(sig)
 
 
+build_runtime = Runtime
+"""What `run` builds inside the service; the tests replace it."""
+
+
 def run(environ: Mapping[str, str]) -> None:
     """Validate the setup and run the service until a stop signal.
 
-    Raises `PathsError`, `ConfigError`, `MigrationError` or `ChannelError` with a message for
-    the user.
+    Raises `PathsError`, `ConfigError`, `PersonalFilesInvalid`, `UnpricedError`,
+    `MigrationError` or `ChannelError` with a message for the user.
     """
     paths = resolve_paths(environ)
     settings = load_settings(paths)
+    intentions, limits = load_personal(paths.config_dir)
+    require_cache_prices(settings.heartbeat_model)  # nothing is spent without counting it
     clock = SystemClock(settings.timezone)
 
     def channel_factory(conn: sqlite3.Connection) -> Channel:
-        return build_channel(settings, conn, clock)
+        return build_runtime(settings, paths, clock, conn, intentions, limits)
 
     asyncio.run(serve_until_signal(paths, clock, channel_factory=channel_factory))

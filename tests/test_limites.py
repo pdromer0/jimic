@@ -63,7 +63,7 @@ def run(conn, now: str, proposal=None, queue=None, its=None, lim=None, day=MONDA
     queue = queue if queue is not None else WaitingNotices()
     return second_pass(
         madrid(now),
-        proposal,
+        () if proposal is None else (proposal,),
         its if its is not None else intentions(),
         lim if lim is not None else limits(),
         sent(conn, day),
@@ -340,6 +340,26 @@ def test_si_sale_un_urgente_la_cola_sigue_esperando(conn):
         "send",
         "ok",
     )
+    assert [item.intent for item in queue.items] == ["regar"]
+
+
+def test_dos_propuestas_en_un_latido_van_en_orden_y_la_segunda_ve_la_primera(conn):
+    """Las plantillas de la API caída pueden ser dos: el gimnasio sale y el aviso, que llega
+    justo detrás de un proactivo, espera la ventana. Pilla una pasada que solo mira la primera
+    propuesta, o que no cuenta lo que acaba de salir."""
+    queue = WaitingNotices()
+    verdicts = second_pass(
+        madrid("2030-01-07T13:00"),
+        (outgoing("insistir_gimnasio"), outgoing("regar")),
+        intentions(),
+        limits(),
+        sent(conn, MONDAY),
+        queue,
+    )
+    assert [(v.action, v.reason, v.intents) for v in verdicts] == [
+        ("send", "ok", ("insistir_gimnasio",)),
+        ("wait", "group_window", ("regar",)),
+    ]
     assert [item.intent for item in queue.items] == ["regar"]
 
 
