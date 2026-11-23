@@ -32,6 +32,8 @@ DAY_RETENTION = (
     ("day_ratings", 365),
     ("day_plans", 365),
     ("model_usage", 365),
+    ("key_task_marks", 365),
+    ("task_moves", 30),
     ("conversations", 7),
 )
 """(table, days kept) for tables keyed by `day`; `plan_items` goes before its `day_plans`."""
