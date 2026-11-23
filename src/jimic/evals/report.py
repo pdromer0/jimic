@@ -130,6 +130,7 @@ def read_outcomes(document: object) -> list[Outcome]:
                 silent_only=bool(item["silent_only"]),
                 correct=tuple(bool(one["correct"]) for one in item["passes"]),
                 speak=tuple(bool(one["speak"]) for one in item["passes"]),
+                errors=tuple(one["api_error"] is not None for one in item["passes"]),
             )
             for item in document["scenarios"]
         ]
@@ -214,7 +215,12 @@ def _figures(total: Score) -> list[str]:
             f" ({total.spoke_when_silent}/{total.silent_passes}) {mark} (umbral ≤ 5 %)"
         )
     else:
-        lines.append("Habla cuando no debía: sin escenarios de callar en esta ejecución")
+        lines.append("Habla cuando no debía: sin pasadas de callar que contar en esta ejecución")
+    if total.errors:
+        lines.append(
+            f"Pasadas con error: {total.errors} (fallo en el acierto;"
+            " fuera de «habla cuando no debía»)"
+        )
     return lines
 
 
@@ -273,9 +279,6 @@ def summary(
         f" {usage.input_tokens} de entrada, {usage.cache_read_tokens} de caché leída,"
         f" {usage.cache_write_tokens} de caché escrita, {usage.output_tokens} de salida"
     )
-    errors = sum(1 for item in results for result in item.passes if result.api_error)
-    if errors:
-        lines.append(f"Errores de la API: {errors} pasadas (cuentan como fallos)")
     failing = [item for item in results if not all(item.outcome.correct)]
     if failing:
         lines.append("Fallan:")
@@ -321,6 +324,7 @@ def _comparison_json(comparison: Comparison | None) -> dict[str, Any] | None:
             "passes": total.passes,
             "spoke_when_silent": total.spoke_when_silent,
             "silent_passes": total.silent_passes,
+            "errors": total.errors,
         }
 
     return {
@@ -357,6 +361,7 @@ def document(
             "passes": total.passes,
             "spoke_when_silent": total.spoke_when_silent,
             "silent_passes": total.silent_passes,
+            "errors": total.errors,
             "skipped": [{"id": item.id, "pending": item.pending} for item in skipped],
             "usd": str(paid.usd),
             "calls": paid.calls,

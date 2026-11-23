@@ -11,6 +11,7 @@ from evals_data import REAL_FILE, outcome, variant
 from heartbeat_data import FakeMessages, answer, api_down, api_message, picks
 
 from jimic.evals.heartbeat import PassResult, is_correct, run_pass, run_scenarios, score
+from jimic.evals.report import read_outcomes
 from jimic.evals.scenarios import EvalError, build_state, load_suite
 from jimic.heartbeat.decide import build_request, fixed_block
 
@@ -249,6 +250,47 @@ def test_habla_cuando_no_debia_se_cuenta_solo_sobre_los_escenarios_de_callar():
     assert total.false_speak == pytest.approx(1 / 3)
     assert (total.spoke_when_silent, total.silent_passes) == (1, 3)
     assert (total.correct, total.passes) == (5, 6)
+
+
+def test_una_pasada_con_error_queda_fuera_de_habla_cuando_no_debia_pero_falla_el_acierto(suite):
+    """Revisión del PR: un escenario de callar con 1 error y 2 silencios da 0/2, no 0/3. Pilla
+    contar el error como un «no habló» que rebaja la cifra sin haber decidido nada."""
+    calls = []
+
+    def reply(request):
+        calls.append(request)
+        return api_down() if len(calls) == 1 else api_message(answer())
+
+    fake = FakeMessages(reply)
+    (l09,) = asyncio.run(
+        run_scenarios(fake.create, "claude-haiku-5-5", suite, suite.select(["l09"]), 3)
+    )
+    assert l09.scenario.silent_only
+    assert l09.outcome.errors == (True, False, False)
+    total = score([l09.outcome])
+    assert (total.spoke_when_silent, total.silent_passes) == (0, 2)
+    assert (total.correct, total.passes, total.errors) == (2, 3, 1)
+
+
+def test_el_informe_anterior_guarda_que_pasadas_tuvieron_error():
+    """La comparación recalcula las cifras del anterior: sin leer el error, su denominador
+    volvería a contar la pasada fallida."""
+    document = {
+        "scenarios": [
+            {
+                "id": "l09",
+                "fingerprint": "huella",
+                "silent_only": True,
+                "passes": [
+                    {"correct": False, "speak": False, "api_error": "down:APIConnectionError"},
+                    {"correct": True, "speak": False, "api_error": None},
+                ],
+            }
+        ]
+    }
+    (read,) = read_outcomes(document)
+    assert read.errors == (True, False)
+    assert score([read]).silent_passes == 1
 
 
 def test_un_escenario_con_alternativa_de_callar_no_cuenta_para_habla_cuando_no_debia(suite):

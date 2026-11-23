@@ -8,7 +8,9 @@ own tests, so they stay out. A failed call is a failed pass with its code, never
 Grading (1.9-b): a pass is right when what it decides (`speak` and the set of intentions after
 `judge`, in any order) is one of the acceptable sets; an `invalid_decision` or an error of the API
 is wrong. «Speaks when it should not» (1.9-c) counts, over the passes of the scenarios whose only
-acceptable answer is silence, those that speak.
+acceptable answer is silence, those that speak. A pass with an error (of the API or `unexpected:*`)
+is left out of that count, as it says nothing about speaking, and listed apart (review of the PR
+of 1.9); it is still wrong for the accuracy.
 """
 
 import asyncio
@@ -54,6 +56,8 @@ class Outcome:
     silent_only: bool
     correct: tuple[bool, ...]
     speak: tuple[bool, ...]
+    errors: tuple[bool, ...]
+    """The passes whose call or answer failed: out of «speaks when it should not»."""
 
 
 @dataclass(frozen=True)
@@ -69,6 +73,7 @@ class ScenarioResult:
             silent_only=self.scenario.silent_only,
             correct=tuple(is_correct(self.scenario.expected, result) for result in self.passes),
             speak=tuple(result.speak for result in self.passes),
+            errors=tuple(result.api_error is not None for result in self.passes),
         )
 
 
@@ -88,6 +93,9 @@ class Score:
     passes: int
     spoke_when_silent: int
     silent_passes: int
+    """The passes without error of the scenarios whose only answer is silence."""
+    errors: int = 0
+    """Passes with an error, of any scenario: wrong for the accuracy, out of the other figure."""
 
     @property
     def accuracy(self) -> Fraction | None:
@@ -100,12 +108,19 @@ class Score:
 
 
 def score(outcomes: Sequence[Outcome]) -> Score:
-    silent = [outcome for outcome in outcomes if outcome.silent_only]
+    silent = [
+        (spoke, errored)
+        for outcome in outcomes
+        if outcome.silent_only
+        for spoke, errored in zip(outcome.speak, outcome.errors, strict=True)
+    ]
+    counted = [spoke for spoke, errored in silent if not errored]
     return Score(
         correct=sum(sum(outcome.correct) for outcome in outcomes),
         passes=sum(len(outcome.correct) for outcome in outcomes),
-        spoke_when_silent=sum(sum(outcome.speak) for outcome in silent),
-        silent_passes=sum(len(outcome.speak) for outcome in silent),
+        spoke_when_silent=sum(counted),
+        silent_passes=len(counted),
+        errors=sum(sum(outcome.errors) for outcome in outcomes),
     )
 
 

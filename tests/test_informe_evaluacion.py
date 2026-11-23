@@ -13,7 +13,7 @@ from zoneinfo import ZoneInfo
 import pytest
 from conftest import FixedClock, write_env
 from evals_data import DEV_ENV, REAL_FILE, ApiFactory, outcome, use_dev
-from heartbeat_data import SECRET_REASON, SECRET_TEXT, FakeMessages, api_message, picks
+from heartbeat_data import SECRET_REASON, SECRET_TEXT, FakeMessages, api_down, api_message, picks
 
 import jimic.cli
 from jimic.evals import command, report
@@ -121,6 +121,20 @@ def test_el_informe_tiene_sus_dos_ficheros_y_el_resumen_con_los_saltados(monkeyp
     assert "Comparación: es el primer informe." in run.screen
     assert "Coste: 0,03744 $ en 117 llamadas (0,00032 $/llamada)" in run.screen
     assert run.md_path.read_text(encoding="utf-8").startswith("# Evaluación del latido")
+
+
+def test_las_pasadas_con_error_se_listan_aparte_y_no_cuentan_como_silencios(monkeypatch):
+    """Revisión del PR: con la API caída en un escenario de callar no hay nada que contar en
+    «habla cuando no debía», en vez de un 0/3 que aprobaría sin haber decidido nada."""
+    use_dev(monkeypatch)
+    run = evaluate(ApiFactory(FakeMessages(api_down())), ["l09"], passes=3)
+    assert "Acierto: 0,0 % (0/3) ❌" in run.screen
+    assert "Habla cuando no debía: sin pasadas de callar que contar en esta ejecución" in run.screen
+    assert "Pasadas con error: 3 (fallo en el acierto; fuera de «habla cuando no debía»)" in (
+        run.screen
+    )
+    document = json.loads(run.json_path.read_text(encoding="utf-8"))
+    assert (document["summary"]["silent_passes"], document["summary"]["errors"]) == (0, 3)
 
 
 def test_ningun_log_lleva_el_motivo_ni_los_mensajes(monkeypatch, caplog):

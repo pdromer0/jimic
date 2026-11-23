@@ -50,5 +50,13 @@ def outcome(
     speak: tuple[bool, ...],
     silent_only: bool = False,
     fingerprint: str | None = None,
+    errors: tuple[bool, ...] | None = None,
 ) -> Outcome:
-    return Outcome(id, fingerprint or f"huella-{id}", silent_only, correct, speak)
+    return Outcome(
+        id,
+        fingerprint or f"huella-{id}",
+        silent_only,
+        correct,
+        speak,
+        errors if errors is not None else (False,) * len(correct),
+    )
