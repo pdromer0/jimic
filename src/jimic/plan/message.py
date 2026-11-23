@@ -231,7 +231,9 @@ def icon_table(rows: Sequence[tuple[str, str]]) -> dict[str, str]:
 
 
 def _since_text(previous: date, today: date) -> str:
-    if previous >= today - timedelta(days=1):
+    if previous == today:
+        return "Desde el plan de antes"
+    if previous == today - timedelta(days=1):
         return "Desde ayer"
     return f"Desde el {WEEKDAYS[previous.weekday()]} {previous:%d/%m}"
 

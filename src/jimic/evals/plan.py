@@ -234,13 +234,16 @@ async def _run_pass(
     habits = config.intentions.habits
     painted = painted_text(built.plan)
     memory = _memory(runs)
+    # The agent's items only if its plan is the one painted: with the minimal plan the pass
+    # fails by its code, and its checks must not score what Pedro never saw.
+    own = built.run if built.code == AGENT else None
     plan_input = CheckInput(
         now=scenario.now,
-        items=built.run.items if built.run is not None else [],
+        items=own.items if own is not None else [],
         tasks=scenario.tasks,
         events=scenario.events,
         habits=habits,
-        plan=built.run.plan if built.run is not None else {},
+        plan=own.plan if own is not None else {},
         painted=painted,
         memory_proposals=memory,
     )

@@ -377,3 +377,12 @@ def test_un_evento_de_varios_dias_sale_sin_hora_y_uno_de_ayer_que_acabo_no():
     ]
     later = day_view(calendar, tasks(), madrid("2030-01-10T12:00"), late=True)
     assert [e.title for e in later.entries] == ["Congreso"]  # la guardia ya acabó
+
+
+def test_con_un_plan_anterior_de_hoy_no_dice_desde_ayer(conn):
+    """Hallazgo de la revisión propia: un segundo plan el mismo día no puede decir «Desde ayer»
+    de lo aprendido esta mañana."""
+    record_sent(conn, "plan_del_dia", madrid("2030-01-10T07:00"), 5)
+    add_change(conn, madrid("2030-01-10T07:20"))
+    line = learned_line(conn, NOW, ["plan_del_dia"])
+    assert line is not None and line.startswith("🧠 Desde el plan de antes he aprendido:")

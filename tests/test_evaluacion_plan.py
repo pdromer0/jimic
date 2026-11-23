@@ -434,3 +434,23 @@ def test_un_escenario_cambiado_no_se_compara():
         ("b",),
         None,
     )
+
+
+def test_con_el_plan_minimo_no_se_puntua_lo_que_el_agente_propuso(monkeypatch):
+    """Hallazgo de la revisión propia: si el plan del agente no cabe y sale el mínimo, la pasada
+    falla por su código y sus comprobaciones no miran elementos que Pedro no vio."""
+    import jimic.plan.runner as runner
+    from jimic.channel.message import MessageTooLong
+    from jimic.plan import minimal
+
+    real = runner.paint
+
+    def too_long(content, *args):
+        if content.greeting != minimal.GREETING:
+            raise MessageTooLong("inventado")
+        return real(content, *args)
+
+    monkeypatch.setattr(runner, "paint", too_long)
+    result, _ = one_pass(GOOD_PLAN)
+    assert result.code == "minimal:too_long" and not result.ok
+    assert result.plan is not None and result.plan.items == ()
