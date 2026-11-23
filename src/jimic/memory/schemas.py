@@ -91,6 +91,9 @@ class Habit(_Strict):
     duration: PositiveDuration
     moment: Moment
     todoist_task: NonEmptyStr
+    training: bool = False
+    """The training (task 1.15): the workout of today in APEX counts as done, and its key task
+    offers [Ya entrené] instead of [Hecho]. At most one habit has it."""
 
 
 class _Intention(_Strict):
@@ -193,9 +196,11 @@ def field_names() -> frozenset[str]:
 
 
 def cross_check(intentions: Intentions) -> list[tuple[Loc, str]]:
-    """Return `(loc, type)` for repeated ids, repeated days and `habit:` that names no habit.
+    """Return `(loc, type)` for repeated ids, repeated days, `habit:` that names no habit and a
+    second habit with `training: true`.
 
-    The second appearance of an id is the one reported; `habit:` looks only among the habits.
+    The second appearance of an id (or of `training`) is the one reported; `habit:` looks only
+    among the habits.
     """
     problems: list[tuple[Loc, str]] = []
     for section, items in (("habits", intentions.habits), ("intentions", intentions.intentions)):
@@ -204,6 +209,8 @@ def cross_check(intentions: Intentions) -> list[tuple[Loc, str]]:
             if item.id in seen:
                 problems.append(((section, index, "id"), "duplicate_id"))
             seen.add(item.id)
+    trainings = [index for index, habit in enumerate(intentions.habits) if habit.training]
+    problems += [(("habits", index, "training"), "second_training") for index in trainings[1:]]
     habit_ids = {habit.id for habit in intentions.habits}
     for index, intention in enumerate(intentions.intentions):
         if isinstance(intention, KeyTask) and intention.habit not in habit_ids:

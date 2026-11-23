@@ -64,6 +64,7 @@ REASONS = {
     "list_type": "debe ser una lista",
     "duplicate_id": "id repetido",
     "unknown_habit": "no apunta a ningún hábito",
+    "second_training": "solo un hábito puede ser el entreno",
     "repeated_days": "días repetidos",
 }
 

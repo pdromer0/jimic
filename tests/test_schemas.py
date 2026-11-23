@@ -296,3 +296,29 @@ def test_los_ids_repetidos_se_rechazan_en_la_segunda_aparicion():
 def test_un_fichero_correcto_no_tiene_problemas_cruzados():
     data = intentions_with(intentions=[key_task(), notice()], habits=[habit()])
     assert cross_check(Intentions.model_validate(data)) == []
+
+
+def test_el_entreno_es_falso_por_defecto_y_se_acepta_en_un_habito():
+    """1.15: `training` es opcional; un hábito sin él no es el entreno."""
+    data = intentions_with(
+        intentions=[key_task()], habits=[habit(), habit(id="gym", training=True)]
+    )
+    parsed = Intentions.model_validate(data)
+    assert [h.training for h in parsed.habits] == [False, True]
+    assert cross_check(parsed) == []
+
+
+def test_dos_habitos_de_entreno_se_rechazan_en_el_segundo():
+    """Pilla un segundo entreno: APEX no sabría a cuál marcar hecho."""
+    data = intentions_with(
+        intentions=[key_task()],
+        habits=[habit(training=True), habit(id="otro"), habit(id="gym", training=True)],
+    )
+    assert cross_check(Intentions.model_validate(data)) == [
+        (("habits", 2, "training"), "second_training")
+    ]
+
+
+def test_el_entreno_no_admite_un_texto():
+    data = intentions_with(intentions=[key_task()], habits=[habit(training="sí")])
+    assert errors(Intentions, data) == [(("habits", 0, "training"), "bool_type")]
