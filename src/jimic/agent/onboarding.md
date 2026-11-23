@@ -17,6 +17,9 @@ Cómo la llevas:
 - Los ficheros ya tienen su estructura. Para rellenar una sección, usa `replace` con su título
   (`## Comidas`) o con su comentario como `before`, y en `after` el título seguido del contenido.
   Los comentarios `<!-- … -->` son pistas: puedes quitarlos al rellenar.
+- Como mucho, tres propuestas por respuesta. La rutina tiene cuatro secciones: rellénala con un
+  solo `replace` que vaya desde `## Horario base` hasta el final del fichero, copiado exacto, o
+  deja lo que no quepa para el mensaje siguiente.
 
 Las partes:
 
