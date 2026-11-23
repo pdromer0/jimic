@@ -297,6 +297,31 @@ class TelegramChannel:
             if item.telegram_message_id is not None and item.view is not None:
                 await self._edit(item.telegram_message_id, item.view)
 
+    async def deliver(
+        self, kind: str, content: InteractiveMessage | str, expires_at: datetime
+    ) -> int:
+        """A proactive message the code wrote (the plan of the day, task 1.14): an interactive
+        one, saved as an approval of `kind`, or escaped text, in as few messages as fit. Returns
+        the id of the (last) message sent; raises `SendError` if Telegram refuses it."""
+        if isinstance(content, InteractiveMessage):
+            await self.send(kind, content, expires_at)
+        else:
+            for chunk in reply_chunks(content):
+                try:
+                    sent = await self._app.bot.send_message(
+                        chat_id=self._chat_id,
+                        text=chunk,
+                        parse_mode=ParseMode.HTML,
+                        link_preview_options=LinkPreviewOptions(is_disabled=True),
+                    )
+                except TelegramError as error:
+                    logger.error("telegram send failed (%s)", _code(error))
+                    raise SendError(_code(error)) from None
+                self._sent(sent.message_id)
+            logger.info("text message sent")
+        assert self.last_sent is not None
+        return self.last_sent
+
     async def send_text(self, text: str) -> int:
         """Send `text` as plain text, without keyboard or preview; return its `message_id`.
 

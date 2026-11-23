@@ -217,19 +217,17 @@ def test_un_envio_rechazado_se_descarta_sin_gastar_y_el_siguiente_latido_puede_e
 
 
 @pytest.mark.parametrize(
-    ("intent", "task_id"), [("plan_del_dia", "1.14"), ("cierre_del_dia", "1.16")]
+    ("intent", "task_id"), [("plan_del_dia", None), ("cierre_del_dia", "1.16")]
 )
-def test_el_plan_y_el_cierre_de_haiku_no_salen_ni_van_a_notices(conn, intent, task_id):
-    """Decisión 1.8-b. Pilla el plan que sale sin la 1.14."""
+def test_el_plan_y_el_cierre_de_haiku_los_envia_el_enganche_no_el_latido(conn, intent, task_id):
+    """Decisión 1.8-b: el latido no envía su texto ni los anota en `notices`; los pasa al
+    enganche (el plan lo envía la 1.14; el cierre, la 1.16)."""
     world = World(conn, FakeMessages(api_message(answer(True, intent, SECRET_TEXT))))
     world.at("2030-01-07T08:00")
     assert world.sender.texts == []
     assert world.notices() == []
-    assert world.rows()[0][1:] == (
-        1,
-        intent,
-        f"{SECRET_REASON} (pendiente: {task_id}) [handover ok]",
-    )
+    note = f" (pendiente: {task_id})" if task_id else ""
+    assert world.rows()[0][1:] == (1, intent, f"{SECRET_REASON}{note} [handover ok]")
     assert world.handovers() == [intent]
     assert world.handed == [intent]
 
@@ -297,13 +295,13 @@ def test_el_enganche_de_serie_solo_escribe_en_el_log(conn, caplog):
         sources=sources(),
         conn=conn,
         decider=HaikuDecider(
-            FakeMessages(api_message(answer(True, "plan_del_dia", None))).create, MODEL, its
+            FakeMessages(api_message(answer(True, "cierre_del_dia", None))).create, MODEL, its
         ),
         sender=FakeSender(),
     )
     asyncio.run(heartbeat.beat())
-    assert "handover plan_del_dia (pending 1.14)" in caplog.text
-    assert [row[0] for row in conn.execute("SELECT intent FROM handovers")] == ["plan_del_dia"]
+    assert "handover cierre_del_dia (pending 1.16)" in caplog.text
+    assert [row[0] for row in conn.execute("SELECT intent FROM handovers")] == ["cierre_del_dia"]
 
 
 # --- La API caída ------------------------------------------------------------------------------
@@ -315,6 +313,19 @@ def test_con_la_api_caida_el_aviso_de_las_16_30_sale_con_su_plantilla(conn):
     assert world.sender.texts == ["⏰ Mirar las ofertas", API_DOWN_TEXT]
     assert world.notices() == [("ofertas", 1001)]
     assert world.rows()[0][1:] == (1, "ofertas", "api_down [send ok]")
+
+
+def test_con_haiku_caido_el_plan_se_lanza_a_su_hora_por_defecto(conn):
+    """Tarea 1.14 (pendiente de la decisión 85): a las 8:00 el latido pasa el plan al agente
+    aunque Haiku no responda; a las 8:15 ya no (su tramo pasó), y nada del plan sale como texto
+    del latido."""
+    world = World(conn, FakeMessages(api_down()))
+    world.at("2030-01-07T08:00")
+    assert world.handed == ["plan_del_dia"]
+    assert world.handovers() == ["plan_del_dia"]
+    assert world.sender.texts == [API_DOWN_TEXT]
+    world.at("2030-01-07T08:15")
+    assert world.handed == ["plan_del_dia"]
 
 
 def test_con_la_api_caida_solo_a_las_16_45_el_aviso_ya_no_sale(conn):

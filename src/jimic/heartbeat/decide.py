@@ -11,10 +11,12 @@ something invalid still has its usage counted (`messages.parse` would raise and 
   a message too long) is dropped with its code and the rest goes on. An answer that does not
   fit as a whole (more than `MAX_PICKS`, no valid pick, or no valid JSON) is
   `invalid_decision:<why>`: nobody speaks and it is not retried.
-- The plan and the close (decision 1.8-b) are decided and recorded, but nothing goes out until
-  tasks 1.14 and 1.16 bring them: the second pass hands them over to the agent.
+- The plan and the close (decision 1.8-b) are decided and recorded, and the second pass hands
+  them over to the agent: the plan goes out from there (task 1.14); the close, with task 1.16.
 - If the API fails (RF-04), each `notice` and `key_task` whose default time falls in this
-  heartbeat's slot and has not gone out today goes out with a fixed template of the code.
+  heartbeat's slot and has not gone out today goes out with a fixed template of the code, and a
+  `daily_plan` in its slot is handed over to the agent as if Haiku had picked it (task 1.14,
+  pending of decision 85): the plan still goes out at its default time. The close has none.
 
 What the model writes (`reason`, `message`) never reaches a log: logs say codes and ids.
 """
@@ -35,7 +37,7 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 from jimic.channel.message import telegram_length
 from jimic.config import Settings
 from jimic.heartbeat.cycle import Decision
-from jimic.heartbeat.limits import HANDOVER_TASK, Outgoing, applies_on
+from jimic.heartbeat.limits import HANDOVER_TYPES, PENDING_TASK, Outgoing, applies_on
 from jimic.heartbeat.state import DayState
 from jimic.memory.live import LiveConfig
 from jimic.memory.schemas import DailyPlan, DayClose, Intention, Intentions, KeyTask, Notice
@@ -60,8 +62,6 @@ MAX_PICKS = 3
 """Intentions the model may pick in one heartbeat (decision 1.8-d)."""
 SLOT = timedelta(minutes=15)
 """A heartbeat's slot for the default times: `default_time <= now < default_time + SLOT`."""
-PENDING_TASK = HANDOVER_TASK
-"""The intentions decided but not sent yet (decision 1.8-b), and the task that brings them."""
 INTENTIONS_MARK = "<<INTENCIONES>>"
 
 type CreateMessage = Callable[..., Awaitable[Message]]
@@ -186,7 +186,7 @@ def _problem(pick: Pick, active: dict[str, str], seen: set[str]) -> str | None:
         return "unknown_intent"
     if pick.intent in seen:
         return "duplicate"
-    if active[pick.intent] in PENDING_TASK:
+    if active[pick.intent] in HANDOVER_TYPES:
         return None
     text = (pick.message or "").strip()
     if not text:
@@ -222,10 +222,11 @@ def judge(message: Message, state: DayState) -> Decision:
             continue
         seen.add(pick.intent)
         intents.append(pick.intent)
-        task = PENDING_TASK.get(active[pick.intent])
-        if task is not None:
+        if active[pick.intent] in HANDOVER_TYPES:
             # Handed over to the agent by the second pass: it has no text of its own.
-            pending.append(task)
+            task = PENDING_TASK.get(active[pick.intent])
+            if task is not None:
+                pending.append(task)
             proposals.append(Outgoing(intent=pick.intent, text=""))
         else:
             proposals.append(Outgoing(intent=pick.intent, text=(pick.message or "").strip()))
@@ -240,22 +241,34 @@ def judge(message: Message, state: DayState) -> Decision:
     return Decision(True, ",".join(intents), answer.reason + notes, tuple(proposals), usage)
 
 
+PLAN_TEMPLATE = "(plan del día a su hora por defecto)"
+"""The text of a plan handed over with the API down: it never goes out, the agent writes it."""
+
+
 def template_text(intention: Intention, habits: dict[str, str]) -> str:
+    if isinstance(intention, DailyPlan):
+        return PLAN_TEMPLATE
     if isinstance(intention, KeyTask):
         return f"⏰ Toca {habits.get(intention.habit, intention.habit)}"
     return f"⏰ {intention.purpose}"
 
 
 def templates(intentions: Intentions, state: DayState) -> tuple[Outgoing, ...]:
-    """Plan B (RF-04): the `notice` and `key_task` of today whose default time falls in this
-    heartbeat's slot and that have not gone out today. The plan and the close have none."""
+    """Plan B (RF-04): the `notice`, `key_task` and `daily_plan` of today whose default time
+    falls in this heartbeat's slot and that have not been attended today (the plan goes to the
+    agent through the second pass). The close has none."""
     now = state.now
     sent = {entry.intent for entry in state.sent_today}
+    left = {active.id: active.left_today for active in state.intentions}
     habits = {habit.id: habit.name for habit in intentions.habits}
     chosen = []
     for intention in intentions.intentions:
-        if not isinstance(intention, Notice | KeyTask) or not applies_on(intention, now.date()):
+        if not isinstance(intention, Notice | KeyTask | DailyPlan):
             continue
+        if not applies_on(intention, now.date()):
+            continue
+        if isinstance(intention, DailyPlan) and left.get(intention.id, 0) < 1:
+            continue  # already handed over today: `sent_today` only has what went out
         start = datetime.combine(now.date(), intention.default_time, tzinfo=now.tzinfo)
         if start <= now < start + SLOT and intention.id not in sent:
             chosen.append(Outgoing(intent=intention.id, text=template_text(intention, habits)))

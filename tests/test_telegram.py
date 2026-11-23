@@ -469,6 +469,52 @@ def test_un_texto_que_telegram_rechaza_levanta_send_error(make_channel, request_
     drive(application, before=before)
 
 
+def test_el_plan_sin_botones_va_escapado_y_devuelve_el_id_del_mensaje(
+    make_channel, request_double, conn
+):
+    """Tarea 1.14: el plan del día escrito por el código va en HTML con todo escapado (lleva
+    títulos de terceros) y sin aprobación cuando no tiene propuestas."""
+    channel, application = make_channel()
+    ids: list[int] = []
+
+    async def before():
+        ids.append(await channel.deliver("plan", "¡Pedro! <b>Hola</b> & más", EXPIRES))
+
+    drive(application, before=before)
+    assert ids == [10] and channel.last_sent == 10
+    (params,) = request_double.params("sendMessage")
+    assert params["text"] == "¡Pedro! &lt;b&gt;Hola&lt;/b&gt; &amp; más"
+    assert params["parse_mode"] == "HTML"
+    assert conn.execute("SELECT COUNT(*) FROM approvals").fetchone() == (0,)
+
+
+def test_el_plan_con_botones_se_guarda_como_aprobacion_y_devuelve_el_id(
+    make_channel, request_double, conn
+):
+    channel, application = make_channel()
+    ids: list[int] = []
+
+    async def before():
+        ids.append(await channel.deliver("demo", make_message(), EXPIRES))
+
+    drive(application, before=before)
+    assert ids == [10]
+    assert conn.execute("SELECT kind, telegram_message_id FROM approvals").fetchall() == [
+        ("demo", 10)
+    ]
+
+
+def test_un_plan_que_telegram_rechaza_levanta_send_error(make_channel, request_double):
+    channel, application = make_channel()
+    request_double.failures["sendMessage"] = (403, "Forbidden: bot was blocked by the user")
+
+    async def before():
+        with pytest.raises(SendError):
+            await channel.deliver("plan", "hola", EXPIRES)
+
+    drive(application, before=before)
+
+
 def test_los_trabajos_no_se_solapan_sin_registro_ni_se_ponen_al_dia(make_channel):
     """Leído del `JobQueue` de verdad, sin arrancarlo: cada 15 min desde el primero alineado,
     sin acumular lo perdido y con un margen de un minuto."""

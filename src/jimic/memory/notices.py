@@ -1,7 +1,8 @@
 """What the `notices` table says about the proactive messages of a day.
 
-Only the heartbeat writes `notices`, one row per intention it sends: Pedro's conversation and
-the confirmations he asks for never go there (4.3 of the design), so every row is proactive.
+The heartbeat writes `notices`, one row per intention it sends, and so does the plan of the day
+when it goes out (task 1.14): Pedro's conversation and the confirmations he asks for never go
+there (4.3 of the design), so every row is proactive.
 A grouped message (decision 1.7-b) is several rows with the same `telegram_message_id`, and it
 counts as one message. A row without that id counts on its own: when in doubt, more discreet.
 
@@ -12,6 +13,7 @@ as attended today for the cap of its intention (once, even with a row in `notice
 
 import sqlite3
 from collections import Counter
+from collections.abc import Collection
 from dataclasses import dataclass, field
 from datetime import datetime
 
@@ -77,3 +79,28 @@ def sent_between(conn: sqlite3.Connection, start: datetime, end: datetime) -> Se
 
 def record_handover(conn: sqlite3.Connection, intent: str, moment: datetime) -> None:
     conn.execute("INSERT INTO handovers (handed_at, intent) VALUES (?, ?)", (to_db(moment), intent))
+
+
+def record_sent(
+    conn: sqlite3.Connection, intent: str, moment: datetime, message_id: int | None
+) -> None:
+    """A proactive message of `intent` went out at `moment` (the plan of the day, task 1.14): it
+    counts in the quota like a notice of the heartbeat."""
+    conn.execute(
+        "INSERT INTO notices (sent_at, intent, telegram_message_id) VALUES (?, ?, ?)",
+        (to_db(moment), intent, message_id),
+    )
+
+
+def last_sent_of(
+    conn: sqlite3.Connection, intents: Collection[str], before: datetime
+) -> datetime | None:
+    """The last time one of `intents` went out before `before`; aware, in UTC."""
+    if not intents:
+        return None
+    marks = ", ".join("?" for _ in intents)
+    (moment,) = conn.execute(
+        f"SELECT MAX(sent_at) FROM notices WHERE intent IN ({marks}) AND sent_at < ?",
+        (*intents, to_db(before)),
+    ).fetchone()
+    return None if moment is None else datetime.fromisoformat(moment)

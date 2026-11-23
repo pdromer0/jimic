@@ -2,8 +2,9 @@
 
 `Runtime.start` opens the sources, the client of the model, the conversation with the agent, the
 executor of what Pedro approves, the memory (its buttons, `/memoria` and `/deshacer`, task 1.12),
-the onboarding (`/puesta_en_marcha`, task 1.13) and the Telegram channel (Pedro's text goes to the
-assistant, the taps to their handlers), all on one live configuration of the YAML files. Then it
+the onboarding (`/puesta_en_marcha`, task 1.13), the Telegram channel (Pedro's text goes to the
+assistant, the taps to their handlers) and the plan of the day (task 1.14: the hook of the
+heartbeat for a `daily_plan`), all on one live configuration of the YAML files. Then it
 sweeps what expired while the service was down and schedules the heartbeat every 15 minutes (from
 the next quarter of an hour), the sweep of expired approvals every day at 00:01 (1.11-c) and the
 purge once a day: the database and the files of the agent older than 7 days. `Runtime.stop` undoes
@@ -38,6 +39,7 @@ from jimic.memory.live import LiveConfig
 from jimic.memory.retention import purge
 from jimic.memory.schemas import Intentions, Limits
 from jimic.paths import Paths
+from jimic.plan.runner import DailyPlanRunner
 from jimic.tools.todoist import TodoistApi
 
 logger = logging.getLogger(__name__)
@@ -97,6 +99,7 @@ class Runtime:
         self.conversation: Conversation | None = None
         self.assistant: Assistant | None = None
         self.executor: Executor | None = None
+        self.plan: DailyPlanRunner | None = None
 
     async def start(self) -> None:
         """Raises what the channel raises (`ChannelError`), with everything opened closed."""
@@ -154,6 +157,16 @@ class Runtime:
             channel = self._channel_factory(
                 self._settings, self._conn, self._clock, assistant.reply, handlers
             )
+            plan = DailyPlanRunner(
+                conversation=conversation,
+                sources=sources,
+                config=self.config,
+                conn=self._conn,
+                clock=self._clock,
+                timezone=self._settings.timezone,
+                config_dir=self._paths.config_dir,
+                sender=channel,
+            )
             heartbeat = Heartbeat(
                 clock=self._clock,
                 timezone=self._settings.timezone,
@@ -165,6 +178,7 @@ class Runtime:
                     model.create, self._settings.heartbeat_model, self._intentions, self.config
                 ),
                 sender=channel,
+                on_handover=plan.handover,
                 config=self.config,
             )
             await channel.start()
@@ -182,6 +196,7 @@ class Runtime:
             self.conversation = conversation
             self.assistant = assistant
             self.executor = executor
+            self.plan = plan
         except BaseException:
             await stack.aclose()
             raise

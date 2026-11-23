@@ -160,3 +160,26 @@ def check_preferences(text: str) -> list[Problem]:
         elif not all(cell.strip() for cell in cells):
             problems.append(Problem(number, "la fila de iconos tiene una celda vacía"))
     return problems
+
+
+def icon_rows(text: str) -> list[tuple[str, str]]:
+    """The rows of the table of `## Iconos` as `(task, icon)`, stripped (task 1.14): what the
+    plan of the day paints «Tu día» with. The header (a row followed by a separator) and the rows
+    without two non-empty cells are skipped; only the first section counts."""
+    starts = [number for number, title in _sections(text) if title == ICONS_SECTION]
+    if not starts:
+        return []
+    lines = _table_lines(text, starts[0])
+    rows = []
+    for index, (_, line) in enumerate(lines):
+        if SEPARATOR_ROW.fullmatch(line):
+            continue
+        if index + 1 < len(lines) and SEPARATOR_ROW.fullmatch(lines[index + 1][1]):
+            continue  # the header
+        cells = [
+            cell.strip()
+            for cell in UNESCAPED_PIPE.split(line.strip().removeprefix("|").removesuffix("|"))
+        ]
+        if len(cells) == 2 and all(cells):
+            rows.append((cells[0], cells[1]))
+    return rows
