@@ -69,10 +69,10 @@ def run(
     Raises `EvalError` outside `dev` (before anything else) or with a wrong file or id, and
     `PathsError`, `ConfigError` or `UnpricedError` like `jimic run`.
     """
-    if passes < 1:
-        raise EvalError("--pasadas tiene que ser 1 o más")
     paths = resolve_paths(environ)
     refuse_unless_dev(paths)
+    if passes < 1:
+        raise EvalError("--pasadas tiene que ser 1 o más")
     suite = load_suite(eval_file)
     chosen = suite.select(scenario_ids)
     settings = load_settings(paths)

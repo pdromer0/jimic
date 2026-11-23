@@ -59,8 +59,10 @@ def test_con_prod_se_niega_sin_leer_el_env(monkeypatch):
     assert factory.built == 0
 
 
-def test_la_cli_se_niega_con_prod_y_sale_con_2(capsys):
-    assert jimic.cli.main(["evaluar", "latido"]) == 2
+@pytest.mark.parametrize("extra", [[], ["--pasadas", "0"]], ids=["normal", "cero-pasadas"])
+def test_la_cli_se_niega_con_prod_antes_que_nada_y_sale_con_2(capsys, extra):
+    """Con `prod`, la negativa va primero, aunque otra opción también esté mal."""
+    assert jimic.cli.main(["evaluar", "latido", *extra]) == 2
     assert "solo corre con ENTORNO=dev" in capsys.readouterr().err
 
 
