@@ -9,10 +9,13 @@
 Headings match exactly (level 2, same case); lines inside fenced code blocks and HTML
 comment blocks are skipped.
 Problems carry a line and a fixed reason, never the text of the line.
+
+`outline` gives the same view to the onboarding (task 1.13), which reads what each section holds.
 """
 
 import re
 from collections.abc import Iterator
+from dataclasses import dataclass
 
 from jimic.memory.problems import Problem
 
@@ -69,6 +72,35 @@ def _sections(text: str) -> list[tuple[int, str]]:
         match = HEADING.fullmatch(line)
         if match and len(match[1]) == 2:
             sections.append((number, match[2] or ""))
+    return sections
+
+
+@dataclass(frozen=True)
+class Section:
+    """A part of a Markdown file: a level-2 section, or what goes before the first one (or
+    after a level-1 heading), with `title` `None`. `body` holds its lines outside code blocks
+    and comments, up to the next heading of level 1 or 2, without that heading."""
+
+    title: str | None
+    line: int | None
+    body: tuple[tuple[int, str], ...]
+
+
+def outline(text: str) -> list[Section]:
+    """The sections of `text`, in order; the first is always the one without a title."""
+    sections: list[Section] = []
+    title: str | None = None
+    start: int | None = None
+    body: list[tuple[int, str]] = []
+    for number, line in _lines(text):
+        match = HEADING.fullmatch(line)
+        if match and len(match[1]) <= 2:
+            sections.append(Section(title, start, tuple(body)))
+            title = (match[2] or "") if len(match[1]) == 2 else None
+            start, body = number, []
+        else:
+            body.append((number, line))
+    sections.append(Section(title, start, tuple(body)))
     return sections
 
 

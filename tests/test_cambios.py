@@ -107,6 +107,7 @@ def test_max_deletions_de_5_a_3_se_ofrece_y_de_5_a_8_se_rechaza_con_su_explicaci
     assert raised.value.code == "relaxes"
     assert "max_deletions_per_day" in raised.value.for_agent
     assert "a mano" in raised.value.for_agent
+    assert raised.value.relaxed == ("max_deletions_per_day",)
 
 
 def test_un_cambio_de_limites_que_solo_toca_un_comentario_se_rechaza(config_dir):

@@ -1,10 +1,11 @@
 """`jimic telegram demo`: an invented proposal in the test bot, to see the buttons on the phone.
 
 Only with `ENTORNO=dev`: the demo refuses before it reads the `.env` or builds anything. It
-sends four messages, as the assistant would: a proposal with a create, a move and a delete under
+sends five messages, as the assistant would: a proposal with a create, a move and a delete under
 an answer, with the global row `[✅ Créalo todo] [⏭ Nada]`; what was done at once with its
-[Deshacer] (task 1.11); a change of memory with [Guardar] [Cambiar] [No] and an idea with
-[📝 Apuntar]; and a list of `/deshacer` (task 1.12). The taps edit the messages and touch nothing
+[Deshacer] (task 1.11); a step of the onboarding, the meals of the routine with [Guardar] (task
+1.13); a change of memory with [Guardar] [Cambiar] [No] and an idea with [📝 Apuntar]; and a list
+of `/deshacer` (task 1.12). The taps edit the messages and touch nothing
 in Todoist or in the files: the handlers only say what would have happened. A text from Pedro
 gets the fixed phrase. It is a process that does not end (stop it with Ctrl+C): **Pedro launches
 it, never the agent**.
@@ -96,6 +97,18 @@ MEMORY_ENTRIES: list[dict[str, Any]] = [
     },
 ]
 MEMORY_ANSWER = "Te propongo no escribirte antes de las 8 y apuntar tu idea (inventado)."
+ONBOARDING_ENTRY: dict[str, Any] = {
+    "action": "change",
+    "file": "rutina.md",
+    "operation": "replace",
+    "before": "## Comidas",
+    "after": "## Comidas\n\n- Desayuno a las 7:30, como a las 14:00 y ceno a las 21:00",
+    "reason": "inventado",
+    "origin": "Desayuno a las 7:30, como a las 14:00 y ceno a las 21:00 (inventado)",
+}
+ONBOARDING_ANSWER = (
+    "Las comidas, así en tu rutina. Después vamos con la jornada de trabajo (inventado)."
+)
 UNDO_ITEMS = (
     Item(
         title="📝 06/01 preferencias.md · añadir: - Mensajes cortos (inventado)",
@@ -107,16 +120,19 @@ UNDO_ITEMS = (
 
 
 def demo_messages(settings: Settings) -> list[tuple[str, InteractiveMessage]]:
-    """The invented proposal, the invented [Deshacer], a change of memory with [Guardar] and a
-    list of `/deshacer` (task 1.12): nothing of them is real."""
+    """The invented proposal, the invented [Deshacer], a step of the onboarding with [Guardar]
+    (task 1.13), a change of memory with [Guardar] and a list of `/deshacer` (task 1.12):
+    nothing of them is real."""
     proposal = plan_message(ENTRIES, DAY, settings.timezone).model_copy(update={"body": ANSWER})
     undo = undo_message("➕ 🧘 Estiramientos · hoy 21:30", {"action": "create", "task_id": "x"})
     undo = undo.model_copy(update={"body": "Apuntado (inventado)."})
+    onboarding = memory_message([ONBOARDING_ENTRY]).model_copy(update={"body": ONBOARDING_ANSWER})
     memory = memory_message(MEMORY_ENTRIES).model_copy(update={"body": MEMORY_ANSWER})
     undo_list = InteractiveMessage(header=UNDO_HEADER, items=UNDO_ITEMS)
     return [
         (PLAN_KIND, proposal),
         (UNDO_KIND, undo),
+        (MEMORY_KIND, onboarding),
         (MEMORY_KIND, memory),
         (UNDO_LIST_KIND, undo_list),
     ]

@@ -1,9 +1,10 @@
 """The five personal files in the config root: check them, create the YAML ones, save changes.
 
-- `jimic config check` (`check`): each file is correct, invalid (with its problems), missing
-  (a YAML file: create it with `jimic config init`) or pending (a Markdown file: the onboarding
-  creates it, CU-12). Problems name the file, a line and a reason built from schema names,
-  never from the content: Pydantic's `msg` and `input` and the loader's `str(exc)` are dropped.
+- `jimic config check` (`check`): each file is correct, invalid (with its problems), missing (a YAML
+  file: create it with `jimic config init`) or pending (a Markdown file: the onboarding creates it,
+  `/puesta_en_marcha` in Telegram, CU-12). Problems name the file, a line and a reason built from
+  schema names, never from the content: Pydantic's `msg` and `input` and the loader's `str(exc)` are
+  dropped.
 - `jimic config init` (`init`): writes the two YAML templates that are missing, private, and
   never overwrites a file.
 - `save_yaml_file`: validates a changed document and writes it atomically (task 1.12 uses it).
@@ -169,7 +170,7 @@ STATUS_TEXT: dict[Status, str] = {
     "ok": "correcto",
     "invalid": "no es válido",
     "missing": "no existe: créalo con `jimic config init`",
-    "pending": "aún no existe: lo crea la puesta en marcha",
+    "pending": "aún no existe: lo crea la puesta en marcha (/puesta_en_marcha)",
 }
 
 
@@ -189,7 +190,7 @@ def render_check(config_dir: Path, reports: Sequence[FileReport]) -> str:
     return "\n".join(lines)
 
 
-def _create_private(path: Path, text: str) -> bool:
+def create_private(path: Path, text: str) -> bool:
     """Create `path` (0600) with `text`; return `False`, untouched, if it already exists."""
     try:
         fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
@@ -212,11 +213,11 @@ def template(name: str) -> str:
 def init(config_dir: Path) -> list[tuple[str, bool]]:
     """Create the missing YAML files from their templates; return `(name, created)` for each.
 
-    The Markdown files are left to the onboarding (CU-12), which starts when `objetivos.md`
-    does not exist.
+    The Markdown files are left to the onboarding (CU-12), which Pedro launches with
+    `/puesta_en_marcha` (decision 1.13-b).
     """
     config_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
-    return [(name, _create_private(config_dir / name, template(name))) for name in YAML_SCHEMAS]
+    return [(name, create_private(config_dir / name, template(name))) for name in YAML_SCHEMAS]
 
 
 def render_init(config_dir: Path, results: Sequence[tuple[str, bool]]) -> str:
@@ -224,7 +225,7 @@ def render_init(config_dir: Path, results: Sequence[tuple[str, bool]]) -> str:
     for name, created in results:
         lines.append(f"- {name}: {'creado' if created else 'ya existe, no se toca'}")
     markdown = ", ".join(MARKDOWN_CHECKS)
-    lines.append(f"- {markdown}: los crea la puesta en marcha")
+    lines.append(f"- {markdown}: los crea la puesta en marcha (/puesta_en_marcha)")
     return "\n".join(lines)
 
 

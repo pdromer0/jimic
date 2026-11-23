@@ -109,16 +109,17 @@ def test_init_y_despues_check_sale_con_0(config_dir, capsys):
         f"Ficheros personales en {config_dir}:",
         "- intenciones.yaml: creado",
         "- limites.yaml: creado",
-        "- rutina.md, objetivos.md, preferencias.md: los crea la puesta en marcha",
+        "- rutina.md, objetivos.md, preferencias.md:"
+        " los crea la puesta en marcha (/puesta_en_marcha)",
     ]
     code, out, err = run(["config", "check"], capsys)
     assert (code, err) == (0, "")
     assert out.splitlines()[1:] == [
         "- intenciones.yaml: correcto",
         "- limites.yaml: correcto",
-        "- rutina.md: aún no existe: lo crea la puesta en marcha",
-        "- objetivos.md: aún no existe: lo crea la puesta en marcha",
-        "- preferencias.md: aún no existe: lo crea la puesta en marcha",
+        "- rutina.md: aún no existe: lo crea la puesta en marcha (/puesta_en_marcha)",
+        "- objetivos.md: aún no existe: lo crea la puesta en marcha (/puesta_en_marcha)",
+        "- preferencias.md: aún no existe: lo crea la puesta en marcha (/puesta_en_marcha)",
     ]
 
 

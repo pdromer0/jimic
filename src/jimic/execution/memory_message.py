@@ -15,6 +15,8 @@ The handlers (`MemoryHandlers`):
 - [Guardar] checks again against the file as it is now and writes it (`changes.save`); if the
   «antes» is gone or the result is no longer valid, nothing is written and the approval ends
   `rejected` (`Declined`). After a YAML file, the live configuration reloads.
+  The [Guardar] that finishes the onboarding (task 1.13) also sends `FINISHED_TEXT` and the
+  goals by priority, from `objetivos.md`.
 - [Cambiar] closes the proposal and asks Pedro how he wants it: the agent proposes again.
 - [📝 Apuntar] adds the line to `ideas.md` (created 0600 if missing), as one more change.
 - [No] only says so.
@@ -26,11 +28,12 @@ from pathlib import Path
 from typing import Any
 
 from jimic.channel.message import InteractiveMessage, Item, Option, ensure_fits
-from jimic.channel.taps import Declined, Failed, HandlerOutcome
+from jimic.channel.taps import Declined, Failed, HandlerOutcome, Show
 from jimic.clock import Clock
 from jimic.memory import changes
 from jimic.memory.changes import ChangeRefused, Proposed
 from jimic.memory.live import LiveConfig
+from jimic.memory.onboarding import progress
 from jimic.memory.personal import YAML_SCHEMAS
 
 logger = logging.getLogger(__name__)
@@ -57,6 +60,11 @@ DROPPED_TEXT = (
     " tareas. Si lo quieres, pídemelo otra vez en otro mensaje."
 )
 """What the code adds when a run read after proposing (decision 1.12-a)."""
+FINISHED_TEXT = (
+    "✅ Puesta en marcha terminada: los cinco ficheros pasan `jimic config check`. Ya no te la"
+    " recuerdo; lo que quieras cambiar, me lo dices cuando sea."
+)
+"""After the [Guardar] that finishes the onboarding (task 1.13), with the goals by priority."""
 
 
 def change_title(entry: dict[str, Any]) -> str:
@@ -115,6 +123,7 @@ class MemoryHandlers:
             logger.warning("memory: option %s does not fit the item", option)
             return Failed("invalid_option")
         proposed = proposed_of(entry)
+        was_finished = True if action == "idea" else self._finished()
         try:
             changes.save(
                 self._conn,
@@ -129,4 +138,19 @@ class MemoryHandlers:
             return Declined(refused.result, NO.key)
         if proposed.file in YAML_SCHEMAS:
             self._config.reload()
-        return NOTED if action == "idea" else SAVED
+        if action == "idea":
+            return NOTED
+        if not was_finished and self._finished():
+            logger.info("onboarding finished")
+            summary = progress(self._config_dir).summary()
+            return Show(f"{FINISHED_TEXT}\n\n{summary}", result=SAVED)
+        return SAVED
+
+    def _finished(self) -> bool:
+        """Whether the onboarding is finished; a folder that cannot be read counts as finished,
+        so that it never stops a [Guardar] nor sends the end by mistake."""
+        try:
+            return progress(self._config_dir).finished
+        except OSError as error:
+            logger.warning("onboarding progress failed (%s)", type(error).__name__)
+            return True

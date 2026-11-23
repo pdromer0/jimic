@@ -85,13 +85,13 @@ def int_of(value: object) -> int:
     return value if isinstance(value, int) and not isinstance(value, bool) else 0
 
 
-def command_of(text: str) -> str | None:
-    """The command the whole message is, or `None`."""
+def command_of(text: str, names: tuple[str, ...] = (MEMORY_COMMAND, UNDO_COMMAND)) -> str | None:
+    """The command of `names` the whole message is, or `None`."""
     word = text.strip()
     if " " in word or "\n" in word:
         return None
     name = word.split("@", 1)[0]
-    return name if name in (MEMORY_COMMAND, UNDO_COMMAND) else None
+    return name if name in names else None
 
 
 def _snippet(text: str, length: int = 60) -> str:

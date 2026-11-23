@@ -356,7 +356,7 @@ como mecanismo de **aprobación asíncrona**).
 | CU-01 | Proponer y crear el plan del día | JimiC | Latido: intención «plan del día» | [1] |
 | CU-02 | Insistir con una tarea clave (la primera: el gimnasio) | JimiC | Latido: tarea clave sin hacer | [1] |
 | CU-04 | Conversar con el contexto del día | Pedro | Mensaje | [1] |
-| CU-12 | Puesta en marcha: rutina, objetivos y preferencias | Pedro y JimiC | Primera conversación o `/puesta-en-marcha` | [1] |
+| CU-12 | Puesta en marcha: rutina, objetivos y preferencias | Pedro y JimiC | `/puesta_en_marcha` (JimiC la sugiere una vez al día mientras esté sin terminar) | [1] |
 | CU-13 | Ajustar objetivos, preferencias o comportamientos conversando | Pedro | Mensaje que expresa un cambio | [1] |
 | CU-14 | Cerrar el día | JimiC | Latido: intención «cierre del día» | [1] |
 | CU-15 | Ver y deshacer lo aprendido | Pedro | `/memoria`, `/deshacer` o una pregunta | [1] |
@@ -445,7 +445,10 @@ prioridad diaria (por ejemplo, «revisar ofertas») entra también desde el H1: 
 ### CU-12 · Puesta en marcha: rutina, objetivos y preferencias
 
 - **Actor:** Pedro y JimiC.
-- **Disparador:** la primera conversación (no existe `objetivos.md`) o `/puesta-en-marcha`.
+- **Disparador:** `/puesta_en_marcha`, que lanza Pedro (`/puesta-en-marcha` vale igual, pero Telegram
+  no lo enlaza); nunca arranca sola. Mientras esté sin terminar, el código añade una línea a la
+  primera respuesta del agente de cada día local: «Cuando quieras, hacemos la puesta en marcha:
+  /puesta_en_marcha» (decisión 106).
 - **Precondiciones:** el bot solo responde al chat ID de Pedro.
 - **Flujo:**
   1. JimiC se presenta, explica que recorrerá la rutina, las nueve áreas y unas preferencias
@@ -458,11 +461,15 @@ prioridad diaria (por ejemplo, «revisar ofertas») entra también desde el H1: 
      lugar de copiarlos; los de entrenamiento de APEX no hace falta enlazarlos, JimiC los lee solo
      (decisión 74). Cada área se guarda con [Guardar] [Cambiar].
   4. **Preferencias básicas:** tono, horas de silencio, cuánto insistir. [Guardar] [Cambiar].
-  5. Al final, resume las metas por prioridad.
-- **Datos:** escribe `rutina.md`, `objetivos.md` y `preferencias.md`; lee APEX.
+  5. Al guardar la última parte, el código dice que ha terminado (los cinco ficheros pasan
+     `jimic config check`) y resume las metas por prioridad.
+- **Datos:** escribe `rutina.md`, `objetivos.md`, `preferencias.md` y la sección `habits` de
+  `intenciones.yaml`, siempre con [Guardar]; lee APEX.
 - **Modelo:** Sonnet.
 - **Autonomía:** propone y espera; cada parte se guarda con un botón.
-- **Si se deja a medias:** al día siguiente lo recuerda una vez; después, solo si Pedro lo pide.
+- **Si se deja a medias:** el mismo comando la retoma donde iba, sin repetir lo guardado: el
+  progreso sale de los propios ficheros, así que un [Deshacer] o una edición a mano cuentan solos.
+  La sugerencia sigue saliendo una vez al día hasta que esté terminada (decisión 106).
 - **Aceptación:** rutina guardada; las nueve áreas con meta o «ahora no»; al menos un objetivo
   medible en tiempo y otro en entrenamiento; nada se guarda sin botón; se puede retomar sin perder
   lo guardado; los objetivos de APEX no se copian a `objetivos.md`: JimiC los lee de APEX.
@@ -865,7 +872,7 @@ ejecución, con un tope de 6000 caracteres por fichero; `ideas.md` no va (decisi
 
 **Claves en inglés, comentarios y textos en español** (decisión 20). `jimic config init` genera los
 dos YAML con un comentario en español junto a cada clave y nunca sobrescribe un fichero; los tres
-Markdown los crea la puesta en marcha (CU-12), que empieza cuando no existe `objetivos.md`. JimiC
+Markdown los crea la puesta en marcha (CU-12), que lanza Pedro con `/puesta_en_marcha`. JimiC
 escribe las horas entre comillas; el esquema (Pydantic, estricto) acepta `H:MM` o `HH:MM`, de 00:00
 a 23:59, con o sin ellas, y rechaza con un mensaje claro un fichero que no cuadre.
 `jimic config check` dice fichero, línea y motivo sin enseñar el contenido.
@@ -1535,6 +1542,7 @@ cuando haya casos reales de sobra y si Pedro lo considera necesario; exige evalu
 | 103 | **`log_idea` sigue la regla de la 102 y pasa a ser propuesta, con [📝 Apuntar]** (1.12-b, revisa la 100). El *hook* ya no lo deniega por la marca del día. `ideas.md` solo se escribe al tocar el botón (lo crea, 0600, si no existe), y la línea queda en `changes`: se puede deshacer | Una sola regla para todo lo que cambia la memoria, y `log_idea` vuelve a servir tras leer el calendario por la mañana. Decisión de Pedro del 22-nov-2026 | [0005](decisiones/0005-la-guardia.md) |
 | 104 | **El texto actual de los cinco ficheros personales va al final del *system prompt* del agente** (1.12-c), después de las instrucciones fijas y reconstruido en cada petición (`snapshot=False`), también al reanudar la sesión. Son datos de Pedro, no contenido externo: no contaminan. Tope de 6000 caracteres por fichero; el que lo pasa se recorta, con una nota al agente y el aviso del sistema `memory_clipped`, uno al día. `ideas.md` no va | Sin el texto, el agente no puede citar un «antes» exacto. La memoria semántica la lee el modelo (1.6). Con un texto fijo, la sesión reenvía el prompt de su primera petición y el agente vería los ficheros de la mañana tras un [Guardar]. Decisión de Pedro del 22-nov-2026 (la caché, medida en el contrato) | — |
 | 105 | Los YAML personales se recargan sin reiniciar: tras un [Guardar] o un [Deshacer], al momento; una edición a mano, al empezar el latido siguiente (cambia la fecha, el tamaño o el inodo). Uno que no vale deja la última versión buena y manda `config_invalid`, uno al día mientras siga así, con `jimic config check`. Además, una ventana de intención con `from == to` es el día entero, como la decisión 80, y para el modelo es lo mismo que no tener pista (pendiente de la 1.7) | Que lo guardado se use enseguida, sin que un fichero roto deje a JimiC sin límites. Tarea 1.12 | — |
+| 106 | **La puesta en marcha la lanza Pedro con `/puesta_en_marcha`, y JimiC se la sugiere una vez al día mientras esté sin terminar** (1.13-b, revisa el disparador de CU-12 y su «si se deja a medias»). Nunca arranca sola. La sugerencia la añade el código, no el agente: una línea al final de la primera respuesta del agente de cada día local que acaba bien, registrada en SQLite (un bit de `conversations`) para que un reinicio no la repita. No sale en `/memoria`, `/deshacer`, el «sí» escrito ni el latido, y no gasta cupo. El mismo comando la retoma; terminada, lo contesta el código. El comando lleva guiones bajos porque Telegram no enlaza comandos con guiones (`/puesta-en-marcha` queda como alias). Qué es «terminada» lo define `memory/onboarding.py`: el progreso se deduce de los ficheros, sin estado aparte | Que la puesta en marcha no se imponga ni se olvide, y que lo guardado nunca se pregunte otra vez. Decisión de Pedro del 23-nov-2026; el nombre del comando, en la sesión de la 1.13 | — |
 
 ### Correspondencia con las decisiones candidatas de la referencia
 

@@ -47,3 +47,67 @@ def shas(config_dir: Path) -> dict[str, str | None]:
     """The fingerprint of every memory file and of `ideas.md`."""
     names = (*MARKDOWN, "intenciones.yaml", "limites.yaml", "ideas.md")
     return {name: file_sha(config_dir / name) for name in names}
+
+
+# --- The onboarding (task 1.13) ---------------------------------------------------------------
+
+AREA_NAMES = (
+    "Gestión del tiempo",
+    "Entrenamiento",
+    "Hábitos",
+    "Nutrición",
+    "Salud",
+    "Trabajo y proyectos personales",
+    "Empleo",
+    "Ocio",
+    "Social",
+)
+"""Written here, not imported: the tests compare with the code's list."""
+AREA_TEXT = {
+    "Gestión del tiempo": (
+        "Meta: llegar a todo sin correr (inventado)\nPrioridad: alta\n\n"
+        "- [medible] Cerrar 5 tareas al día, según Todoist\n"
+    ),
+    "Entrenamiento": "Meta: ganar fuerza (inventado)\nPrioridad: alta\n",
+    "Hábitos": "Meta: leer cada noche\nPrioridad: media\n\n- [declarado] Leer 20 minutos\n",
+    "Ocio": "Prioridad: ahora no\n",
+    "Social": "Prioridad: Ahora no.\n",
+}
+"""The areas not here get a plain goal with priority «baja»."""
+HABIT = (
+    "habits:\n"
+    "  - id: lectura\n"
+    '    name: "Lectura"\n'
+    "    priority: medium\n"
+    "    duration: 20m\n"
+    "    moment: evening\n"
+    '    todoist_task: "Leer"\n'
+)
+"""An invented habit, for the first line `habits: []` of the template."""
+
+
+def area_text(name: str) -> str:
+    return AREA_TEXT.get(name, f"Meta: algo de {name.lower()} (inventado)\nPrioridad: baja\n")
+
+
+def objectives(areas: dict[str, str]) -> str:
+    """`objetivos.md` with one section per area, in the order given."""
+    return "# Objetivos\n" + "".join(f"\n## {name}\n\n{text}" for name, text in areas.items())
+
+
+def finished_objectives() -> str:
+    return objectives({name: area_text(name) for name in AREA_NAMES})
+
+
+def intentions_with_habit() -> str:
+    text = template("intenciones.yaml")
+    assert text.count("\nhabits: []") == 1
+    return text.replace("\nhabits: []", "\n" + HABIT.rstrip("\n"), 1)
+
+
+def write_finished(config_dir: Path) -> Path:
+    """The five files with everything the onboarding asks for."""
+    write_personal(config_dir)
+    (config_dir / "objetivos.md").write_text(finished_objectives(), encoding="utf-8")
+    (config_dir / "intenciones.yaml").write_text(intentions_with_habit(), encoding="utf-8")
+    return config_dir

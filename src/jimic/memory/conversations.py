@@ -2,7 +2,8 @@
 
 One row per day: the id of the agent's session (`NULL` until its first answer), the last moment
 Pedro wrote (decision 1.10-c) and whether the session has read external content (the calendar or
-the tasks), which the origin rule of task 1.12 needs. No text: ids, moments and a flag.
+the tasks), which the origin rule of task 1.12 needs, and whether the onboarding was suggested
+that day (decision 1.13-b). No text: ids, moments and two flags.
 """
 
 import sqlite3
@@ -55,3 +56,15 @@ def read_external(conn: sqlite3.Connection, day: date) -> bool:
         "SELECT read_external FROM conversations WHERE day = ?", (day.isoformat(),)
     ).fetchone()
     return row is not None and bool(row[0])
+
+
+def claim_suggestion(conn: sqlite3.Connection, day: date) -> bool:
+    """Whether the onboarding may be suggested on `day`, marking it: `True` only the first time
+    (decision 1.13-b), also after a restart. A day without a row (Pedro has not written) gives
+    `False` and marks nothing."""
+    cursor = conn.execute(
+        "UPDATE conversations SET onboarding_suggested = 1"
+        " WHERE day = ? AND onboarding_suggested = 0",
+        (day.isoformat(),),
+    )
+    return cursor.rowcount == 1

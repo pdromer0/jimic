@@ -19,6 +19,11 @@ the file as it is now (`jimic.memory.changes`) and added to the run; the code sh
 [Guardar] or [📝 Apuntar] when the run ends, with Pedro's message as its origin, and only the
 button writes. If the run reads after proposing, the conversation drops what it proposed.
 
+Two more refusals of task 1.13: a change of `limites.yaml` that relaxes a limit is kept in
+`RunState.manual`, so that the code tells Pedro which key to change by hand (1.13-a); and a change
+of `objetivos.md` that repeats the description of a goal of APEX in progress is refused (decision
+74: JimiC reads them from APEX).
+
 `propose_plan` does not save anything either: it adds its items to the run, and the code shows
 them under the agent's answer when the run ends (decision 1.11-a). Several calls in one run add
 up, eight items at most and each task once.
@@ -56,6 +61,7 @@ from jimic.execution.rules import FOR_THE_AGENT, refusal
 from jimic.heartbeat.sources import Sources
 from jimic.memory import changes, conversations
 from jimic.memory.changes import IDEAS_FILE, ChangeRefused, Proposed
+from jimic.memory.onboarding import OBJECTIVES_FILE, copied_goal
 from jimic.tools.apex import ApexReader
 from jimic.tools.apex_schema import ApexSnapshot
 from jimic.tools.calendar import CalendarDay, CalendarReader
@@ -74,12 +80,26 @@ CONTAMINATED_TEXT = (
     " memoria ni ideas: pídele a Pedro que te lo repita en otro mensaje."
 )
 
+APEX_COPY_TEXT = (
+    "Eso copia en objetivos.md un objetivo de APEX: no se copian, JimiC los lee de APEX cada día"
+    " (decisión 74). En el área de entrenamiento van solo su Meta: y su Prioridad:."
+)
+
 type Result = dict[str, Any]
 
 
 def model_name(name: str) -> str:
     """The name the model sees for one of our tools."""
     return f"mcp__{SERVER_NAME}__{name}"
+
+
+@dataclass(frozen=True)
+class ManualChange:
+    """A change of `limites.yaml` that relaxes a limit (decision 1.13-a): the keys it relaxes
+    and the fragment the agent proposed, which is what Pedro would write by hand."""
+
+    keys: tuple[str, ...]
+    after: str | None
 
 
 @dataclass
@@ -99,10 +119,15 @@ class RunState:
     """The changes and ideas proposed, as data, checked against the files."""
     memory_dropped: bool = False
     """The run read after proposing: what it proposed for the memory was dropped."""
+    manual: list[ManualChange] = field(default_factory=list)
+    """What the asymmetric rule refused in `limites.yaml`: Pedro may do it by hand (1.13-a)."""
 
     def close(self) -> None:
         """At the end of the run: a run that read external content proposes nothing for the
-        memory, even what it proposed before reading (1.12-a, «en esta ejecución»)."""
+        memory, even what it proposed before reading (1.12-a, «en esta ejecución»), and does not
+        tell Pedro what to relax by hand either (1.13-a)."""
+        if self.contaminated:
+            self.manual = []
         if self.contaminated and self.memory:
             self.memory = []
             self.memory_dropped = True
@@ -300,6 +325,8 @@ def build_tools(ctx: ToolContext) -> list[SdkMcpTool[Any]]:
             changes.check(ctx.config_dir, proposed)
         except ChangeRefused as refused:
             logger.info("memory proposal refused (%s)", refused.code)
+            if refused.code == "relaxes" and refused.relaxed:
+                ctx.run.manual.append(ManualChange(refused.relaxed, proposed.after))
             raise AgentInputError(refused.for_agent) from None
         try:
             memory_message([*ctx.run.memory, entry])
@@ -310,9 +337,25 @@ def build_tools(ctx: ToolContext) -> list[SdkMcpTool[Any]]:
             ) from None
         ctx.run.memory.append(entry)
 
+    async def copies_apex(before: str | None, after: str) -> bool:
+        """Whether the change adds a goal of APEX in progress (decision 74). Reading APEX does
+        not contaminate; if it cannot be read, nothing can be compared."""
+        snapshot = await asyncio.to_thread(ctx.apex.read_today)
+        if not snapshot.available:
+            logger.info("apex copy check skipped (%s)", snapshot.unavailable_reason)
+            return False
+        return copied_goal(before, after, [goal.description for goal in snapshot.goals])
+
     async def propose_change(args: dict[str, Any]) -> Result:
         change = _validated(MemoryChange, args)
         origin = memory_allowed()
+        if (
+            change.file == OBJECTIVES_FILE
+            and change.after
+            and await copies_apex(change.before, change.after)
+        ):
+            logger.info("memory proposal refused (apex_copy)")
+            raise AgentInputError(APEX_COPY_TEXT)
         entry = (
             {"action": "change"}
             | change.model_dump()
