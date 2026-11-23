@@ -18,7 +18,7 @@ from datetime import datetime
 from decimal import Decimal
 from fractions import Fraction
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 from jimic.evals.heartbeat import Outcome, PassResult, ScenarioResult, Score, is_correct, score
 from jimic.evals.scenarios import Scenario
@@ -29,7 +29,12 @@ MAX_FALSE_SPEAK = Fraction(5, 100)
 REGRESSION = Fraction(5, 100)
 """More than this drop (5 points) is a regression; exactly 5 is not."""
 VERSION = 1
-NAME = re.compile(r"latido-([0-9]{8}-[0-9]{4})(?:-([0-9]+))?\.json")
+PREFIX = "latido"
+"""The name of the reports of the heartbeat; the plan's are `plan-` (task 1.14)."""
+
+
+def _name(prefix: str) -> re.Pattern[str]:
+    return re.compile(rf"{re.escape(prefix)}-([0-9]{{8}}-[0-9]{{4}})(?:-([0-9]+))?\.json")
 
 
 class UnreadableReport(Exception):
@@ -94,23 +99,50 @@ def worsened(before: Score, after: Score) -> tuple[str, ...]:
     return tuple(worse)
 
 
-def compare(name: str, current: Sequence[Outcome], previous: Sequence[Outcome]) -> Comparison:
+class Fingerprinted(Protocol):
+    @property
+    def id(self) -> str: ...
+
+    @property
+    def fingerprint(self) -> str: ...
+
+
+@dataclass(frozen=True)
+class Partition[T: Fingerprinted]:
+    """The scenarios of two reports, by id and fingerprint (decision 1.9-e)."""
+
+    common: list[T]
+    """The current ones with the same id and fingerprint in the previous report."""
+    new: tuple[str, ...]
+    removed: tuple[str, ...]
+    changed: tuple[str, ...]
+
+
+def partition[T: Fingerprinted](current: Sequence[T], previous: Sequence[T]) -> Partition[T]:
     before_by_id = {outcome.id: outcome for outcome in previous}
     now_ids = {outcome.id for outcome in current}
-    common = [
-        outcome
-        for outcome in current
-        if outcome.id in before_by_id
-        and before_by_id[outcome.id].fingerprint == outcome.fingerprint
-    ]
-    new = tuple(outcome.id for outcome in current if outcome.id not in before_by_id)
-    removed = tuple(outcome.id for outcome in previous if outcome.id not in now_ids)
-    changed = tuple(
-        outcome.id
-        for outcome in current
-        if outcome.id in before_by_id
-        and before_by_id[outcome.id].fingerprint != outcome.fingerprint
+    return Partition(
+        common=[
+            outcome
+            for outcome in current
+            if outcome.id in before_by_id
+            and before_by_id[outcome.id].fingerprint == outcome.fingerprint
+        ],
+        new=tuple(outcome.id for outcome in current if outcome.id not in before_by_id),
+        removed=tuple(outcome.id for outcome in previous if outcome.id not in now_ids),
+        changed=tuple(
+            outcome.id
+            for outcome in current
+            if outcome.id in before_by_id
+            and before_by_id[outcome.id].fingerprint != outcome.fingerprint
+        ),
     )
+
+
+def compare(name: str, current: Sequence[Outcome], previous: Sequence[Outcome]) -> Comparison:
+    before_by_id = {outcome.id: outcome for outcome in previous}
+    parts = partition(current, previous)
+    common, new, removed, changed = parts.common, parts.new, parts.removed, parts.changed
     if not common:
         return Comparison(name, None, None, (), (), new, removed, changed)
     before = score([before_by_id[outcome.id] for outcome in common])
@@ -138,11 +170,12 @@ def read_outcomes(document: object) -> list[Outcome]:
         raise UnreadableReport(type(error).__name__) from None
 
 
-def previous_report(folder: Path) -> Path | None:
-    """The most recent report of `folder`, by the time in its name."""
+def previous_report(folder: Path, prefix: str = PREFIX) -> Path | None:
+    """The most recent report of `folder` named `<prefix>-…`, by the time in its name."""
     found = []
-    for path in folder.glob("latido-*.json"):
-        match = NAME.fullmatch(path.name)
+    pattern = _name(prefix)
+    for path in folder.glob(f"{prefix}-*.json"):
+        match = pattern.fullmatch(path.name)
         if match is not None:
             found.append(((match[1], int(match[2] or 1)), path))
     return max(found)[1] if found else None
@@ -160,9 +193,9 @@ def compare_with_previous(folder: Path, current: Sequence[Outcome]) -> Compariso
     return compare(path.name, current, previous)
 
 
-def report_paths(folder: Path, started: datetime) -> tuple[Path, Path]:
+def report_paths(folder: Path, started: datetime, prefix: str = PREFIX) -> tuple[Path, Path]:
     """The two files of a run; a second run in the same minute gets `-2`, and so on."""
-    stem = f"latido-{started:%Y%m%d-%H%M}"
+    stem = f"{prefix}-{started:%Y%m%d-%H%M}"
     number = 1
     while True:
         name = stem if number == 1 else f"{stem}-{number}"
