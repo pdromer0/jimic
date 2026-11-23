@@ -15,6 +15,7 @@ import jimic.cli
 import jimic.service
 from jimic.channel import demo
 from jimic.channel.message import InteractiveMessage, Item, render
+from jimic.channel.taps import Answer, Followup
 from jimic.config import Settings, load_settings
 from jimic.logs import LOG_FILE
 from jimic.memory.database import open_database
@@ -129,7 +130,7 @@ def test_los_toques_de_la_demo_solo_marcan_el_resultado(index, option, result):
 def test_la_demo_ensena_un_cambio_con_guardar_y_un_deshacer():
     """La captura de la 1.12: el antes y el después con [Guardar] [Cambiar] [No], la idea con
     [📝 Apuntar], y `/deshacer` con un cambio y un borrado."""
-    *_, (memory_kind, memory), (list_kind, undo_list) = demo.demo_messages(demo_settings())
+    *_, (memory_kind, memory), (list_kind, undo_list), _, _ = demo.demo_messages(demo_settings())
     assert (memory_kind, list_kind) == ("memory", "undo_list")
     view = render(memory, 3)
     assert view.text.startswith(demo.MEMORY_ANSWER)
@@ -163,7 +164,7 @@ def test_la_demo_ensena_un_paso_de_la_puesta_en_marcha_con_guardar():
     [("save", "💾 guardado"), ("edit", "✏️ dime cómo lo quieres"), ("no", "✖️ descartado")],
 )
 def test_los_toques_de_memoria_de_la_demo_solo_marcan_el_resultado(option, result):
-    *_, (_, memory), _ = demo.demo_messages(demo_settings())
+    *_, (_, memory), _, _, _ = demo.demo_messages(demo_settings())
     assert asyncio.run(demo.demo_memory(memory.items[0], option, 1)) == result
 
 
@@ -201,10 +202,12 @@ def test_con_dev_la_demo_arranca_el_canal_manda_el_plan_y_para_con_sigterm(
         "memory",
         "memory",
         "undo_list",
+        "key_task",
+        "key_task",
     ]
     assert message == demo.demo_messages(demo_settings())[0][1]
     assert channel.stopped
-    assert list(channel.handlers) == ["plan", "undo", "memory", "undo_list"]
+    assert list(channel.handlers) == ["plan", "undo", "memory", "undo_list", "key_task"]
     # `expires_at` viene del reloj del sistema: una hora después de enviar, con holgura.
     assert (
         timedelta(minutes=59) < expires_at - datetime.now(expires_at.tzinfo) <= timedelta(hours=1)
@@ -241,3 +244,24 @@ def test_la_demo_ensena_el_plan_del_dia_pintado_con_sus_botones():
     assert [b.label for b in view.keyboard[0]] == ["1 ✅", "1 ✏️", "1 ⏭"]
     assert [b.label for b in view.keyboard[-1]] == ["✅ Créalo todo", "⏭ Hoy sin plan"]
     assert asyncio.run(demo.demo_plan(plan.items[0], "edit", 1)) == "✏️ ¿cómo la quieres?"
+
+
+def test_los_avisos_de_tareas_clave_de_la_demo_llevan_sus_botones():
+    """Tarea 1.15: uno solo, y dos en un mensaje con un aviso, cada botón con su icono."""
+    *_, (one_kind, one), (two_kind, two) = demo.demo_messages(demo_settings())
+    assert one_kind == two_kind == "key_task"
+    one_rows = [[b.label for b in row] for row in render(one, 1).keyboard]
+    assert one_rows == [["🏃 Voy ahora", "⏰ Más tarde"], ["✅ Ya entrené", "⏭ Hoy no"]]
+    two_rows = [[b.label for b in row] for row in render(two, 2).keyboard]
+    assert two_rows[0] == ["🏋️ 🏃 Voy ahora", "🏋️ ⏰ Más tarde"]
+    assert two_rows[3] == ["🛒 ✅ Hecho", "🛒 ⏭ Hoy no"]
+
+
+def test_los_toques_de_la_demo_contestan_como_los_de_verdad():
+    item = demo.GYM_ITEM
+    going = asyncio.run(demo.demo_key(item, "go", 1))
+    assert isinstance(going, Answer) and going.reply == "¡Vamos! 💪"
+    assert going.then is not None and [o.key for o in going.then.options] == ["done", "skip"]
+    skipped = asyncio.run(demo.demo_key(item, "skip", 1))
+    assert isinstance(skipped, Answer) and isinstance(skipped.reply, Followup)
+    assert skipped.reply.message.body == "Vale, hoy nada de gimnasio. 🛋️"

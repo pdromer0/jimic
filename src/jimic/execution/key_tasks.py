@@ -68,7 +68,7 @@ def later_label(data: dict[str, Any], timezone: ZoneInfo) -> str:
     return f"«{habit}» ({when}, tarea {task_id})"
 
 
-def _still_open(item: Item) -> Item:
+def still_open(item: Item) -> Item:
     """After [Voy ahora] or [Más tarde]: the item stays, with [Ya entrené] (or [Hecho]) and
     [Hoy no] to tap when it is done or when Pedro gives up for today."""
     return item.model_copy(
@@ -76,7 +76,7 @@ def _still_open(item: Item) -> Item:
     )
 
 
-def _undo_message(body: str, item: Item, data: dict[str, Any]) -> InteractiveMessage:
+def key_undo_message(body: str, item: Item, data: dict[str, Any]) -> InteractiveMessage:
     return InteractiveMessage(
         body=body,
         items=(Item(title=item.title, options=(UNDO,), data=data),),
@@ -108,7 +108,7 @@ class KeyTaskActions:
 
     def _followup(self, body: str, item: Item, data: dict[str, Any]) -> Followup:
         expires = local_day_bounds(self._now().date(), self._timezone)[1]
-        return Followup(KEY_UNDO_KIND, _undo_message(body, item, data), expires, body)
+        return Followup(KEY_UNDO_KIND, key_undo_message(body, item, data), expires, body)
 
     # --- The four buttons -----------------------------------------------------------------------
 
@@ -119,10 +119,10 @@ class KeyTaskActions:
         if option == "go":
             key_marks.record(self._conn, now.date(), intent, "going", now)
             logger.info("key task: going")
-            return Answer(GOING, GO_TEXT, then=_still_open(item))
+            return Answer(GOING, GO_TEXT, then=still_open(item))
         if option == "later":
             logger.info("key task: later")
-            return Answer(LATER, LATER_TEXT, then=_still_open(item))
+            return Answer(LATER, LATER_TEXT, then=still_open(item))
         if option == "skip":
             mark = key_marks.record(self._conn, now.date(), intent, "not_today", now)
             logger.info("key task: not today")

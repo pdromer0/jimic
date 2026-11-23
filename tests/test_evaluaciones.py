@@ -44,7 +44,7 @@ def test_el_fichero_real_carga_y_cada_escenario_monta_su_estado_con_lo_esperado_
     ids = [item.id for item in suite.scenarios]
     assert len(ids) == len(set(ids)) == 40
     assert [(item.id, item.pending) for item in suite.scenarios if item.pending] == [
-        ("e02", "1.15")
+        ("e02", "1.15-b")
     ]
     runnable = [item for item in suite.scenarios if item.pending is None]
     assert len(runnable) == 39
@@ -96,6 +96,57 @@ def test_un_pendiente_puede_esperar_lo_que_su_tarea_aun_no_ha_traido(tmp_path):
 def test_un_fichero_con_errores_dice_donde(tmp_path, extra, error):
     with pytest.raises(EvalError, match=error):
         load_suite(variant(tmp_path, extra))
+
+
+# --- Lo que el código sabe de las tareas clave (tarea 1.15) -----------------------------------
+
+
+def key_state(tmp_path, changes: str, now: str = "13:30"):
+    """The gym's key task in a scenario of the base day with `changes` (YAML lines)."""
+    path = variant(
+        tmp_path,
+        f'\n  - id: zz1\n    title: tareas clave\n    now: "{now}"\n{changes}    expected: [[]]\n',
+    )
+    suite = load_suite(path)
+    return build_state(suite, by_id(suite, "zz1")).key_tasks["insistir_gimnasio"]
+
+
+def test_la_base_marca_el_gimnasio_como_entreno_y_apex_lo_da_por_hecho(suite):
+    """l12: con el entreno de hoy en APEX, el estado lo dice (decisión de Pedro, `training`)."""
+    status = build_state(suite, by_id(suite, "l12")).key_tasks["insistir_gimnasio"]
+    assert status.done_by == "apex"
+    assert build_state(suite, by_id(suite, "l08")).key_tasks["insistir_gimnasio"].done_by is None
+
+
+def test_completed_today_llega_al_estado(tmp_path):
+    changes = "    tasks: []\n    completed_today:\n      - {id: t-gimnasio, title: Gimnasio}\n"
+    assert key_state(tmp_path, changes).done_by == "todoist"
+
+
+@pytest.mark.parametrize(
+    ("mark", "field"),
+    [("not_today", "not_today"), ("done", "done_by"), ("going", "paused_until")],
+)
+def test_key_marks_llegan_al_estado(tmp_path, mark, field):
+    changes = f'    key_marks:\n      - {{intent: insistir_gimnasio, mark: {mark}, at: "13:00"}}\n'
+    assert getattr(key_state(tmp_path, changes), field)
+
+
+def test_una_vista_que_esta_en_later_tasks_salto(tmp_path):
+    changes = (
+        "    tasks: []\n"
+        "    key_marks:\n"
+        '      - {intent: insistir_gimnasio, mark: seen, at: "12:00", task_id: t-gimnasio}\n'
+        "    later_tasks:\n"
+        '      - {id: t-gimnasio, title: Gimnasio, due: "2030-01-11T12:00"}\n'
+    )
+    assert key_state(tmp_path, changes).rescheduled
+
+
+def test_una_marca_desconocida_es_un_error_del_fichero(tmp_path):
+    changes = '    key_marks:\n      - {intent: insistir_gimnasio, mark: motivo, at: "13:00"}\n'
+    with pytest.raises(EvalError, match="zz1: key_marks"):
+        key_state(tmp_path, changes)
 
 
 def test_like_hereda_el_estado_pero_no_el_porque_ni_lo_esperado(suite):

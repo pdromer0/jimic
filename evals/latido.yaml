@@ -12,6 +12,10 @@
 #   sección de APEX (`meta`, `plan`, `entrenamientos`...). Horas locales, sin zona.
 # - `sent_today`: lo enviado hoy; lo de la misma hora salió en un solo mensaje (decisión 92).
 # - `unavailable`: las fuentes caídas (`calendar`, `tasks`, `apex`) con su código.
+# - Tareas clave (tarea 1.15): `completed_today` (`{id, title}`, completadas hoy en Todoist),
+#   `key_marks` (`{intent, mark, at, task_id}`; `mark` es `going` [Voy ahora], `done` [Ya entrené],
+#   `not_today` [Hoy no] o `seen`, la tarea de hoy que el latido vio abierta) y `later_tasks`
+#   (tareas abiertas de otro día: una `seen` que está aquí saltó, decisión 1.15-j).
 # - `expected`: los conjuntos aceptables de intenciones, sin orden; `[]` es callar.
 # - `pending: "<tarea>"`: el programa lo salta y lo cuenta aparte hasta esa tarea.
 #
@@ -71,7 +75,7 @@ base:
         priority: medium
     habits:
       - {id: gimnasio, name: Gimnasio, priority: high, duration: 75m, moment: midday,
-         todoist_task: Gimnasio}
+         todoist_task: Gimnasio, training: true}
       - {id: ofertas, name: Revisar ofertas, priority: high, duration: 30m, moment: afternoon,
          todoist_task: Revisar ofertas}
   events:
@@ -224,9 +228,9 @@ scenarios:
            duracion_min: 62.0, fuente: inventada, ejercicios: []}
     expected: [[]]
     why: >-
-      Pedro dijo «hoy no» por la mañana, y el estado del día aún no tiene cómo decirlo;
-      activarlo y pasarlo es criterio de aceptación de la 1.15.
-    pending: "1.15"
+      Pedro dijo «hoy no» por la mañana. El estado del día ya puede decirlo (`key_marks`, tarea
+      1.15); activarlo y pasarlo es de la 1.15-b.
+    pending: "1.15-b"
 
   - id: l13
     title: Gimnasio sin aviso y un dentista a las 13:30
