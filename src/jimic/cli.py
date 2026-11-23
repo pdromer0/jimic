@@ -12,6 +12,8 @@ from jimic.channel import demo
 from jimic.channel.bot import ChannelError
 from jimic.config import ConfigError
 from jimic.doctor import diagnose, render
+from jimic.evals import command as evals
+from jimic.evals.scenarios import EvalError
 from jimic.memory import personal
 from jimic.memory.database import MigrationError
 from jimic.memory.personal import PersonalFilesInvalid
@@ -33,10 +35,12 @@ SETUP_ERRORS = (
     MigrationError,
     ChannelError,
     demo.DemoError,
+    EvalError,
     sqlite3.Error,
     OSError,
 )
-"""What `jimic run` and `jimic telegram demo` turn into a message and `SETUP_ERROR`."""
+"""What `jimic run`, `jimic telegram demo` and `jimic evaluar latido` turn into a message and
+`SETUP_ERROR`."""
 
 CHECK_FAILED = 1
 """Exit status of `jimic config check` when a personal file is invalid or a YAML one is missing."""
@@ -61,6 +65,17 @@ def build_parser() -> argparse.ArgumentParser:
     telegram_commands = telegram.add_subparsers(dest="telegram_command", required=True)
     telegram_commands.add_parser(
         "demo", help="plan inventado en el bot de pruebas (solo dev; Ctrl+C para parar)"
+    )
+    evaluate = commands.add_parser("evaluar", help="evaluaciones del juicio del modelo (solo dev)")
+    evaluate_commands = evaluate.add_subparsers(dest="eval_command", required=True)
+    heartbeat = evaluate_commands.add_parser(
+        "latido", help="los escenarios de evals/latido.yaml contra la API real (cuesta dinero)"
+    )
+    heartbeat.add_argument(
+        "--escenario", action="append", dest="scenarios", metavar="ID", help="solo este (repetible)"
+    )
+    heartbeat.add_argument(
+        "--pasadas", type=int, default=evals.DEFAULT_PASSES, dest="passes", help="por escenario"
     )
     return parser
 
@@ -119,6 +134,10 @@ def main(argv: list[str] | None = None) -> int:
         return config_command(args.config_command)
     elif args.command == "google":
         return google_command()
+    elif args.command == "evaluar":
+        return setup_errors_as_exit(
+            lambda: print(evals.run(os.environ, args.scenarios, args.passes).text)
+        )
     elif args.command == "telegram":
         return setup_errors_as_exit(lambda: demo.run(os.environ))
     elif args.command == "run":
