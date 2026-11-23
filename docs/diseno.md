@@ -422,30 +422,44 @@ pregunta y los enlazados con el estado de su app.
 
 Las tareas clave se declaran en `intenciones.yaml`; el gimnasio es la primera, y una segunda
 prioridad diaria (por ejemplo, «revisar ofertas») entra también desde el H1: es solo configuración
-(decisión 37).
+(decisión 37). El hábito del entreno lleva `training: true` (decisión 143).
 
 - **Actor:** JimiC.
-- **Disparador:** un latido en el que Haiku decide insistir. Lo considera cuando ha pasado un
-  margen desde la hora prevista, la tarea sigue abierta y no hay entreno registrado.
-- **Precondiciones:** una tarea clave de hoy en Todoist o un entreno previsto en APEX.
+- **Disparador:** un latido en el que Haiku decide insistir. El código solo lo deja salir desde
+  «se puede insistir desde» (la hora de la tarea de hoy en Todoist, o `default_time` sin ella, más
+  `grace`) y si la tarea no está hecha, no ha dejado de ser de hoy, no tiene «hoy no» ni está en
+  pausa (decisiones 137 a 139, 141 y 142).
+- **Precondiciones:** una tarea clave activa hoy.
 - **Flujo:**
-  1. El estado del día incluye si la tarea está hecha, si hay entreno hoy, los avisos de hoy sobre
-     esa tarea y los ignorados esta semana.
-  2. Haiku decide si hablar y con qué nivel de tono: primero amable, luego directo, luego con
-     humor o reto, según las preferencias.
-  3. Telegram: [Voy ahora] [Más tarde] [Hoy no].
-  4. [Más tarde] propone una hora y mueve la tarea en Todoist (reversible; sin más confirmación).
-     [Hoy no] pregunta el motivo, opcional, y lo guarda para la revisión semanal.
-  5. En cuanto la tarea se completa o aparece el entreno, deja de insistir; como mucho, una
-     felicitación.
-- **Datos:** Todoist, APEX (Hevy) y memoria.
-- **Modelo:** Haiku.
-- **Autonomía:** solo.
-- **Aceptación:** tope de avisos por tarea y día (límite duro); el tono escala a partir del
-  segundo ignorado; respeta las horas de silencio; nunca insiste tras [Hoy no]; para en cuanto la
-  tarea está hecha.
-- **Riesgo abierto (P-20):** APEX solo se actualiza cuando Pedro lo sincroniza; JimiC podría
-  insistir con el entreno ya hecho. Se resuelve en el bloque de datos.
+  1. El estado del día dice, de cada tarea clave, si está hecha y por qué fuente (el botón, una
+     tarea completada hoy en Todoist sin otra abierta de hoy, o, en el entreno, APEX), si su tarea
+     ya no es de hoy (el salto, 142), el «hoy no», la pausa, desde cuándo se puede insistir, el
+     nivel del tono y los avisos de hoy (decisión 137).
+  2. Haiku decide si hablar; el código calcula el nivel del tono (avisos de hoy de esa tarea + 1,
+     hasta 3: amable, directo, con reto o humor) y Haiku escribe con él (140). El espacio entre
+     avisos es criterio de Haiku.
+  3. Telegram: el mensaje lleva, por cada tarea clave, `[🏃 Voy ahora] [⏰ Más tarde]` y
+     `[✅ Ya entrené] [⏭ Hoy no]` (`[✅ Hecho]` si no es el entreno); con dos, cada botón con el
+     icono de su hábito. Los avisos no llevan botones. Caduca al acabar el día (135).
+  4. [Voy ahora]: «¡Vamos! 💪» y una pausa lo que dura el hábito (139). [Más tarde]: «¿A qué hora?»;
+     la respuesta de Pedro va al agente con la tarea y su id, y el `move` sale al momento con
+     [Deshacer] si se cumplen las condiciones de la 97 (136). [Ya entrené]/[Hecho]: completa la
+     tarea de hoy, «¡Hecho! 💪 Una menos» con [Deshacer] (137, 144). [Hoy no]: lo anota sin motivo,
+     «Vale, hoy nada de …» con [Deshacer] (138). Ninguno llama al modelo; tras [Voy ahora] o [Más
+     tarde] quedan [Ya entrené] y [Hoy no].
+  5. En cuanto la tarea está hecha (por cualquier fuente) o ya no es de hoy, deja de insistir; la
+     felicitación, solo con el botón (140).
+- **Datos:** Todoist, APEX y SQLite (`key_task_marks`, `task_moves`).
+- **Modelo:** Haiku para decidir y redactar; los toques, el código.
+- **Autonomía:** sola; los toques, sin confirmación.
+- **Aceptación:** tope de avisos por tarea y día (límite duro); el tono escala con los avisos;
+  respeta las horas de silencio; nunca insiste tras [Hoy no]; para en cuanto la tarea está hecha o
+  ya no es de hoy.
+- **Riesgo abierto (P-20):** APEX solo se actualiza cuando Pedro lo sincroniza; mitigado por el
+  botón y por Todoist. Límite conocido del salto: una recurrente completada antes de que ningún
+  latido la viera abierta no se nota (142).
+- **Pendiente (3.5):** preguntar el motivo del «hoy no» en la revisión semanal, con cuidado con los
+  de salud (138).
 
 ### CU-12 · Puesta en marcha: rutina, objetivos y preferencias
 
@@ -938,6 +952,7 @@ habits:                           # ids propios: pueden coincidir con los de una
     duration: 75m                 # m u h
     moment: midday                # morning, midday, afternoon o evening: pista para el plan
     todoist_task: "Gimnasio"      # la tarea de Todoist con la que se reconoce
+    training: true                # el entreno: APEX lo da por hecho (uno como mucho, 143)
 ```
 
 `limites.yaml`, ejemplo (todo el fichero es zona protegida y cada clave es obligatoria):
@@ -1580,6 +1595,17 @@ cuando haya casos reales de sobra y si Pedro lo considera necesario; exige evalu
 | 131 | **Las comprobaciones de `jimic evaluar plan` son de dos tipos** (1.14-i). **Reglas duras**, al 100 %: `no_overlap`, `no_duplicates`, `max_new`, `due_from_now`, `no_item_on`, `deletes_exactly`, `no_delete`, `no_deletes`, `no_move`, `no_create_title`, `creates`, `left_out_or_absent`, `no_memory_proposal`, `learned_line`, `training_line`, y `moves` cuando es una incoherencia con el calendario (H1-9). **Criterio**, con el umbral de 13.3 y revisadas en la 1.17 con los 10 planes de Pedro: `includes_habit`, `includes_or_left_out`, y `moves` de una atrasada que no duplica (traerla a hoy o a mañana). El informe aún da una sola nota; las dos por separado (cada comprobación del catálogo con su tipo), en la 1.16 | Una regla dura dice algo que el plan nunca debe hacer (pisar, duplicar, borrar de más); una de criterio, una elección en la que un plan distinto también puede ser bueno, y la juzga mejor Pedro con planes reales. En la tercera medida de la 1.14, las duras al 100 % y el único fallo, de criterio. Pedro, en la revisión del PR de la 1.14 | — |
 | 132 | **El coste del agente sale de sus tokens** (fix #51; revisa la 89 y la 32): `Conversation._bookkeeping` calcula el gasto de cada ejecución con `usage.cost(modelo, tokens)`, como el latido, y no suma el `total_cost_usd` del SDK, que es el acumulado de la sesión. Sin tokens en el resultado, o con un modelo sin precio, cuenta `max_session_usd` (salvo el rechazo de la API: decisión 133). La migración 0008 recalcula las filas de `claude-sonnet-5-5` con tokens (escritura de caché a 5 minutos; no toca las de Haiku ni las que no tienen tokens). `max_budget_usd` es por ejecución, no por sesión: el contrato lo comprueba. Dos ejecuciones de la misma sesión ya no se cuentan dos veces | El 23-nov-2026, con 14 mensajes, la suma registrada era de 3,32 $ y el gasto real, de unos 0,52 $: el tope diario saltó en falso. Pedro, en las notas del chat del fix #51 | — |
 | 133 | **Un rechazo de la API sin tokens cuenta 0 $** (fix #51, decisión F-c de Pedro; matiza la 132): una ejecución del agente que falla porque la API la rechaza (código `agent:api:…`) y no trae tokens deja su fila en `model_usage` con 0 $, para que se vea. Cualquier otro fallo sin tokens (el proceso que muere, tiempo agotado, `max_turns`…) sigue contando `max_session_usd` | Con la API caída, seis intentos a 0,50 $ habrían llegado al tope diario de 3 $ sin haber gastado nada y habrían dejado a Pedro sin agente aunque la API volviera. Pedro, en la revisión del PR del fix #51 | — |
+| 134 | **Las tareas clave en dos tareas: esta (CU-02) y la 1.15-b (el latido al umbral)** (1.15-a): aquí no se ajusta el prompt del latido para la evaluación ni se activa el e02; sí se amplían el estado del día y el formato de los escenarios, sin cambiar ningún `expected` | Ajustar el prompt a la vez que cambia el estado mezclaría las dos medidas; la 1.15-b lo hace con su conjunto de reserva. Notas del chat de la 1.15 (23-nov-2026) | — |
+| 135 | **El mensaje del latido lleva los botones de cada tarea clave que incluya; los avisos, sin botones** (1.15-c): por cada una, `[🏃 Voy ahora] [⏰ Más tarde]` y `[✅ Ya entrené] [⏭ Hoy no]` (`[✅ Hecho]` si el hábito no es el entreno); con dos, cada botón con el icono de su hábito (tabla de `preferencias.md`; sin él, su número). Cada botón actúa solo sobre su tarea. Caduca al acabar el día. Si no cabe, sale como texto | Responder con un toque sin gastar cupo (H1-4). Notas del chat de la 1.15 | — |
+| 136 | **[⏰ Más tarde] pregunta «¿A qué hora?» y el agente mueve la tarea con la respuesta** (1.15-d; cambia el criterio del issue «sin llamar al modelo»): el código recuerda el toque como el [✏️] (130) y el siguiente mensaje de Pedro llega con `(JimiC) Pedro tocó ⏰ Más tarde en: «Gimnasio» (hoy 12:00, tarea <id>); su mensaje dice a qué hora moverla`, así que el agente propone el `move` sin leer Todoist. Al momento con [Deshacer] si se cumplen las condiciones de la 97; si no, con su botón. Mientras Pedro no conteste, la tarea sigue a su hora | Pedro escribe la hora; el código no interpreta texto. Notas del chat de la 1.15 | [0005](decisiones/0005-la-guardia.md) |
+| 137 | **[✅ Ya entrené]/[✅ Hecho] completa la tarea de hoy; el estado del día trae un «hecho» comprobado por el código** (1.15-e): hecha si se tocó el botón, si una tarea con su nombre se completó hoy en Todoist y no queda otra abierta de hoy, o, en el hábito del entreno, si APEX registra el entreno de hoy (por ese orden en `done_by`). La segunda pasada no la deja salir (`key_done`). Con el plan gratuito, las completadas de hoy salen del endpoint por fecha de cierre (contrato del 23-nov-2026) | Que JimiC deje de insistir aunque Pedro lo marque en la app. Notas del chat de la 1.15; la fuente, del contrato | — |
+| 138 | **[⏭ Hoy no] guarda solo el día y la tarea, sin motivo** (1.15-f): una fila en `key_task_marks` (día local); la segunda pasada no la deja salir el resto del día (`key_not_today`); «Vale, hoy nada de gimnasio. 🛋️» con [Deshacer]. Si Pedro lo escribe, el agente no puede anotarlo y le recuerda el botón del aviso, sin prometer que no insistirá (una línea en `agent/prompt.md`, ajuste de Pedro). Pendiente para la 3.5: preguntar el motivo | Un «hoy no» escrito sería zona protegida. Notas del chat de la 1.15 y ajuste de Pedro al aprobar el plan | — |
+| 139 | **[🏃 Voy ahora]: «¡Vamos! 💪» y una pausa lo que dura el hábito** (1.15-g): el código anota la hora; hasta hora + `duration` del hábito no sale (`key_paused`) y el estado lo dice; después, si no está hecha, sigue como siempre | Insistir mientras Pedro está entrenando sobra. Notas del chat de la 1.15 | — |
+| 140 | **El código calcula el nivel del tono y Haiku escribe con él; la felicitación, solo con el botón** (1.15-h): nivel = avisos de hoy de esa tarea + 1, hasta 3 (1 amable, 2 directo, 3 con reto o humor según las preferencias, H1-11); el prompt del latido dice cómo suena cada nivel. «¡Hecho! 💪 Una menos» es la respuesta del botón; si se sabe por Todoist o APEX, no se escribe nada | El tono escala con un dato, no con la memoria del modelo. Notas del chat de la 1.15 | — |
+| 141 | **«Se puede insistir desde» = hora de la tarea de hoy (o `default_time` sin ella) + `grace`** (1.15-i): con la hora de Todoist, la nueva si se movió; una tarea sin hora usa `default_time`; si cae mañana, hoy no se insiste. La segunda pasada no deja salir la insistencia antes (`key_too_early`); con la API caída, la plantilla sale en el latido de esa hora. El espacio entre avisos sigue siendo de Haiku. Cierra el pendiente de la 1.9 (`grace` sin usar) | Un tope del código y un dato para Haiku. Notas del chat de la 1.15 | — |
+| 142 | **El salto: una tarea clave cuya tarea de hoy pasó a otro día «ya no es de hoy»** (1.15-j): el latido anota la tarea de hoy que ve abierta (`seen`); si después esa misma tarea está abierta otro día y no la movió JimiC (`task_moves`), el estado lo dice (`rescheduled`) y la segunda pasada la frena igual que una hecha (`key_rescheduled`), pero el cierre (1.16) no debe contarla como hecha. Límite: una completada antes del primer latido que la vio no se nota | El contrato del 23-nov-2026 mostró que una recurrente completada no sale en las completadas (pasa a mañana). Decisión de Pedro en la sesión de la 1.15 | — |
+| 143 | **El hábito del entreno lleva `training: true`** (1.15-k): opcional, como mucho uno (`second_training`); el entreno de APEX lo da por hecho y su tarea clave ofrece [Ya entrené]. La base de `evals/latido.yaml` lo marca, así que la medida de la 1.15 se compara con la de la 1.9 por las cifras globales | Un dato explícito, validado por `jimic config check`, en lugar de una convención por id. Decisión de Pedro en la sesión de la 1.15 | — |
+| 144 | **[Deshacer] de [Ya entrené] con una recurrente la devuelve a su fecha moviéndola** (1.15-l): reabrir no la devuelve a hoy (contrato del 23-nov-2026); el `move` de siempre conserva la recurrencia. Antes comprueba que sigue donde la dejó completarla; si no, no la toca. Una normal se reabre | Deshacer de verdad lo que hizo el botón. Decisión de Pedro en la sesión de la 1.15 | — |
 
 ### Correspondencia con las decisiones candidatas de la referencia
 

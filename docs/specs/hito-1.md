@@ -60,9 +60,9 @@ clave: el gimnasio y una prioridad diaria (revisar ofertas).
 | 10:00–11:00 | Reunión en curso: el ciclo se corta antes de llamar al modelo | Código, primera pasada |
 | 12:45 | Gimnasio previsto a las 12:00 sin hacer: primer aviso, tono amable | Haiku |
 | 13:00 | Sin respuesta: no se repite el aviso | Haiku; el código solo garantiza el tope de 3 (tarea 1.7) |
-| 13:30 | Segundo aviso, más directo; [Más tarde] mueve la tarea sin modelo | Haiku, después el código |
+| 13:30 | Segundo aviso, más directo; [Más tarde] pregunta la hora y la mueve con la respuesta (1.15-d) | Haiku, después el agente y el código |
 | 17:20 | La prioridad diaria se completa a tiempo: no habla | Haiku |
-| 20:15 | Gimnasio completado: una felicitación de una línea; se acaba la insistencia | Haiku |
+| 20:15 | Gimnasio completado con [Ya entrené]: una felicitación de una línea; se acaba la insistencia | El código (1.15-h) |
 | 21:30 | Cierre en un solo mensaje, con lo hecho, «la haré», lo pendiente y la valoración | Haiku |
 | 23:00 | Horas de silencio: el ciclo se corta sin modelo | Código, primera pasada |
 
@@ -202,7 +202,8 @@ pasadas cada uno, con un informe de porcentajes. Nunca en el CI.
 - `intenciones.yaml` gana una sección `habits`. Cada hábito tiene nombre, prioridad (`high`,
   `medium`, `low`), duración típica, momento del día y la tarea de Todoist con la que se reconoce.
   Una intención `key_task` apunta a un hábito con `habit: <id>`, y el nombre de Todoist sale del
-  hábito (1.3-c).
+  hábito (1.3-c). Un hábito, como mucho, lleva `training: true`: el entreno, que APEX da por hecho
+  (tarea 1.15).
 - `preferencias.md` gana una tabla corta de iconos para las tareas habituales.
 - `limites.yaml` gana `max_deletions_per_day: 5` (zona protegida: conversando, solo baja).
 
@@ -216,6 +217,7 @@ habits:
     duration: 75m
     moment: midday               # pista para el plan, no horario
     todoist_task: "Gimnasio"
+    training: true               # el entreno (uno como mucho)
   - id: estiramientos
     name: "Estiramientos"
     priority: medium
@@ -319,8 +321,27 @@ Un solo mensaje de unas 25 líneas como máximo:
 
 ### Tareas clave (CU-02)
 
-Sin cambios de fondo: tono que escala hasta 3 avisos, [Voy ahora] [Más tarde] [Ya entrené]
-[Hoy no], para en cuanto la tarea está hecha. El tono sigue H1-11; la frecuencia, `limites.yaml`.
+Tono que escala hasta 3 avisos, [Voy ahora] [Más tarde] [Ya entrené] [Hoy no], y para en cuanto la
+tarea está hecha. El tono sigue H1-11; la frecuencia, `limites.yaml`. Lo que hizo la tarea 1.15
+(decisiones 134 a 144 del diseño):
+
+```text
+Oye, que la pesa te echa de menos 😄 ¿Te da tiempo antes de comer?
+
+[🏃 Voy ahora] [⏰ Más tarde]
+[✅ Ya entrené] [⏭ Hoy no]
+```
+
+- **El estado del día** de cada tarea clave: hecha y por qué fuente (botón, Todoist o APEX en el
+  hábito con `training: true`), si ya no es de hoy (el salto), «hoy no», la pausa de [Voy ahora],
+  desde cuándo se puede insistir (hora de la tarea de hoy, o `default_time`, + `grace`), el nivel
+  del tono y sus avisos de hoy. La segunda pasada lo garantiza con su código.
+- **[Más tarde]** pregunta «¿A qué hora?» y la respuesta de Pedro va al agente, con la tarea y su
+  id: el `move` sale al momento con [Deshacer] si se cumplen las condiciones de la 97 (cambia el
+  criterio del issue, que decía «sin llamar al modelo»).
+- **[Ya entrené]/[Hecho]** completa la tarea de hoy y **[Hoy no]** lo anota, los dos con
+  [Deshacer]; **[Voy ahora]** pausa la insistencia lo que dura el hábito. Tras [Voy ahora] o [Más
+  tarde] quedan [Ya entrené] y [Hoy no]. Ningún toque llama al modelo.
 
 ### Cierre del día (CU-14, con H1-8 y H1-14)
 
