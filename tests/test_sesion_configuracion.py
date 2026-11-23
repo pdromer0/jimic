@@ -32,15 +32,27 @@ DEV_ENV_RULES = [
     "Read(//tmp/casa-falsa/.config/jimic-dev/.env.*)",
     "Edit(//tmp/casa-falsa/.config/jimic-dev/.env.*)",
 ]
-PROD_DENY_READ = [
+PROD_SECRETS = [
     "/tmp/casa-falsa/.config/jimic/.env",
     "/tmp/casa-falsa/.config/jimic/google_cliente.json",
     "/tmp/casa-falsa/.config/jimic/google_token.json",
 ]
-DEV_DENY_READ = [
+DEV_SECRETS = [
     "/tmp/casa-falsa/.config/jimic-dev/.env",
     "/tmp/casa-falsa/.config/jimic-dev/google_cliente.json",
     "/tmp/casa-falsa/.config/jimic-dev/google_token.json",
+]
+DENY_READ = [
+    "/tmp/casa-falsa/.config/jimic/.env",
+    "/tmp/casa-falsa/.config/jimic/.env.*",
+    "/tmp/casa-falsa/.config/jimic/google_cliente.json",
+    "/tmp/casa-falsa/.config/jimic/google_token.json",
+    "/tmp/casa-falsa/.config/jimic-dev/.env",
+    "/tmp/casa-falsa/.config/jimic-dev/.env.*",
+    "/tmp/casa-falsa/.config/jimic-dev/google_cliente.json",
+    "/tmp/casa-falsa/.config/jimic-dev/google_token.json",
+    "/tmp/casa-falsa/.local/share/jimic",
+    "/tmp/casa-falsa/.local/share/jimic-dev",
 ]
 
 
@@ -97,7 +109,7 @@ def test_deniega_los_ficheros_de_google():
     for name in ("google_cliente.json", "google_token.json"):
         for tool in ("Read", "Edit"):
             assert f"{tool}(//tmp/casa-falsa/.config/jimic/{name})" in rules
-    assert len(deny()) == 20  # 4 nombres × 2 copias × 2 herramientas, y las 4 de fuera
+    assert len(deny()) == 25  # 16 de secretos, 4 de las raíces de datos y 5 de fuera
 
 
 @pytest.mark.parametrize("environment", ["prod", "dev"])
@@ -106,14 +118,15 @@ def test_cada_copia_deniega_los_secretos_de_las_dos(environment):
     deniega los secretos de dev y la de dev, los de prod, en las dos capas."""
     built = settings(environment)
     assert set(PROD_ENV_RULES + DEV_ENV_RULES) <= set(built["permissions"]["deny"])
-    assert built["sandbox"]["filesystem"]["denyRead"] == PROD_DENY_READ + DEV_DENY_READ
+    assert built["sandbox"]["filesystem"]["denyRead"] == DENY_READ
+    assert built["sandbox"]["filesystem"]["denyWrite"] == PROD_SECRETS + DEV_SECRETS
 
 
 def test_las_dos_copias_respetan_xdg_config_home():
     built = settings("prod", XDG_CONFIG_HOME="/tmp/xdg-falso")
     assert "Read(//tmp/xdg-falso/jimic-dev/.env)" in built["permissions"]["deny"]
     assert "/tmp/xdg-falso/jimic/.env" in built["sandbox"]["filesystem"]["denyRead"]
-    assert not any("casa-falsa" in rule for rule in built["permissions"]["deny"])
+    assert not any("casa-falsa/.config" in rule for rule in built["permissions"]["deny"])
 
 
 def test_el_sandbox_es_obligatorio():
@@ -126,7 +139,33 @@ def test_el_sandbox_es_obligatorio():
 
 def test_el_sandbox_no_deja_leer_el_env():
     """La segunda capa: un `cat .env` desde Bash lo para el sandbox, no las reglas `deny`."""
-    assert "/tmp/casa-falsa/.config/jimic/.env" in settings()["sandbox"]["filesystem"]["denyRead"]
+    deny_read = settings()["sandbox"]["filesystem"]["denyRead"]
+    assert "/tmp/casa-falsa/.config/jimic/.env" in deny_read
+    assert "/tmp/casa-falsa/.config/jimic/.env.*" in deny_read  # revisión propia, hallazgo 2
+
+
+def test_el_sandbox_no_deja_escribir_los_secretos():
+    """Revisión propia (hallazgo 4): la carpeta de trabajo se puede escribir, y con ella el
+    `.env`; `Edit(…)` no alcanza a un `rm .env` desde Bash."""
+    deny_write = settings()["sandbox"]["filesystem"]["denyWrite"]
+    assert "/tmp/casa-falsa/.config/jimic/.env" in deny_write
+    assert "/tmp/casa-falsa/.config/jimic/google_token.json" in deny_write
+
+
+def test_las_raices_de_datos_quedan_fuera():
+    """Revisión propia (hallazgo 3): SQLite, logs y transcripciones de las dos copias."""
+    built = settings()
+    for root in ("/tmp/casa-falsa/.local/share/jimic", "/tmp/casa-falsa/.local/share/jimic-dev"):
+        assert f"Read(/{root}/**)" in built["permissions"]["deny"]
+        assert f"Edit(/{root}/**)" in built["permissions"]["deny"]
+        assert root in built["sandbox"]["filesystem"]["denyRead"]
+
+
+def test_sin_mcp_ni_conectores():
+    """Revisión propia (hallazgo 1): las herramientas MCP corren fuera del sandbox."""
+    built = settings()
+    assert "mcp__*" in built["permissions"]["deny"]
+    assert built["disableClaudeAiConnectors"] is True
 
 
 def test_la_red_queda_cerrada_sin_preguntar():
@@ -212,12 +251,16 @@ def test_con_jimic_entorno_dev_la_carpeta_es_la_de_dev(monkeypatch, fake_home, j
 
 
 def test_lo_que_se_pasa_a_claude_code(fake_home, jimic_exe):
-    """La carpeta de configuración y `--settings`: solo desde ahí vale `strictAllowlist`."""
+    """La carpeta de configuración y `--settings`: solo desde ahí vale `strictAllowlist`; y sin
+    los ajustes de usuario ni locales, cuyas listas se sumarían a estas (hallazgo 5)."""
     launcher = RecordingLauncher()
     config_session.run(os.environ, which=all_found, launch=launcher, jimic=jimic_exe)
     settings_path = fake_home / ".config" / "jimic" / ".claude" / "settings.json"
     assert launcher.calls == [
-        (fake_home / ".config" / "jimic", ["claude", "--settings", str(settings_path)])
+        (
+            fake_home / ".config" / "jimic",
+            ["claude", "--settings", str(settings_path), "--setting-sources", "project"],
+        )
     ]
     allow = json.loads(settings_path.read_text(encoding="utf-8"))["permissions"]["allow"]
     assert allow == [f"Bash({jimic_exe} config check)"]

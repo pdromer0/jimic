@@ -207,7 +207,18 @@ def test_config_sesion_abre_claude_code(monkeypatch, fake_home, capsys):
     code, out, err = run(["config", "sesion"], capsys)
     assert (code, out, err) == (0, "", "")
     config = fake_home / ".config" / "jimic"
-    assert calls == [(config, ["claude", "--settings", str(config / ".claude" / "settings.json")])]
+    assert calls == [
+        (
+            config,
+            [
+                "claude",
+                "--settings",
+                str(config / ".claude" / "settings.json"),
+                "--setting-sources",
+                "project",
+            ],
+        )
+    ]
 
 
 def test_config_sesion_sin_bwrap_sale_con_el_error_de_arranque(monkeypatch, capsys):

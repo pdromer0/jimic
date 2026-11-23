@@ -20,11 +20,12 @@ from pathlib import Path
 from typing import NoReturn
 
 from jimic.files import write_private
-from jimic.paths import ENVIRONMENT_VAR, ROOT_NAMES, resolve_paths
+from jimic.paths import ENVIRONMENT_VAR, ROOT_NAMES, Paths, resolve_paths
 
 SECRET_NAMES = (".env", ".env.*", "google_cliente.json", "google_token.json")
-"""The files of each config root the session never reads: the `.env` (and any variant of it)
-and the two Google credentials. A name with `*` is a pattern, only for the `deny` rules."""
+"""The files of each config root the session never reads nor writes: the `.env` (and any
+variant of it) and the two Google credentials. A name with `*` is a pattern: on Linux the
+sandbox takes it for reading, not for writing (only a trailing `/**` there)."""
 
 SANDBOX_PACKAGES = {"bwrap": "bubblewrap", "socat": "socat"}
 """What the sandbox of Claude Code needs on Linux, by command and by Debian/Ubuntu package."""
@@ -43,13 +44,21 @@ class SessionError(Exception):
     """The session cannot be opened; the message says what to install or what is missing."""
 
 
+def _both_copies(environ: Mapping[str, str]) -> list[Paths]:
+    return [resolve_paths({**environ, ENVIRONMENT_VAR: environment}) for environment in ROOT_NAMES]
+
+
 def secret_files(environ: Mapping[str, str]) -> list[Path]:
     """The secrets of both copies, under the roots `resolve_paths` gives for each environment."""
-    roots = [
-        resolve_paths({**environ, ENVIRONMENT_VAR: environment}).config_dir
-        for environment in ROOT_NAMES
-    ]
-    return [root / name for root in roots for name in SECRET_NAMES]
+    return [paths.config_dir / name for paths in _both_copies(environ) for name in SECRET_NAMES]
+
+
+def data_dirs(environ: Mapping[str, str]) -> list[Path]:
+    """The data roots of both copies: SQLite, logs, backups and the agent's transcripts.
+
+    The session has no business there (decision 69 split the roots for this).
+    """
+    return [paths.data_dir for paths in _both_copies(environ)]
 
 
 def build_settings(environ: Mapping[str, str], jimic: Path) -> dict[str, object]:
@@ -61,16 +70,24 @@ def build_settings(environ: Mapping[str, str], jimic: Path) -> dict[str, object]
     """
     paths = resolve_paths(environ)
     secrets = secret_files(environ)
+    data = data_dirs(environ)
     deny = [f"{tool}(/{path})" for path in secrets for tool in ("Read", "Edit")]
-    deny += ["WebFetch", "WebSearch", "Bash(git push *)", "Bash(gh *)"]
+    deny += [f"{tool}(/{path}/**)" for path in data for tool in ("Read", "Edit")]
+    # `mcp__*` takes every MCP tool out of the session: they run outside the sandbox.
+    deny += ["WebFetch", "WebSearch", "Bash(git push *)", "Bash(gh *)", "mcp__*"]
     return {
         "$schema": SETTINGS_SCHEMA,
         "permissions": {"allow": [f"Bash({jimic} config check)"], "deny": deny},
+        "disableClaudeAiConnectors": True,
         "sandbox": {
             "enabled": True,
             "failIfUnavailable": True,
             "allowUnsandboxedCommands": False,
-            "filesystem": {"denyRead": [str(path) for path in secrets if "*" not in path.name]},
+            "filesystem": {
+                "denyRead": [str(path) for path in [*secrets, *data]],
+                # The working folder is writable: without this, `rm .env` would go through.
+                "denyWrite": [str(path) for path in secrets if "*" not in path.name],
+            },
             # `strictAllowlist` is only honoured from `--settings`: `run` opens Claude Code so.
             "network": {"allowedDomains": [], "strictAllowlist": True},
         },
@@ -152,6 +169,10 @@ def exec_claude(cwd: Path, argv: Sequence[str]) -> NoReturn:
     os.execvp(argv[0], list(argv))
 
 
+def launch_args(settings: Path) -> list[str]:
+    return ["claude", "--settings", str(settings), "--setting-sources", "project"]
+
+
 def run(
     environ: Mapping[str, str],
     *,
@@ -163,7 +184,9 @@ def run(
 
     Nothing is written or opened if a command is missing. Claude Code gets the settings file
     with `--settings` too: only from there does it honour `strictAllowlist` (the network closed
-    without asking) and keep `allowUnsandboxedCommands` fixed.
+    without asking) and keep `allowUnsandboxedCommands` fixed. `--setting-sources project`
+    leaves out the user and local settings, whose lists (domains, `allow` rules) would merge
+    with these and could open the network again.
     """
     config_dir = resolve_paths(environ).config_dir
     missing = missing_commands(which or find_command)
@@ -173,4 +196,4 @@ def run(
     if not executable.is_file():
         raise SessionError(f"no está el ejecutable de jimic en {executable}")
     settings = write_session(environ, executable)
-    (launch or exec_claude)(config_dir, ["claude", "--settings", str(settings)])
+    (launch or exec_claude)(config_dir, launch_args(settings))
