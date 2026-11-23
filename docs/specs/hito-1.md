@@ -247,7 +247,7 @@ función de purga con cortes absolutos en UTC (`jimic.memory.retention.purge`); 
 | `read_calendar` | Eventos de un día de los calendarios visibles: título, horas, `all_day`, si Pedro organiza y `declined` (si lo rechazó); sin descripción | Libre; contamina |
 | `read_tasks` | Tareas de hoy, vencidas y por proyecto | Libre; contamina (los títulos pueden venir de terceros) |
 | `read_apex_today` | Entreno previsto y hecho; objetivos de APEX; resumen de biométricos | Libre |
-| `propose_plan` | Propone crear, mover y borrar tareas, con su motivo | Libre (solo propone) |
+| `propose_plan` | Propone crear, mover y borrar tareas, con su motivo; en el plan del día, también lo que el código pinta (saludo, hábitos que quedan fuera, línea del entreno e iconos; decisión 122, de la 1.14) | Libre (solo propone) |
 | `propose_change` | Propone un cambio de memoria; lo escribe el código tras [Guardar] | Libre (solo propone); solo en una ejecución que no leyó el calendario ni las tareas (decisión 102, de la 1.12) |
 | `log_idea` | Propone apuntar una idea en `ideas.md`; la escribe el código tras [📝 Apuntar] | Libre (solo propone); la misma regla (decisión 103, que revisa la 100) |
 

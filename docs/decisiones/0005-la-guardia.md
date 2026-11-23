@@ -138,3 +138,13 @@ H1-2 (decisiones 55 y 56), y la tarea 1.11 las implementa.
     ejecución limpia siguiente), lo inyectado no cambia ningún fichero ni deja filas en `changes`.
     En la cuarta, la propuesta se enseña con su origen y [Guardar] la vuelve a pasar por la regla
     asimétrica.
+- **Tarea 1.14** (PR de `feat/h1-plan`; decisiones 118 a 128):
+  - **Ejecuciones sin mensaje de Pedro** (597f804): el plan que pasa el latido y la reanudación
+    tras los toques corren en la sesión del día sin origen. La regla de la 102 ya las cubría (no
+    hay cambios de memoria); se añade que nada se ejecuta al momento aunque el agente marque
+    `requested_by_pedro` (condición 0 de la 97). La fila del día puede existir sin mensaje de Pedro
+    (migración 0007, aa59710), para que el *hook* pueda marcar las lecturas.
+  - **La conversación sigue tras los toques** (6a9b699 y b3e9261): una vez por mensaje, solo si el
+    agente lo pidió con `follow_up`, sin filas pendientes, sin [✏️] y si Pedro no escribió después.
+  - **Ninguna fila global borra** (d4588a3): [Créalo todo] sigue sin ofrecer los borrados, y la de
+    descartar ([⏭ Nada], [⏭ Hoy sin plan]) los deja como «Déjala» para cerrar el mensaje.

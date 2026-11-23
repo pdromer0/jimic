@@ -2,8 +2,9 @@
 
 Las evaluaciones miden el **juicio del modelo**, que no es determinista: dan un porcentaje, no un
 verde o un rojo (13.1 y 13.2 del diseño, capa 3). Se lanzan a mano y **nunca** corren en el CI ni
-en `uv run pytest`. Los tests de `tests/test_evaluaciones.py` sí corren siempre: comprueban el
-fichero de escenarios y la corrección, con un doble del modelo y sin gastar.
+en `uv run pytest`. Los tests de `tests/test_evaluaciones.py` y `tests/test_evaluacion_plan.py` sí
+corren siempre: comprueban los ficheros de escenarios y la corrección, con un doble del modelo y
+sin gastar.
 
 **Todo lo de esta carpeta es inventado** (decisión 43). Los casos sacados de días reales irán, más
 adelante, en una carpeta fuera del repositorio con el mismo formato.
@@ -35,3 +36,34 @@ JIMIC_ENTORNO=dev uv run jimic evaluar latido --escenario l08 --escenario l10 --
   cerrar el hito.
 
 Cuándo lanzarla: al cambiar el prompt del latido, el modelo o el SDK, y al cerrar cada hito.
+
+## El plan del día
+
+`plan.yaml` (tarea 1.14) tiene un día base entero de una persona inventada (jueves 10-ene-2030 a
+las 7:45: sus ficheros personales, sus eventos, sus tareas, APEX y los cambios de memoria ya
+guardados) y 10 escenarios: seis casos del piloto con datos nuevos, el plan del e02 y tres nuevos.
+Algunos llevan mensajes de Pedro antes o después del plan, en la misma conversación. Cada
+escenario declara sus comprobaciones de un catálogo fijo (`src/jimic/evals/plan_checks.py`), que
+son funciones de los datos de la propuesta, nunca del texto.
+
+```bash
+JIMIC_ENTORNO=dev uv run jimic evaluar plan                      # todo, 3 pasadas
+JIMIC_ENTORNO=dev uv run jimic evaluar plan --escenario p03 --pasadas 1
+```
+
+- **Solo con la copia `dev`**, como la del latido. Usa `MODELO_AGENTE` y la clave de `jimic-dev`.
+- **Qué hace:** cada pasada corre el agente de verdad (prompt, herramientas, guardia y opciones)
+  en una carpeta temporal con los ficheros inventados, su propia base de datos y su propio
+  `CLAUDE_CONFIG_DIR`, con fuentes fijas; pinta el plan con el mismo código que el servicio, sin
+  enviarlo. No toca Todoist, Calendar ni Telegram (el escritor de Todoist se niega), ni la base de
+  datos de la copia. Tres pasadas a la vez.
+- **Cuánto cuesta:** unos 0,80 $ la evaluación completa (39 ejecuciones del agente) en la primera
+  medida; se para y se pregunta si pasara de 3 $.
+- **El informe:** `~/.local/share/jimic-dev/evals/plan-AAAAMMDD-HHMM.json` y `.md`, con el plan
+  pintado de cada pasada y las comprobaciones que fallan; se compara con el anterior como el del
+  latido.
+- **El umbral** (13.3 del diseño): el 100 % de las pasadas cumplen todas sus comprobaciones. Un
+  plan mínimo (el agente no pudo) es una pasada fallida.
+
+Cuándo lanzarla: al cambiar el prompt del agente o del plan, el modelo o el SDK, y al cerrar cada
+hito. Si una comprobación parece mal, se pregunta: nunca se cambia para que cuadre con el modelo.
