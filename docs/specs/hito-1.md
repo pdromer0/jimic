@@ -483,8 +483,15 @@ secciones de esta especificación que le tocan; nada personal (los ejemplos, inv
 - **Un día real completo en el PC:** plan creado con [Créalo], una insistencia que se para al
   hacer la tarea, cierre con valoración y ningún aviso repetido ni fuera de los límites.
 - Evaluaciones por encima del umbral de 13.3 del diseño: latido ≥ 90 % y ≤ 5 % de «habla cuando
-  no debía»; plan, 100 % en las comprobaciones automáticas y 8 de 10 planes aprobados por Pedro;
+  no debía»; plan, 100 % en las reglas duras, las de criterio con el umbral de 13.3 y revisadas
+  en la 1.17 con los 10 planes de Pedro, y 8 de 10 planes aprobados por Pedro (decisión 131);
   inyección, 100 %.
+  - Reglas duras: `no_overlap`, `no_duplicates`, `max_new`, `due_from_now`, `no_item_on`,
+    `deletes_exactly`, `no_delete`, `no_deletes`, `no_move`, `no_create_title`, `creates`,
+    `left_out_or_absent`, `no_memory_proposal`, `learned_line`, `training_line`, y `moves` cuando es
+    una incoherencia con el calendario (H1-9).
+  - Criterio: `includes_habit`, `includes_or_left_out`, y `moves` de una atrasada que no duplica
+    (traerla a hoy o a mañana).
 - Cada regla de los límites, la guardia, el borrado y la validación tiene su test, y su versión
   incorrecta lo pone en rojo.
 - Los botones por elemento, comprobados en el móvil (H1-4).
@@ -2677,6 +2684,24 @@ conjunto de reserva; 13 escenarios, 3 pasadas): **97,4 % (38/39)** ❌, en 1,08 
   prompt no se ajusta mirándola.
 Informe: `plan-20261123-1722.md` en la copia `dev`. Siguiendo las notas, no se tocó el prompt.
 
+**Las tres medidas por tipo de comprobación** (decisión 131, 1.14-i). Clasificadas con la salida
+de cada medida, que nombra cada comprobación que falla en cada pasada; se pudieron clasificar
+todas. Nota dura: pasadas que cumplen todas sus reglas duras; nota de criterio: pasadas que cumplen
+todas sus comprobaciones de criterio.
+
+| Medida | Duras | Criterio | Fallos duros | Fallos de criterio |
+| --- | --- | --- | --- | --- |
+| Primera (10 escenarios) | 90 % (27/30) | 90 % (27/30) | p03 ×2: `deletes_exactly` y `no_create_title(Gimnasio)` en las dos, y `no_delete(t-gimnasio-ayer)` en una (borró el gimnasio de ayer y creó otro); p04 ×1: `no_overlap` | p03 ×2: `moves(t-gimnasio-ayer, hoy)`; p04 ×1: `includes_habit(cena)` (la misma pasada que el solape) |
+| Segunda (10) | 96,7 % (29/30) | 93,3 % (28/30) | p05 ×1: `creates(Revisar ofertas, 14:30, 15:00)`, en el turno de después | p04 ×2: `includes_habit(ofertas)` |
+| Tercera (13) | **100 % (39/39)** | 97,4 % (38/39) | — | p04 ×1: `includes_habit(cena)` |
+
+En la tercera, `p01` a `p10`: duras 100 % (30/30) y criterio 96,7 % (29/30); la reserva, 100 % en
+las dos (9/9). Los fallos duros de la primera (p03 y el solape de p04) los corrigieron las reglas
+generales de la decisión 129. Matiz frente a las notas: la segunda también tuvo un fallo duro, pero
+de p05 (`creates`, tras el mensaje de Pedro), con las reglas generales ya puestas; en la tercera
+desaparece con solo la línea del momento del día, que no trata de eso, así que lo más probable es
+la variabilidad del modelo. Ver si vuelve es parte de la 1.16.
+
 **Versiones incorrectas** (aplicadas y deshechas; el árbol quedó limpio). Predicción frente a lo
 observado:
 
@@ -2743,12 +2768,20 @@ minutos del disparador del módulo `xdist`.
   3. La tercera medida, arriba.
   - N3 del paso 2: en verde en 2:37, 1566 tests (pre-commit 0:13, pytest 2:22 y gitleaks de la
     historia 0:02).
+- **Ajustes finales** (decisión 1.14-i de Pedro, la 131; solo documentación): las comprobaciones,
+  de dos tipos, en este anexo, en `evals/README.md`, en el criterio de aceptación del hito y en 13.3
+  del diseño; las tres medidas por tipo, arriba.
 - N3 de la ronda: en verde en 2:20, 1566 tests (pre-commit 0:14, pytest 2:05 y gitleaks de la
   historia 0:01). pytest pasa de los 2 minutos: se cumple el disparador del módulo `xdist`.
 
 **Pendiente.**
 - **El prompt del plan** (p04 de la tercera medida, la cena de prioridad media en 1 de 3
-  pasadas): lo decide Pedro, con reglas generales y no por escenario.
+  pasadas): es de criterio y se revisa en la 1.17 con los 10 planes de Pedro.
+- **Las dos notas por separado** (1.16, que reutiliza el programa del agente): el informe de
+  `jimic evaluar plan` da la nota de las duras y la de criterio, y cada comprobación del catálogo
+  lleva su tipo.
+- **El disparador del módulo `xdist`** (1.17): pytest pasa de 2 minutos (2:05 y 2:22 en las N3 de
+  los ajustes).
 - **El plan confirmado** (`day_plans` y `plan_items`, CU-01 paso 6): con el cierre, en la 1.16.
 - **Un hábito ya marcado hoy** no está entre las tareas abiertas y el plan mínimo lo volvería a
   proponer (raro: el plan sale a primera hora).

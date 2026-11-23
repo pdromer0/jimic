@@ -39,13 +39,26 @@ Cuándo lanzarla: al cambiar el prompt del latido, el modelo o el SDK, y al cerr
 
 ## El plan del día
 
-`plan.yaml` (tarea 1.14) tiene un día base entero de una persona inventada (jueves 10-ene-2030 a
-las 7:45: sus ficheros personales, sus eventos, sus tareas, APEX y los cambios de memoria ya
-guardados) y 13 escenarios: seis casos del piloto con datos nuevos, el plan del e02 y tres nuevos
-(`p01` a `p10`), y un conjunto de reserva (`r01` a `r03`) que el chat escribió después de ajustar
-el prompt: el prompt no se ajusta mirándolo, para que mida lo que no se vio al ajustar. Algunos llevan mensajes de Pedro antes o después del plan, en la misma conversación. Cada
-escenario declara sus comprobaciones de un catálogo fijo (`src/jimic/evals/plan_checks.py`), que
-son funciones de los datos de la propuesta, nunca del texto.
+`plan.yaml` (tarea 1.14) tiene un día base entero de una persona inventada (jueves 10-ene-2030 a las
+7:45: sus ficheros personales, sus eventos, sus tareas, APEX y los cambios de memoria ya guardados)
+y 13 escenarios: seis casos del piloto con datos nuevos, el plan del e02 y tres nuevos (`p01` a
+`p10`), y un conjunto de reserva (`r01` a `r03`) que el chat escribió después de ajustar el prompt:
+el prompt no se ajusta mirándolo, para que mida lo que no se vio al ajustar. Algunos llevan mensajes
+de Pedro antes o después del plan, en la misma conversación. Cada escenario declara sus
+comprobaciones de un catálogo fijo (`src/jimic/evals/plan_checks.py`), que son funciones de los
+datos de la propuesta, nunca del texto.
+
+Las comprobaciones son de dos tipos (decisión 131):
+
+- **Reglas duras**, al 100 %: `no_overlap`, `no_duplicates`, `max_new`, `due_from_now`,
+  `no_item_on`, `deletes_exactly`, `no_delete`, `no_deletes`, `no_move`, `no_create_title`,
+  `creates`, `left_out_or_absent`, `no_memory_proposal`, `learned_line`, `training_line`, y `moves`
+  cuando es una incoherencia con el calendario (H1-9).
+- **Criterio**, con el umbral de 13.3 del diseño y revisadas en la 1.17 con los 10 planes de Pedro:
+  `includes_habit`, `includes_or_left_out`, y `moves` de una atrasada que no duplica (traerla a hoy
+  o a mañana).
+
+El informe aún da una sola nota (pasadas que cumplen todas); las dos por separado llegan en la 1.16.
 
 ```bash
 JIMIC_ENTORNO=dev uv run jimic evaluar plan                      # todo, 3 pasadas
