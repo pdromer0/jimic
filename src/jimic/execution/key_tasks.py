@@ -13,7 +13,8 @@
 [↩️ Deshacer] (`key_undo`) takes the mark away and, if JimiC closed the task, opens it again: a
 normal one is reopened; a recurring one (which completing sent to its next day, and which reopening
 does not bring back: contract of 23-nov-2026) is moved back to the due it had, if it is still where
-JimiC left it. Everything expires at the end of the local day. Marks are on the local day.
+JimiC left it. If Todoist changed meanwhile, only the mark goes. Everything expires at the end of
+the local day. Marks are on the local day.
 """
 
 import logging
@@ -26,8 +27,9 @@ from jimic.agent.proposals import due_value, same_due
 from jimic.channel.message import InteractiveMessage, Item, Option
 from jimic.channel.taps import Answer, Failed, Followup, HandlerOutcome, TapHandler
 from jimic.clock import Clock, local_day_bounds
-from jimic.execution.execute import CHANGED, GONE, UNDONE
+from jimic.execution.execute import UNDONE
 from jimic.execution.plan_message import UNDO_EXPIRED
+from jimic.execution.rules import due_day
 from jimic.heartbeat.key_message import KEY_KIND
 from jimic.memory import key_marks
 from jimic.tools.failures import ToolFailure
@@ -47,12 +49,11 @@ DONE_TEXT = "¡Hecho! 💪 Una menos"
 SKIPPED = "⏭ hoy no"
 SKIP_TEXT = "Vale, hoy nada de {habit}. 🛋️"
 
+MARK_ONLY = "↩️ deshecho (Todoist, sin tocar)"
+"""[Deshacer] of a done whose task changed or is gone: the mark goes, Todoist is left alone."""
+
 LATER_LINE = "Pedro tocó ⏰ Más tarde en: {label}; su mensaje dice a qué hora moverla"
 """The line of the code before Pedro's next message (decision 1.15-d)."""
-
-
-def _day(due: Due) -> date:
-    return due.date() if isinstance(due, datetime) else due
 
 
 def later_label(data: dict[str, Any], timezone: ZoneInfo) -> str:
@@ -158,12 +159,17 @@ class KeyTaskActions:
         current = await self._todoist.reader.get_task(task_id)
         if current is None or current.completed or current.due is None:
             return None
-        if _day(current.due) != today:
+        if due_day(current.due) != today:
             return None
         await self._todoist.writer.complete(task_id)
         if not current.is_recurring:
             return {"recurring": False}
-        after = await self._todoist.reader.get_task(task_id)
+        # Closed already: a failed read now must not fail the tap (no mark, no [Deshacer]).
+        try:
+            after = await self._todoist.reader.get_task(task_id)
+        except ToolFailure as error:
+            logger.info("key task: next due unknown (%s)", error.code)
+            after = None
         return {
             "recurring": True,
             "before": current.due.isoformat(),
@@ -173,43 +179,48 @@ class KeyTaskActions:
     # --- [↩️ Deshacer] --------------------------------------------------------------------------
 
     async def undo(self, item: Item, option: str, approval_id: int) -> HandlerOutcome:
+        """Take the mark away and, if JimiC closed the task and it is still as it left it, open it
+        again. If Todoist changed (or the task is gone), only the mark goes: Pedro asked to undo
+        the done."""
         data = item.data or {}
         if option != "undo":
             return Failed("invalid_option")
+        untouched = False
         if data.get("action") == "done" and data.get("task_id"):
             try:
-                refused = await self._reopen(data)
+                untouched = not await self._reopen(data)
             except ToolFailure as error:
-                if error.code == TASK_NOT_FOUND:
-                    return GONE
-                return Failed(error.code)
-            if refused is not None:
-                return refused
+                if error.code != TASK_NOT_FOUND:
+                    return Failed(error.code)  # nothing undone: it can be tried again
+                untouched = True
         key_marks.remove(self._conn, int(str(data["mark"])))
-        logger.info("key task: undone (%s)", data.get("action"))
-        return UNDONE
+        logger.info("key task: undone (%s%s)", data.get("action"), ", mark only" * untouched)
+        return MARK_ONLY if untouched else UNDONE
 
-    async def _reopen(self, data: dict[str, Any]) -> str | None:
-        """Open again what JimiC closed; a text if it changed or is gone (nothing undone)."""
+    async def _reopen(self, data: dict[str, Any]) -> bool:
+        """Open again what JimiC closed; `False` if the task changed or is gone (left alone)."""
         task_id = str(data["task_id"])
         current = await self._todoist.reader.get_task(task_id)
         if current is None:
-            return GONE
+            return False
         if not data.get("recurring"):
             if current.completed:
                 await self._todoist.writer.reopen(task_id)
-            return None
-        if not _same_due(current, data.get("after")):
-            logger.info("key task: undo refused (changed)")
-            return CHANGED
+            return True
         before = due_value(data.get("before"))
+        if not _where_jimic_left_it(current, data.get("after"), before):
+            logger.info("key task: Todoist changed, left alone")
+            return False
         await self._todoist.writer.move(task_id, before)
         now = self._now()
         key_marks.note_moved(self._conn, now.date(), task_id, now)
-        return None
+        return True
 
 
-def _same_due(task: TodoistTask, after: object) -> bool:
-    """The task is still where completing it left it."""
+def _where_jimic_left_it(task: TodoistTask, after: object, before: Due | None) -> bool:
+    """The task is still where completing it left it; if that was not read, still on a day
+    after the one it had."""
     current = None if task.due is None else task.due.isoformat()
-    return same_due(current, None if after is None else str(after))
+    if after is not None:
+        return same_due(current, str(after))
+    return task.due is not None and before is not None and due_day(task.due) > due_day(before)

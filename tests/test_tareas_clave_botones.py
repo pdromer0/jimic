@@ -177,7 +177,8 @@ def test_con_una_recurrente_hecho_la_pasa_a_manana_y_deshacer_la_devuelve(conn, 
     assert not w.marks().of("insistir_gimnasio").done
 
 
-def test_si_la_recurrente_cambio_deshacer_no_la_toca(conn, tmp_path):
+def test_si_la_recurrente_cambio_deshacer_quita_la_marca_y_no_toca_todoist(conn, tmp_path):
+    """Revisión propia: Pedro pidió deshacer el «hecho»; si Todoist cambió, solo va la marca."""
     recurring = todoist_task("t-gym", "Gimnasio", due="2030-01-07T12:00:00", recurring=True)
     w = KeyWorld(conn, tmp_path, [recurring])
     followup = only_followup(w.press(w.send("insistir_gimnasio"), 1, "done"))
@@ -185,9 +186,42 @@ def test_si_la_recurrente_cambio_deshacer_no_la_toca(conn, tmp_path):
     assert stored is not None
     stored["due"]["date"] = "2030-01-09T12:00:00"  # Pedro la movió en la app
     result = w.press(w.save(followup), 1, "undo")
-    assert "ha cambiado" in render_text(result)
+    assert "Todoist, sin tocar" in render_text(result)
     assert w.api.calls_of("update_task") == []
-    assert w.marks().of("insistir_gimnasio").done
+    assert not w.marks().of("insistir_gimnasio").done
+
+
+def test_si_la_tarea_ya_no_existe_deshacer_quita_la_marca(conn, tmp_path):
+    w = KeyWorld(conn, tmp_path)
+    followup = only_followup(w.press(w.send("insistir_gimnasio"), 1, "done"))
+    asyncio.run(w.api.delete_task("t-gym"))
+    result = w.press(w.save(followup), 1, "undo")
+    assert "Todoist, sin tocar" in render_text(result)
+    assert not w.marks().of("insistir_gimnasio").done
+
+
+def test_si_falla_la_relectura_tras_completar_queda_la_marca_y_el_deshacer(conn, tmp_path):
+    """Revisión propia: una vez completada, el toque no falla. Sin la fecha nueva, [Deshacer]
+    devuelve la recurrente si sigue en un día posterior al que tenía."""
+    recurring = todoist_task("t-gym", "Gimnasio", due="2030-01-07T12:00:00", recurring=True)
+    w = KeyWorld(conn, tmp_path, [recurring])
+    approval = w.send("insistir_gimnasio")
+    original = w.api.get_task
+    reads = {"n": 0}
+
+    async def second_read_fails(task_id: str):
+        reads["n"] += 1
+        if reads["n"] == 2:
+            raise http_status_error(503)
+        return await original(task_id)
+
+    w.api.get_task = second_read_fails  # una lectura que falla
+    result = w.press(approval, 1, "done")
+    w.api.get_task = original
+    assert result.code == "resolved" and w.marks().of("insistir_gimnasio").done
+    w.press(w.save(only_followup(result)), 1, "undo")
+    task = asyncio.run(w.todoist.reader.get_task("t-gym"))
+    assert task is not None and task.due == datetime(2030, 1, 7, 12, tzinfo=MADRID)
 
 
 def render_text(result: TapResult) -> str:
