@@ -103,7 +103,7 @@ def test_la_demo_ensena_una_propuesta_con_sus_filas_y_la_global_bajo_una_respues
     assert (kind, undo_kind) == ("plan", "undo")
     view = render(proposal, approval_id=1)
     assert [[b.label for b in row] for row in view.keyboard] == [
-        ["1 ✅", "1 ⏭"],
+        ["1 ✅", "1 ✏️", "1 ⏭"],
         ["2 🔄 A las 9:50", "2 🆗 Déjalo"],
         ["3 🗑️ Bórrala", "3 🆗 Déjala"],
         ["✅ Créalo todo", "⏭ Nada"],

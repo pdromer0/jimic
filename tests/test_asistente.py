@@ -297,13 +297,15 @@ def test_una_inyeccion_da_cero_ejecuciones_y_cero_cambios_de_memoria(conn, tmp_p
     out = outgoing(w.say("¿qué tengo hoy?"))
     assert out.kind == PLAN_KIND
     assert w.writes() == []
-    # La fila global no se ve: solo hay borrados, y no la ofrecen.
+    # De la fila global solo se ve [Nada]: [Créalo todo] no ofrece los borrados.
     approval, _ = w.show([], message=out.message)
-    assert [b.label for b in render(out.message, approval).keyboard[-1]] == [
-        "3 🗑️ Bórrala",
-        "3 🆗 Déjala",
-    ]
+    keyboard = render(out.message, approval).keyboard
+    assert [b.label for b in keyboard[-2]] == ["3 🗑️ Bórrala", "3 🆗 Déjala"]
+    assert [b.label for b in keyboard[-1]] == ["⏭ Nada"]
     assert w.tap(approval, None, "all").code == "nothing_to_do"
+    assert w.writes() == []
+    # [Nada] los deja todos («Déjala»): ninguna fila global borra.
+    assert w.tap(approval, None, "none").code == "resolved"
     assert w.writes() == []
     assert conn.execute("SELECT COUNT(*) FROM changes").fetchone() == (0,)
     assert sorted(path.name for path in w.paths.config_dir.iterdir()) == before

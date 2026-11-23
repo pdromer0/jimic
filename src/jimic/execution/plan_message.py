@@ -3,14 +3,17 @@
 The code writes the exact list under the agent's answer: the title of the snapshot (move,
 delete) or of the proposal (create), and when. The labels are the ones of the format of the plan:
 
-- create: `n ✅` / `n ⏭`;
+- create: `n ✅` / `n ✏️` / `n ⏭` (task 1.14: [✏️ Cámbialo] closes it and asks how);
 - move: `n 🔄 <when>` / `n 🆗 Déjalo`;
 - delete: `n 🗑️ Bórrala` / `n 🆗 Déjala`;
-- global: `[✅ Créalo todo] [⏭ Nada]`.
+- global: `[✅ Créalo todo] [⏭ Nada]`, and `[✅ Créalo todo] [⏭ Hoy sin plan]` in the plan of the
+  day (decision 1.14-c).
 
-Create and move offer `ok`/`no`, delete offers `del`/`keep`, and the global row applies `ok` and
-`no`: **a delete never offers what the global row applies**, so [Créalo todo] never deletes.
-What an item does lives in its `data` (the proposal and its snapshot), never in what is shown.
+Create and move offer `ok`/`no`, delete offers `del`/`keep`. [Créalo todo] applies `ok`, which a
+delete never offers, so it never deletes; the global row to discard applies `no`, or `keep` to a
+delete (task 1.14, Pedro's review of the plan), so it leaves every row closed without deleting
+anything. **No global button ever applies `del`.** What an item does lives in its `data` (the
+proposal and its snapshot), never in what is shown.
 """
 
 from datetime import date, datetime, timedelta
@@ -29,15 +32,19 @@ UNDO_EXPIRED = "Deshacer caducado"
 """What [Deshacer] says at midnight: a bare «caducado» would read as if the task had."""
 
 OK = Option(key="ok", label="✅")
+EDIT = Option(key="edit", label="✏️", approves=False)
 SKIP = Option(key="no", label="⏭", approves=False)
 KEEP_MOVE = Option(key="no", label="🆗 Déjalo", approves=False)
 DELETE = Option(key="del", label="🗑️ Bórrala")
 KEEP = Option(key="keep", label="🆗 Déjala", approves=False)
 UNDO = Option(key="undo", label="↩️ Deshacer")
-GLOBAL = (
-    GlobalOption(key="all", label="✅ Créalo todo", option="ok"),
-    GlobalOption(key="none", label="⏭ Nada", option="no"),
+CREATE_ALL = GlobalOption(key="all", label="✅ Créalo todo", option="ok")
+GLOBAL = (CREATE_ALL, GlobalOption(key="none", label="⏭ Nada", option="no", then="keep"))
+DAY_GLOBAL = (
+    CREATE_ALL,
+    GlobalOption(key="none", label="⏭ Hoy sin plan", option="no", then="keep"),
 )
+"""The global row of the plan of the day: [Nada] with another label (decision 1.14-c)."""
 
 ICONS = {"create": "➕", "move": "🔄", "delete": "🗑️"}
 
@@ -107,7 +114,7 @@ def item_title(entry: dict[str, Any], today: date, timezone: ZoneInfo) -> str:
 def plan_item(entry: dict[str, Any], today: date, timezone: ZoneInfo) -> Item:
     action = entry["action"]
     if action == "create":
-        options = (OK, SKIP)
+        options = (OK, EDIT, SKIP)
     elif action == "move":
         label = move_label(proposed_due(entry["due"], timezone), today, timezone)
         options = (Option(key="ok", label=label), KEEP_MOVE)
