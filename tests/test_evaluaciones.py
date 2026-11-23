@@ -65,6 +65,17 @@ def test_una_intencion_esperada_que_ese_dia_no_esta_activa_es_un_error(tmp_path)
         load_suite(path)
 
 
+def test_un_pendiente_puede_esperar_lo_que_su_tarea_aun_no_ha_traido(tmp_path):
+    """Pilla una comprobación que exige lo esperado también a los pendientes: el escenario
+    se salta, así que no puede impedir la evaluación."""
+    path = variant(
+        tmp_path,
+        '\n  - id: zz1\n    title: futuro\n    day: "2030-01-11"\n    now: "19:00"\n'
+        '    expected: [[regar]]\n    pending: "1.99"\n',
+    )
+    assert by_id(load_suite(path), "zz1").pending == "1.99"
+
+
 @pytest.mark.parametrize(
     ("extra", "error"),
     [

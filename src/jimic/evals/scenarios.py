@@ -324,8 +324,9 @@ def _resolve(item: ScenarioIn, earlier: dict[str, dict[str, Any]]) -> dict[str, 
 
 
 def load_suite(path: Path = EVALS_FILE) -> Suite:
-    """Read, validate and resolve `path`. Every scenario that is not pending builds its state
-    here and its expected intentions must be active that day: a typo fails before spending."""
+    """Read, validate and resolve `path`. Every scenario builds its state here, and the expected
+    intentions of those that are not pending must be active that day: a typo fails before
+    spending. A pending one may expect what its task has not brought yet."""
     try:
         text = path.read_text(encoding="utf-8")
     except FileNotFoundError:
@@ -413,6 +414,8 @@ def _check_expected(path: Path, suite: Suite, scenario: Scenario) -> None:
             f"{path}: escenario {scenario.id}: el estado no se puede montar"
             f" ({error.error_count()} errores)"
         ) from None
+    if scenario.pending is not None:
+        return
     active = {intention.id for intention in state.intentions}
     for alternative in scenario.expected:
         missing = sorted(alternative - active)
