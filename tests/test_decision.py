@@ -42,6 +42,7 @@ from jimic.heartbeat.decide import (
     HaikuDecider,
     build_client,
     fixed_block,
+    prompt_template,
     usage_of,
 )
 from jimic.memory import key_marks
@@ -386,3 +387,13 @@ def test_el_repr_de_la_decision_no_lleva_el_motivo(conn):
         conn, "2030-01-07T16:30", FakeMessages(api_message(answer(True, "ofertas", SECRET_TEXT)))
     )
     assert SECRET_REASON not in repr(decision) and SECRET_TEXT not in repr(decision)
+
+
+def test_el_prompt_del_latido_explica_los_campos_de_la_tarea_clave_y_el_tono():
+    """Tarea 1.15 (1.15-h): el único cambio de prompt del latido. Pilla un campo del estado que
+    el modelo no sabría leer o un nivel del tono sin describir."""
+    text = " ".join(prompt_template().split())
+    for field in ("done_by", "rescheduled", "not_today", "paused_until", "insist_from"):
+        assert f"`{field}`" in text
+    for level in ("1, amable", "2, más directo", "3, con un reto o con humor"):
+        assert level in text
