@@ -3,7 +3,7 @@ propuestas, las 25 líneas, los iconos y la línea 🧠. Funciones puras con dat
 la línea 🧠, que lee `changes` y `notices` de una base temporal.
 """
 
-from datetime import date, datetime
+from datetime import date, datetime, time
 
 import pytest
 from heartbeat_data import all_day, calendar_with, event, madrid, task
@@ -18,6 +18,7 @@ from jimic.plan.message import (
     MAX_LINES,
     PlanContent,
     icon_table,
+    late_after,
     learned_line,
     line_count,
     paint,
@@ -332,3 +333,30 @@ def test_la_linea_dice_la_fecha_si_el_plan_anterior_no_fue_ayer(conn):
     add_change(conn, madrid("2030-01-08T10:00"))
     line = learned_line(conn, NOW, ["plan_del_dia"])
     assert line is not None and line.startswith("🧠 Desde el lun 07/01 he aprendido:")
+
+
+# --- El plan tardío (H1-7) ---------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("window", "now", "late"),
+    [
+        (None, "08:00:00.300", False),  # el latido llega una fracción de segundo tarde
+        (None, "08:00:59", False),
+        (None, "08:01", True),
+        (("07:30", "09:30"), "09:30:40", False),
+        (("07:30", "09:30"), "09:31", True),
+        (("08:00", "08:00"), "23:00", False),  # el día entero
+        (("23:00", "01:00"), "23:30", False),  # cruza la medianoche
+        (("23:00", "01:00"), "00:30", False),
+        (("23:00", "01:00"), "02:00", True),
+    ],
+)
+def test_el_plan_es_tardio_al_minuto_tras_su_ventana(window, now, late):
+    """Pilla un tardío a las 8:00 sin ventana por los segundos (hallazgo de la revisión propia) y
+    una ventana que cruza la medianoche juzgada como si no lo hiciera."""
+    span = (
+        None if window is None else (time.fromisoformat(window[0]), time.fromisoformat(window[1]))
+    )
+    moment = datetime.fromisoformat(f"2030-01-10T{now}").replace(tzinfo=NOW.tzinfo)
+    assert late_after(span, time(8, 0), moment) is late

@@ -269,8 +269,17 @@ def learned_line(
     )
 
 
-def late_after(window_end: time | None, default_time: time, now: datetime) -> bool:
-    """A late plan (H1-7): after the end of the window or, without one, after its default
-    time."""
-    end = window_end if window_end is not None else default_time
-    return now.time() > end
+def late_after(window: tuple[time, time] | None, default_time: time, now: datetime) -> bool:
+    """A late plan (H1-7): after the end of the window `(start, end)` or, without one, after its
+    default time; compared to the minute, so a heartbeat a fraction of a second after 8:00 is
+    still 8:00. A window with `start == end` is the whole day (decision 105): never late. One
+    that crosses midnight is late only between its end and its start."""
+    moment = now.time().replace(second=0, microsecond=0)
+    if window is None:
+        return moment > default_time
+    start, end = window
+    if start == end:
+        return False
+    if start < end:
+        return moment > end
+    return end < moment < start

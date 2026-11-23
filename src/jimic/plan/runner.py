@@ -82,11 +82,10 @@ class BuiltPlan:
 
 
 def is_late(intention: DailyPlan, now: datetime) -> bool:
-    """After the window (H1-7). A window with `from == to` is the whole day (decision 105)."""
+    """After the window of the plan (H1-7), as `late_after` says."""
     window = intention.window
-    if window is not None and window.start == window.end:
-        return False
-    return late_after(window.end if window is not None else None, intention.default_time, now)
+    span = None if window is None else (window.start, window.end)
+    return late_after(span, intention.default_time, now)
 
 
 def plan_note(intention: DailyPlan, late: bool) -> str:
