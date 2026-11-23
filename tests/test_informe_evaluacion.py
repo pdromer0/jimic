@@ -267,6 +267,32 @@ def test_un_informe_anterior_ilegible_no_rompe_la_evaluacion(monkeypatch):
     (reports_dir() / "latido-20300120-0950.json").write_text("{no es json")
     run = evaluate(ApiFactory(), ["l01"], clock=at(10))
     assert "Comparación con latido-20300120-0900.json:" in run.screen
+    # Revisión propia: se dice cuál se saltó, para no esconder una ejecución rota.
+    assert "  ilegibles, saltados: latido-20300120-0950.json" in run.screen
+    document = json.loads(run.json_path.read_text(encoding="utf-8"))
+    assert document["comparison"]["skipped"] == ["latido-20300120-0950.json"]
+
+
+def test_sin_completo_pero_con_uno_ilegible_tambien_lo_dice(monkeypatch):
+    use_dev(monkeypatch)
+    reports_dir().mkdir(parents=True)
+    (reports_dir() / "latido-20300120-0950.json").write_text("{no es json")
+    run = evaluate(ApiFactory(), ["l01"], clock=at(10))
+    assert (
+        "Comparación: no hay un informe completo anterior.\n"
+        "  ilegibles, saltados: latido-20300120-0950.json"
+    ) in run.screen
+
+
+def test_comparar_con_una_ruta_con_punto_es_una_ruta(monkeypatch, tmp_path):
+    """Revisión propia: `./x.json` no se busca en la carpeta de informes."""
+    use_dev(monkeypatch)
+    chosen = evaluate(ApiFactory(), ["l01", "l03"], clock=at(9))
+    copy = tmp_path / "latido-elegido.json"
+    copy.write_text(chosen.json_path.read_text(encoding="utf-8"), encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    run = evaluate(ApiFactory(), ["l01"], clock=at(10), compare_to="./latido-elegido.json")
+    assert "Comparación con latido-elegido.json:" in run.screen
 
 
 def test_un_completo_que_no_se_deja_leer_entero_lo_dice(monkeypatch):

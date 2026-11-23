@@ -18,7 +18,7 @@ the next one. `--comparar-con` names another by hand. The scenarios of the reser
 import json
 import re
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from decimal import Decimal
 from fractions import Fraction
@@ -77,8 +77,9 @@ def spend(model: str, results: Sequence[ScenarioResult]) -> Spend:
 
 @dataclass(frozen=True)
 class Comparison:
-    previous: str
-    """The name of the previous report."""
+    previous: str | None
+    """The name of the previous report; `None` when there is no complete one, but some that
+    could not be read were skipped (`skipped`)."""
     before: Score | None
     """`None` when no scenario is common to both: nothing to compare."""
     after: Score | None
@@ -91,6 +92,9 @@ class Comparison:
     changed: tuple[str, ...]
     """The same id with another fingerprint: left out of the comparison."""
     unreadable: bool = False
+    skipped: tuple[str, ...] = ()
+    """Newer reports that could not be read, so could not say they were complete (task 1.15-b):
+    the screen names them, so a broken run is never hidden."""
 
 
 def worsened(before: Score, after: Score) -> tuple[str, ...]:
@@ -199,24 +203,36 @@ def _read(path: Path) -> object:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def latest_complete(folder: Path) -> Path | None:
+@dataclass(frozen=True)
+class Latest:
+    """The last complete report, read once, and the newer ones that could not be read."""
+
+    path: Path | None
+    document: object
+    skipped: tuple[str, ...]
+
+
+def latest_complete(folder: Path) -> Latest:
     """The most recent heartbeat report of `folder` that is complete. One that cannot be read
-    cannot say so, and is skipped like a partial one."""
+    cannot say so: it is skipped, and named."""
+    skipped: list[str] = []
     for path in _reports(folder, PREFIX):
         try:
             document = _read(path)
         except OSError, ValueError:
+            skipped.append(path.name)
             continue
         if isinstance(document, dict) and document.get("complete") is True:
-            return path
-    return None
+            return Latest(path, document, tuple(skipped))
+    return Latest(None, None, tuple(skipped))
 
 
 def chosen_report(folder: Path, name: str) -> tuple[str, list[Outcome]]:
-    """The report of `--comparar-con` and its outcomes: a path, or a bare file name looked up in
-    `folder`. `EvalError` if it does not exist or cannot be read, before spending anything."""
-    given = Path(name).expanduser()
-    path = folder / given if len(given.parts) == 1 else given
+    """The report of `--comparar-con` and its outcomes: a path (with a folder, `./` included),
+    or a bare file name looked up in `folder`. `EvalError` if it does not exist or cannot be
+    read, before spending anything."""
+    bare = "/" not in name and "\\" not in name and not name.startswith("~")
+    path = folder / name if bare else Path(name).expanduser()
     try:
         return path.name, read_outcomes(_read(path))
     except FileNotFoundError:
@@ -228,15 +244,19 @@ def chosen_report(folder: Path, name: str) -> tuple[str, list[Outcome]]:
 
 
 def compare_with_previous(folder: Path, current: Sequence[Outcome]) -> Comparison | None:
-    """With the last complete report; `None` when there is none."""
-    path = latest_complete(folder)
-    if path is None:
-        return None
+    """With the last complete report; `None` when there is none and nothing was skipped."""
+    latest = latest_complete(folder)
+    skipped = latest.skipped
+    if latest.path is None:
+        return (
+            Comparison(None, None, None, (), (), (), (), (), skipped=skipped) if skipped else None
+        )
+    name = latest.path.name
     try:
-        previous = read_outcomes(_read(path))
-    except OSError, ValueError, UnreadableReport:
-        return Comparison(path.name, None, None, (), (), (), (), (), unreadable=True)
-    return compare(path.name, current, previous)
+        previous = read_outcomes(latest.document)
+    except UnreadableReport:
+        return Comparison(name, None, None, (), (), (), (), (), unreadable=True, skipped=skipped)
+    return replace(compare(name, current, previous), skipped=skipped)
 
 
 def report_paths(folder: Path, started: datetime, prefix: str = PREFIX) -> tuple[Path, Path]:
@@ -306,9 +326,14 @@ def _figures(total: Score) -> list[str]:
 def _comparison_lines(comparison: Comparison | None) -> list[str]:
     if comparison is None:
         return ["Comparación: no hay un informe completo anterior."]
+    skipped = (
+        [f"  ilegibles, saltados: {', '.join(comparison.skipped)}"] if comparison.skipped else []
+    )
+    if comparison.previous is None:
+        return ["Comparación: no hay un informe completo anterior.", *skipped]
     if comparison.unreadable:
-        return [f"Comparación: {comparison.previous} no se puede leer; sin comparación."]
-    lines = [f"Comparación con {comparison.previous}:"]
+        return [f"Comparación: {comparison.previous} no se puede leer; sin comparación.", *skipped]
+    lines = [f"Comparación con {comparison.previous}:", *skipped]
     before, after = comparison.before, comparison.after
     if before is None or after is None:
         lines.append("  sin informe anterior comparable (ningún escenario en común)")
@@ -334,10 +359,9 @@ def _comparison_lines(comparison: Comparison | None) -> list[str]:
     return lines
 
 
-def reserve_score(results: Sequence[ScenarioResult]) -> Score | None:
-    """The figures of the reserve set alone; `None` without it in this run."""
-    outcomes = [item.outcome for item in results if item.scenario.origin == RESERVE]
-    return score(outcomes) if outcomes else None
+def reserve_outcomes(results: Sequence[ScenarioResult]) -> list[Outcome]:
+    """The outcomes of the reserve set alone, measured apart too; empty without it."""
+    return [item.outcome for item in results if item.scenario.origin == RESERVE]
 
 
 def summary(
@@ -354,11 +378,10 @@ def summary(
         f"Evaluación del latido · {model} · {passes} pasadas · {len(results)} escenarios",
         *_figures(total),
     ]
-    reserve = reserve_score(results)
-    if reserve is not None:
-        count = sum(item.scenario.origin == RESERVE for item in results)
-        lines.append(f"Reserva, aparte ({count} escenarios):")
-        lines.extend(f"  {line}" for line in _figures(reserve))
+    reserve = reserve_outcomes(results)
+    if reserve:
+        lines.append(f"Reserva, aparte ({len(reserve)} escenarios):")
+        lines.extend(f"  {line}" for line in _figures(score(reserve)))
     if skipped:
         listed = ", ".join(f"{item.id} (pendiente: {item.pending})" for item in skipped)
         lines.append(f"Saltados: {len(skipped)}: {listed}")
@@ -420,6 +443,7 @@ def _comparison_json(comparison: Comparison | None) -> dict[str, Any] | None:
     return {
         "previous": comparison.previous,
         "unreadable": comparison.unreadable,
+        "skipped": list(comparison.skipped),
         "before": figures(comparison.before),
         "after": figures(comparison.after),
         "worse": list(comparison.worse),
@@ -455,6 +479,7 @@ def document(
     """The JSON report: everything, every pass with its reason and messages (invented data).
     `complete`: every scenario of the file was chosen (the pending ones, skipped)."""
     total = score([item.outcome for item in results])
+    reserve = reserve_outcomes(results)
     return {
         "version": VERSION,
         "complete": complete,
@@ -471,7 +496,7 @@ def document(
             "usd": str(paid.usd),
             "calls": paid.calls,
             "usage": _usage_json(paid.usage),
-            "reserve": _score_json(reserve_score(results)),
+            "reserve": _score_json(score(reserve) if reserve else None),
         },
         "comparison": _comparison_json(comparison),
         "scenarios": [
