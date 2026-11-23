@@ -187,7 +187,8 @@ def test_el_mensaje_proactivo_9_del_dia_se_bloquea(conn):
 def test_con_7_enviados_solo_cabe_el_cierre(conn):
     fill(conn, 7)
     gym = cycle(conn, "2030-01-07T20:00", spy=SpyDecide(outgoing("insistir_gimnasio")))
-    close = cycle(conn, "2030-01-07T21:30", spy=SpyDecide(outgoing("cierre_del_dia")))
+    # A las 22:00, la hora del cierre sin ventana: antes no toca (revisión propia de la 1.15-b).
+    close = cycle(conn, "2030-01-07T22:00", spy=SpyDecide(outgoing("cierre_del_dia")))
     assert [(v.action, v.reason) for v in gym.verdicts] == [("block", "close_slot")]
     # El cierre cabe: se pasa al agente (1.8-b), que lo enviará en la 1.16.
     assert [(v.action, v.reason) for v in close.verdicts] == [("handover", "ok")]

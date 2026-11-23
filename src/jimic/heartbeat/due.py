@@ -11,7 +11,8 @@ applies decides:
   time (`before_time`); and anything but the close without a free message (`no_room`). The close
   has the slot kept for it (decision 78), so it is due while it fits.
 - **Due:** the plan or the close in their window (`in_window`) or after it without having gone
-  out (`late`, as `late_after` says: the same late plan as the plan's runner); a notice in its
+  out (`late`, as `late_after` says: the same late plan as the plan's runner; without a window,
+  from its default time); a notice in its
   heartbeat's slot (`on_time`) or later, if it did not go out (`late`); a key task that may
   insist (`can_insist`).
 
@@ -68,13 +69,24 @@ def _minute(now: datetime) -> datetime:
 
 
 def _window_due(intention: DailyPlan | DayClose, now: datetime) -> Due:
+    """`[start, end]` to the minute. Without a window, its default time is a window of one
+    minute; one with `start == end` is the whole day (decision 80). One that crosses midnight is
+    never `late`: after its end the day has changed, so outside it, it is `before_window`."""
     window = intention.window
-    span = None if window is None else (window.start, window.end)
-    if late_after(span, intention.default_time, now):
-        return Due(True, "late")
-    if window is not None and window.start < window.end and _minute(now).time() < window.start:
+    moment = _minute(now).time()
+    if window is None:
+        start, end = intention.default_time, intention.default_time
+    elif window.start == window.end:
+        return Due(True, "in_window")
+    else:
+        start, end = window.start, window.end
+    if start > end:
+        inside = moment >= start or moment <= end
+        return Due(True, "in_window") if inside else Due(False, "before_window")
+    if moment < start:
         return Due(False, "before_window")
-    return Due(True, "in_window")
+    span = None if window is None else (window.start, window.end)
+    return Due(True, "late" if late_after(span, intention.default_time, now) else "in_window")
 
 
 def _notice_due(intention: Notice, now: datetime) -> Due:

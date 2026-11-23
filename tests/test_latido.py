@@ -55,14 +55,15 @@ MEETING = event(madrid("2030-01-07T10:00"), minutes=60)
 ALL = (PLAN, CLOSE, GYM, PLANTS, BINS, OFFERS)
 DUE_EARLY = (
     PLAN,
-    CLOSE,
+    {**CLOSE, "default_time": "07:00"},
     GYM,
     {**PLANTS, "default_time": "07:00"},
     {**BINS, "default_time": "07:00"},
     {**OFFERS, "default_time": "07:00"},
 )
-"""The notices already due from 7:00 (task 1.15-b: the second pass blocks a pick that is not due),
-for the tests of batches and of the queue, which do not look at the hour."""
+"""The notices and the close (without a window) already due from 7:00 (task 1.15-b: the second pass
+blocks a pick that is not due), for the tests of batches, the queue and the handover, which do
+not look at the hour."""
 
 
 @pytest.fixture
@@ -232,7 +233,9 @@ def test_un_envio_rechazado_se_descarta_sin_gastar_y_el_siguiente_latido_puede_e
 def test_el_plan_y_el_cierre_de_haiku_los_envia_el_enganche_no_el_latido(conn, intent, task_id):
     """Decisión 1.8-b: el latido no envía su texto ni los anota en `notices`; los pasa al
     enganche (el plan lo envía la 1.14; el cierre, la 1.16)."""
-    world = World(conn, FakeMessages(api_message(answer(True, intent, SECRET_TEXT))))
+    world = World(
+        conn, FakeMessages(api_message(answer(True, intent, SECRET_TEXT))), items=DUE_EARLY
+    )
     world.at("2030-01-07T08:00")
     assert world.sender.texts == []
     assert world.notices() == []
@@ -298,7 +301,7 @@ def test_si_el_enganche_falla_el_plan_no_queda_atendido(conn):
 
 def test_el_enganche_de_serie_solo_escribe_en_el_log(conn, caplog):
     caplog.set_level(logging.INFO)
-    its = intentions(*ALL)
+    its = intentions(*DUE_EARLY)
     heartbeat = Heartbeat(
         clock=FixedClock(madrid("2030-01-07T08:30")),
         timezone=MADRID,

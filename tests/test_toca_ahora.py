@@ -120,17 +120,23 @@ def test_el_plan_ya_atendido_hoy_no_toca():
     assert due(PLAN_I, at(9), left_today=0) == (False, "sent_today")
 
 
-def test_una_ventana_que_cruza_la_medianoche_nunca_es_antes():
+def test_una_ventana_que_cruza_la_medianoche_nunca_es_tardia():
+    """Revisión propia: tras su fin ya es otro día; fuera de ella, aún no toca (no `late` a
+    mediodía)."""
     crossing = DayClose.model_validate({**CLOSE, "window": {"from": "23:00", "to": "01:00"}})
     assert due(crossing, at(23, 30)) == (True, "in_window")
     assert due(crossing, at(0, 30)) == (True, "in_window")
-    assert due(crossing, at(12)) == (True, "late")
+    assert due(crossing, at(1, 0)) == (True, "in_window")
+    assert due(crossing, at(1, 1)) == (False, "before_window")
+    assert due(crossing, at(12)) == (False, "before_window")
 
 
-def test_sin_ventana_toca_todo_el_dia_y_es_tardio_tras_su_hora():
-    """Como `late_after`: sin ventana, tardío después de la hora por defecto."""
+def test_sin_ventana_toca_desde_su_hora_por_defecto():
+    """Revisión propia: un cierre sin ventana no toca a las 8:00; desde su hora, sí, y después
+    es tardío como dice `late_after`."""
     bare = DayClose.model_validate(CLOSE)
-    assert due(bare, at(8)) == (True, "in_window")
+    assert due(bare, at(8)) == (False, "before_window")
+    assert due(bare, at(22)) == (True, "in_window")
     assert due(bare, at(22, 1)) == (True, "late")
 
 
