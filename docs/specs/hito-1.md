@@ -2741,6 +2741,8 @@ minutos del disparador del módulo `xdist`.
      el comentario de Pedro, con el catálogo tal como está. El id de la atrasada de `r01` es
      `t-estiramientos-ayer`, como en p03. El test del fichero real carga ahora 13 escenarios.
   3. La tercera medida, arriba.
+  - N3 del paso 2: en verde en 2:37, 1566 tests (pre-commit 0:13, pytest 2:22 y gitleaks de la
+    historia 0:02).
 - N3 de la ronda: en verde en 2:20, 1566 tests (pre-commit 0:14, pytest 2:05 y gitleaks de la
   historia 0:01). pytest pasa de los 2 minutos: se cumple el disparador del módulo `xdist`.
 
