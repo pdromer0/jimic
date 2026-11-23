@@ -33,7 +33,7 @@ from datetime import date, datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from jimic.agent.conversation import Conversation
+from jimic.agent.conversation import Conversation, Turn
 from jimic.agent.proposals import expires_at
 from jimic.agent.tools import ManualChange, RunState
 from jimic.channel import store
@@ -160,8 +160,12 @@ class Assistant:
         return True
 
     async def _converse(self, message: str, suggest: bool) -> str | Reply:
-        day = self._today()
         turn = await self._conversation.respond(message)
+        return await self._reply(turn, suggest)
+
+    async def _reply(self, turn: Turn, suggest: bool) -> str | Reply:
+        """The answer of a turn, with what its run proposed under it."""
+        day = self._today()
         run = turn.run
         if run is None:
             return turn.text
