@@ -2795,3 +2795,86 @@ minutos del disparador del módulo `xdist`.
 de arriba). Todo inventado; no toca Todoist, Calendar ni Telegram: no hay restos que comprobar.
 
 **Captura del móvil:** `JIMIC_ENTORNO=dev uv run jimic telegram demo` (la lanza Pedro).
+
+### Fix #51: el gasto del agente
+
+**Qué se hizo.** Issue #51, rama `fix/h1-gasto-agente`, aprobada a las 18:04 del 23-nov-2026. Se
+hace antes de la 1.15 porque el tope diario falso bloqueaba el uso real. Commits:
+- `fix(agente)`: el coste de cada ejecución sale de sus tokens (074252d);
+- `fix(memoria)` y `test(memoria)`: migración 0008 y su versión en `test_database.py` (ac6397d,
+  e15426a);
+- `test(agente)`: el contrato y la evaluación de dos turnos (1ed2b2b);
+- `docs(diseno)`: §10.3 y la decisión 132 (933b8df);
+- las correcciones de la revisión propia: `fix(agente)` (cf4bcab), `fix(servicio)` (d58f9ad) y
+  `test(memoria)` (7462961).
+
+Este anexo es `docs(hito-1)`.
+
+**Causa.** `total_cost_usd` del SDK es el total de la sesión. Con la sesión del día reanudada
+(decisión 89), cada fila de `model_usage` llevaba el acumulado y `spent_on` sumaba acumulados: el
+23-nov, 14 mensajes dieron 3,32 $ registrados frente a unos 0,52 $ reales.
+
+**Decisiones del diff** (lo que el plan interpretaba):
+- **Coste por tokens** con `usage.cost(agent_model, tokens)`. «Sin tokens» es `TokenUsage` a cero
+  (el SDK sin `usage` da ceros), no solo `None`: cuenta `max_session_usd`, como hoy.
+- **Un modelo sin precio no pierde la respuesta ni la cuenta** (no estaba en las notas): sin esa
+  guarda, `usage.cost` lanzaba `UnpricedError` después de llamar al SDK, `respond` devolvía «se me ha
+  atascado» y no se guardaban ni la fila de gasto ni la sesión. Cuenta el tope de la ejecución y lo
+  anota en el log. Para esto, los tests de la conversación usan `claude-sonnet-5-5` como modelo del
+  agente (antes, un nombre inventado sin precio).
+- **`Outcome.usd` se queda** (el log y el contrato), con su docstring: no se suma.
+- **Una ejecución cortada** (`max_turns`, `max_budget`) con tokens cuenta por tokens.
+- **Migración 0008** en SQL con los precios de Sonnet escritos y comentados; solo
+  `claude-sonnet-5-5` con tokens. Un test lee los números del SQL y los compara con `cost` y
+  `PRICES`.
+- **Evaluaciones:** `evals/plan.py` suma `model_usage`, que ahora pasa por `_bookkeeping`; no hizo
+  falta tocarlas. Un test de dos turnos (p05) lo fija.
+
+**Valores a mano** (calculados con código independiente de `usage.cost`): fila (4, 39, 3588, 3812) =
+0,0102868 $; turnos (10, 100, 0, 2000) = 0,00602 $ y (5, 50, 2000, 300) = 0,00146 $, suma 0,00748 $.
+
+**Contrato** (clave de `dev`, dos turnos cortos sin herramientas, unos 2 céntimos): el coste por
+tokens de cada turno coincide con la diferencia de acumulados del SDK (0,018954 y 0,0018932 $, al
+dígito). **`max_budget_usd` es por ejecución**: un tercer turno con tope 0,01165 $ (por encima de su
+coste, por debajo del acumulado de 0,0208 $) no se cortó. No hubo que parar. Los tokens de una
+ejecución son la suma de todas sus llamadas internas.
+
+**Versiones incorrectas** (predicción frente a observado):
+1. Seguir sumando `total_cost_usd`: predicho rojo «dos ejecuciones cuentan cada una lo suyo» y
+   «tope diario» y verde «sin tokens, el tope»; **observado:** 10 rojos, también «sin tokens» (su
+   doble lleva `cost=9.0` a propósito, así que también lo pilla) y los de cortada, solo caché, modelo
+   sin precio y resultado antes del error.
+2. La migración recalcula también las filas sin tokens: rojo «las de Sonnet sin tokens no cambian»;
+   observado, solo ese (5 verdes; con un único test para las dos, lo pillaba el mismo, y se separó).
+3. La migración toca las de Haiku: rojo «las de Haiku no cambian»; observado, solo ese (5 verdes).
+
+**Pruebas contra servicios reales:** solo la API de Anthropic con la clave de `jimic-dev`, dos
+turnos y un tercero de céntimos. No toca Todoist, Calendar ni Telegram: no hay restos que
+comprobar.
+
+**Revisión** (`/code-review medium main...fix/h1-gasto-agente`): 7 hallazgos, 4 corregidos y 3
+explicados.
+- *`result.usage` podría ser también acumulado:* explicado; el contrato lo comprueba (tokens de cada
+  turno = diferencia de acumulados, al dígito).
+- *La migración usa los 5 minutos y recalcula filas con tope que tienen tokens:* explicado; es la
+  decisión F-b de las notas (la fila no guarda el TTL; con tokens, el cálculo es mejor que el tope).
+- *Una ejecución con cero tokens cuenta el tope entero:* explicado, es lo que dicen las notas, y a
+  «Pendiente».
+- *Un modelo del agente sin precio solo avisaba en el log:* corregido, `jimic run` no arranca (como
+  con el del latido) y el aviso dice el modelo; `VALID_ENV` usa Sonnet.
+- *Docstring del módulo y condición `outcome.usd` sobrante:* corregidos.
+- *El test de precios leía el SQL con una expresión regular:* corregido; ejecuta la migración con un
+  millón de tokens de cada clase y compara con `cost` y con `PRICES`.
+
+**Pendiente.**
+- **Cero tokens y el tope entero:** una ejecución que falla sin tokens (la API caída, con
+  `total_cost_usd` a 0) cuenta `max_session_usd` (0,50 $); seis seguidas llegarían al tope diario de
+  3 $ sin haber gastado nada. Es la regla de las notas («sin tokens, el tope»). Se decide con Pedro si
+  basta o si una ejecución fallida sin tokens cuenta 0.
+- **Filas con caché de 1 h** (no hay en el agente: el SDK usa 5 minutos con clave de API): se
+  recalcularían a 2,50 $ en vez de 4 $ por millón.
+
+- N3 en verde en 1:55, 1582 tests (pre-commit 0:12, pytest 1:42 y gitleaks de la historia 0:01).
+
+**Para Pedro, tras fusionar:** bajar `daily_cap_usd` a 3 otra vez con `nano` si lo subió y reiniciar
+el servicio (aplica la 0008 y corrige el gasto de hoy).
