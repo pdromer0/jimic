@@ -31,6 +31,7 @@ from jimic.config import Settings
 from jimic.execution.assistant import Assistant
 from jimic.execution.commands import Commands
 from jimic.execution.execute import Executor
+from jimic.execution.key_tasks import KeyTaskActions
 from jimic.execution.memory_message import MEMORY_KIND, MemoryHandlers
 from jimic.execution.summary import summarize
 from jimic.heartbeat.beat import INTERVAL, Heartbeat, next_beat
@@ -40,7 +41,7 @@ from jimic.memory.live import LiveConfig
 from jimic.memory.retention import purge
 from jimic.memory.schemas import Intentions, Limits
 from jimic.paths import Paths
-from jimic.plan.runner import DailyPlanRunner
+from jimic.plan.runner import DailyPlanRunner, read_icons
 from jimic.tools.todoist import TodoistApi
 
 logger = logging.getLogger(__name__)
@@ -158,8 +159,16 @@ class Runtime:
                 commands=commands,
                 config_dir=self._paths.config_dir,
             )
+            key_tasks = KeyTaskActions(
+                conn=self._conn,
+                clock=self._clock,
+                timezone=self._settings.timezone,
+                todoist=sources.todoist,
+            )
             handlers = (
-                assistant.track(executor.handlers | {MEMORY_KIND: memory.memory})
+                assistant.track(
+                    executor.handlers | key_tasks.handlers | {MEMORY_KIND: memory.memory}
+                )
                 | commands.handlers
             )
             channel = self._channel_factory(
@@ -193,6 +202,7 @@ class Runtime:
                 sender=channel,
                 on_handover=plan.handover,
                 config=self.config,
+                icons=partial(read_icons, self._paths.config_dir),
             )
             await channel.start()
             stack.push_async_callback(channel.stop)

@@ -23,6 +23,7 @@ from calendar_data import SECRET_TITLE
 from todoist_data import FixedTodoistReader
 
 from jimic.channel.bot import SendError
+from jimic.channel.message import InteractiveMessage, MessageTooLong
 from jimic.clock import local_day_bounds, to_db
 from jimic.heartbeat.cycle import Decision
 from jimic.heartbeat.limits import Outgoing, WaitingNotices
@@ -405,6 +406,8 @@ class FakeSender:
     def __init__(self) -> None:
         self.texts: list[str] = []
         self.fail: str | None = None
+        self.delivered: list[tuple[str, Any, datetime]] = []
+        self.too_long = False
 
     async def send_text(self, text: str) -> int:
         if self.fail is not None:
@@ -413,3 +416,12 @@ class FakeSender:
         if len(self.texts) > MAX_SENT:
             raise RunawayDouble(f"more than {MAX_SENT} messages sent")
         return 1000 + len(self.texts)
+
+    async def deliver(self, kind: str, content: Any, expires_at: datetime) -> int:
+        """A message with buttons (the key tasks, task 1.15): its body goes to `texts` too, and
+        the whole message to `delivered`. `too_long` makes it refuse as the store would."""
+        if self.too_long:
+            raise MessageTooLong("inventado")
+        self.delivered.append((kind, content, expires_at))
+        body = content.body if isinstance(content, InteractiveMessage) else content
+        return await self.send_text(body or "")

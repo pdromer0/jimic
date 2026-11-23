@@ -66,6 +66,9 @@ class TodoistTask(BaseModel):
     is_recurring: bool
     has_subtasks: bool
     duration_minutes: int | None
+    completed: bool = Field(default=False, exclude=True)
+    """Closed: a completed task is still readable by its id (contract of 23-nov-2026). For the
+    code (the key tasks, task 1.15); it never goes to the model."""
 
 
 class TaskPhoto(BaseModel):
@@ -310,6 +313,7 @@ def _to_task(raw: Task, timezone: ZoneInfo, has_subtasks: bool) -> TodoistTask:
         is_recurring=raw.due is not None and raw.due.is_recurring,
         has_subtasks=has_subtasks,
         duration_minutes=_minutes(raw),
+        completed=raw.is_completed,
     )
 
 

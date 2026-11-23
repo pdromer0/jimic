@@ -93,10 +93,13 @@ class Followup:
 @dataclass(frozen=True)
 class Answer:
     """The item is resolved with `result`, and after the tap the code answers with `reply`: a
-    fixed text, or a message with buttons (task 1.15, the key tasks)."""
+    fixed text, or a message with buttons (task 1.15, the key tasks). With `then`, the item is
+    not resolved: it becomes `then`, pending, with `result` as its note ([Voy ahora] and [Más
+    tarde] leave [Ya entrené] and [Hoy no] to tap later)."""
 
     result: str
     reply: str | Followup
+    then: Item | None = None
 
 
 type HandlerOutcome = str | Failed | Renew | Declined | Show | Answer
@@ -146,7 +149,7 @@ def _apply(message: InteractiveMessage, outcomes: dict[int, tuple[str, HandlerOu
             done[index] = Outcome(option, outcome)
         elif isinstance(outcome, Show) and outcome.result is not None:
             done[index] = Outcome(option, outcome.result)
-        elif isinstance(outcome, Answer):
+        elif isinstance(outcome, Answer) and outcome.then is None:
             done[index] = Outcome(option, outcome.result)
         elif isinstance(outcome, Declined):
             declined = _declined_option(message.items[index], outcome.option)
@@ -165,6 +168,9 @@ def _apply(message: InteractiveMessage, outcomes: dict[int, tuple[str, HandlerOu
             updated = release(updated, index, item)
         elif isinstance(outcome, Renew):
             updated = release(updated, index, outcome.item)
+        elif isinstance(outcome, Answer) and outcome.then is not None:
+            then = outcome.then.model_copy(update={"note": clip_result(outcome.result)})
+            updated = release(updated, index, then)
     return updated, len(done)
 
 
@@ -231,7 +237,9 @@ async def process_tap(
         isinstance(outcome, Show) and outcome.result is None for _, outcome in outcomes.values()
     ):
         code = "shown"
-    elif done == len(chosen):
+    elif done == len(chosen) or all(
+        isinstance(outcome, Answer) for _, outcome in outcomes.values()
+    ):
         code = "resolved"
     elif any(isinstance(outcome, Failed) for _, outcome in outcomes.values()):
         code = "partially_resolved" if done else "handler_failed"

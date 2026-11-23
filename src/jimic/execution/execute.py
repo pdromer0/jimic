@@ -27,6 +27,7 @@ from jimic.channel.taps import Failed, HandlerOutcome, TapHandler
 from jimic.clock import Clock
 from jimic.execution import deletion
 from jimic.execution.plan_message import PLAN_KIND, UNDO_KIND, item_title, proposed_due
+from jimic.memory import key_marks
 from jimic.memory.live import LiveConfig
 from jimic.memory.schemas import Limits
 from jimic.tools.failures import ToolFailure
@@ -133,7 +134,13 @@ class Executor:
         await self._todoist.writer.move(
             str(data["task_id"]), proposed_due(str(data["due"]), self._timezone)
         )
+        self._note_moved(str(data["task_id"]))
         logger.info("task moved")
+
+    def _note_moved(self, task_id: str) -> None:
+        """A move of JimiC is not the jump of a key task (decision 1.15-j)."""
+        now = self._clock.now().astimezone(self._timezone)
+        key_marks.note_moved(self._conn, now.date(), task_id, now)
 
     # --- At once ----------------------------------------------------------------------------
 
@@ -194,6 +201,7 @@ class Executor:
                 await self._todoist.writer.move(
                     task_id, due_value(None if before is None else str(before))
                 )
+                self._note_moved(task_id)
         except ToolFailure as error:
             if error.code == TASK_NOT_FOUND:
                 return GONE
