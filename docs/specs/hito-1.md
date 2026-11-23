@@ -3041,4 +3041,4 @@ de hoy no anota nada. Commit `feat(tareas-clave)` (9dbe6d0) y esta entrada.
   commit (`CodeQL`, `Analyze (python)`, `Analyze (actions)` y `tests`) salen `success`. El resumen
   de la ejecución, que diría el motivo del `neutral`, no lo da `gh.sh`, y la lectura directa de la
   API se denegó: queda para que Pedro lo mire en la pestaña de checks del PR.
-- **N3 de la ronda:** N3_RONDA.
+- **N3 de la ronda:** en verde en 1:41, 1712 tests y 13 de contrato saltados (pre-commit 0:11, pytest 1:30 y gitleaks de la historia 0:00).
