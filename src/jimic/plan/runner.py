@@ -66,6 +66,17 @@ MAX_TRIES = 3
 type Plan = InteractiveMessage | str
 
 
+def read_icons(config_dir: Path) -> dict[str, str]:
+    """The table of `## Iconos` of `preferencias.md`, keyed by `normalized` task; empty if the
+    file cannot be read (the default icons)."""
+    try:
+        text = read_text(config_dir, PREFERENCES_FILE)
+    except Exception as error:  # a file that cannot be read leaves the default icons
+        logger.warning("icons unreadable (%s)", type(error).__name__)
+        return {}
+    return icon_table(icon_rows(text)) if text else {}
+
+
 class PlanSender(Protocol):
     async def deliver(self, kind: str, content: Plan, expires_at: datetime) -> int:
         """Send it; return the id of its (last) message. Raises `SendError`."""
@@ -161,12 +172,7 @@ class DailyPlanRunner:
         )
 
     def _icons(self) -> dict[str, str]:
-        try:
-            text = read_text(self._config_dir, PREFERENCES_FILE)
-        except Exception as error:  # a file that cannot be read leaves the default icons
-            logger.warning("plan: icons unreadable (%s)", type(error).__name__)
-            return {}
-        return icon_table(icon_rows(text)) if text else {}
+        return read_icons(self._config_dir)
 
     async def build(self, intention: DailyPlan, use_agent: bool = True) -> BuiltPlan:
         """The plan for now: the agent's, or the minimal one. Never raises for the agent."""
