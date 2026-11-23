@@ -352,3 +352,35 @@ def test_la_sugerencia_se_reclama_una_vez_por_dia_y_sobrevive_a_un_reinicio(tmp_
         assert conversations.claim_suggestion(restarted, tomorrow) is True
     finally:
         restarted.close()
+
+
+# --- La guarda de APEX (decisión 74) ----------------------------------------------------------
+
+APEX_GOALS = ["Subir la fuerza", "Moverse más", "Fuerza"]
+
+
+@pytest.mark.parametrize(
+    ("before", "after", "copied"),
+    [
+        (None, "- [medible] Subir la fuerza", True),
+        (None, "- [declarado] subir  LA  Fuerza este año", True),
+        ("## Salud", "## Salud\n\n- moverse más", True),
+        # Una descripción de una sola palabra no se compara: sería una coincidencia.
+        (None, "Meta: ganar fuerza en sentadilla", False),
+        # Palabras enteras: «subir la fuerzas» no es «subir la fuerza».
+        (None, "- subir la fuerzas", False),
+        # Ya estaba en el fichero (una edición a mano): cambiar al lado no la copia otra vez.
+        (
+            "## Entrenamiento\n- Subir la fuerza\nPrioridad: media",
+            "## Entrenamiento\n- Subir la fuerza\nPrioridad: alta",
+            False,
+        ),
+        (
+            "## Entrenamiento\n- Subir la fuerza",
+            "## Entrenamiento\n- Subir la fuerza\n- Subir la fuerza",
+            True,
+        ),
+    ],
+)
+def test_la_guarda_de_apex_solo_ve_lo_que_el_cambio_anade(before, after, copied):
+    assert onboarding.copied_goal(before, after, APEX_GOALS) is copied

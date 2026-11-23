@@ -337,19 +337,23 @@ def build_tools(ctx: ToolContext) -> list[SdkMcpTool[Any]]:
             ) from None
         ctx.run.memory.append(entry)
 
-    async def copies_apex(text: str) -> bool:
-        """Whether `text` repeats a goal of APEX in progress (decision 74). Reading APEX does
+    async def copies_apex(before: str | None, after: str) -> bool:
+        """Whether the change adds a goal of APEX in progress (decision 74). Reading APEX does
         not contaminate; if it cannot be read, nothing can be compared."""
         snapshot = await asyncio.to_thread(ctx.apex.read_today)
         if not snapshot.available:
             logger.info("apex copy check skipped (%s)", snapshot.unavailable_reason)
             return False
-        return copied_goal(text, [goal.description for goal in snapshot.goals])
+        return copied_goal(before, after, [goal.description for goal in snapshot.goals])
 
     async def propose_change(args: dict[str, Any]) -> Result:
         change = _validated(MemoryChange, args)
         origin = memory_allowed()
-        if change.file == OBJECTIVES_FILE and change.after and await copies_apex(change.after):
+        if (
+            change.file == OBJECTIVES_FILE
+            and change.after
+            and await copies_apex(change.before, change.after)
+        ):
             logger.info("memory proposal refused (apex_copy)")
             raise AgentInputError(APEX_COPY_TEXT)
         entry = (

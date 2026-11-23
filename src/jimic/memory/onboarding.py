@@ -285,9 +285,22 @@ def _normalized(text: str) -> str:
     return " ".join(text.casefold().split())
 
 
-def copied_goal(text: str, goals: list[str]) -> bool:
-    """Whether `text` contains one of `goals` (the descriptions of the goals of APEX in
-    progress), ignoring case and spaces. Only the description: a target like «100 kg» is too
-    short to tell a copy from a coincidence."""
-    haystack = _normalized(text)
-    return any(goal and goal in haystack for goal in map(_normalized, goals))
+MIN_GOAL_WORDS = 2
+"""A description of one word («Fuerza») is too short to tell a copy from a coincidence."""
+
+
+def _count(goal: str, text: str) -> int:
+    """Whole-word occurrences of `goal` in `text`, both normalized."""
+    return len(re.findall(rf"(?<!\w){re.escape(goal)}(?!\w)", text))
+
+
+def copied_goal(before: str | None, after: str, goals: list[str]) -> bool:
+    """Whether the change from `before` to `after` adds one of `goals` (the descriptions of the
+    goals of APEX in progress): whole words, ignoring case and spaces. A goal that was already in
+    `before` (an edit by hand) does not count again. Only the description: a target like
+    «100 kg» is too short to tell a copy from a coincidence."""
+    old, new = _normalized(before or ""), _normalized(after)
+    for goal in map(_normalized, goals):
+        if len(goal.split()) >= MIN_GOAL_WORDS and _count(goal, new) > _count(goal, old):
+            return True
+    return False
