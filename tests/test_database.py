@@ -27,8 +27,8 @@ TABLES = {
     "handovers",
     "conversations",
 }
-LATEST = 7
-"""La última migración del paquete (0007, la del plan del día)."""
+LATEST = 8
+"""La última migración del paquete (0008, la del gasto del agente)."""
 
 
 def table_names(conn: sqlite3.Connection) -> set[str]:
