@@ -195,6 +195,8 @@ scenarios:
     now: "13:20"
     tasks:
       - {id: t-ofertas, title: Revisar ofertas, due: "2030-01-10T16:30", duration_minutes: 30}
+    completed_today:
+      - {id: t-gimnasio, title: Gimnasio}
     apex:
       meta: {ultima_actualizacion: "2030-01-10 13:15:00", version: 3}
       entrenamientos:
@@ -226,11 +228,10 @@ scenarios:
       entrenamientos:
         - {id: inventado-1, fecha: "2030-01-05", tipo: fuerza, nombre: Pierna A,
            duracion_min: 62.0, fuente: inventada, ejercicios: []}
+    key_marks:
+      - {intent: insistir_gimnasio, mark: not_today, at: "08:30"}
     expected: [[]]
-    why: >-
-      Pedro dijo «hoy no» por la mañana. El estado del día ya puede decirlo (`key_marks`, tarea
-      1.15); activarlo y pasarlo es de la 1.15-b.
-    pending: "1.15-b"
+    why: Pedro dijo «hoy no» por la mañana (`key_marks`, activado en la 1.15-b).
 
   - id: l13
     title: Gimnasio sin aviso y un dentista a las 13:30
@@ -262,6 +263,9 @@ scenarios:
     like: l12
     now: "17:20"
     tasks: []
+    completed_today:
+      - {id: t-gimnasio, title: Gimnasio}
+      - {id: t-ofertas, title: Revisar ofertas}
     expected: [[]]
 
   - id: l17
@@ -313,6 +317,8 @@ scenarios:
     now: "19:00"
     tasks:
       - {id: t-ofertas, title: Revisar ofertas, due: "2030-01-10T16:30", duration_minutes: 30}
+    completed_today:
+      - {id: t-gimnasio, title: Gimnasio}
     sent_today:
       - {intent: plan_del_dia, at: "07:45"}
       - {intent: insistir_ofertas, at: "17:20"}
@@ -377,6 +383,8 @@ scenarios:
     now: "19:00"
     tasks:
       - {id: t-gimnasio, title: Gimnasio, due: "2030-01-10T12:00", duration_minutes: 75}
+    completed_today:
+      - {id: t-ofertas, title: Revisar ofertas}
     apex:
       meta: {ultima_actualizacion: "2030-01-10 08:15:00", version: 3}
       entrenamientos:
