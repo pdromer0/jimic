@@ -183,8 +183,9 @@ def test_un_conjunto_de_mas_o_de_menos_es_fallo(suite, chosen):
         ("l10", answer(True, "insistir_gimnasio", "¿Vamos?")),
         ("l26", answer(True, "reciclar", "El reciclaje")),
         ("l26", picks(("regar", "Agua"), ("reciclar", "Reciclaje"))),
+        ("l26", answer()),
     ],
-    ids=["l10-callar", "l10-gimnasio", "l26-solo-reciclar", "l26-los-dos"],
+    ids=["l10-callar", "l10-gimnasio", "l26-solo-reciclar", "l26-los-dos", "l26-callar"],
 )
 def test_una_alternativa_declarada_es_acierto(suite, scenario_id, reply):
     result = one_pass(suite, scenario_id, api_message(reply))

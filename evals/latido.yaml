@@ -360,10 +360,12 @@ scenarios:
       - {intent: insistir_ofertas, at: "17:20"}
       - {intent: insistir_ofertas, at: "17:50"}
       - {intent: insistir_ofertas, at: "18:20"}
-    expected: [[regar, reciclar], [reciclar]]
+    expected: [[regar, reciclar], [reciclar], []]
     why: >-
-      Van en un solo mensaje, que cuenta uno (92); dejar fuera la de prioridad baja también
-      vale.
+      Dilema (decisión 1.9-k): con un solo mensaje libre a las 19:00, gastarlo en regar y
+      reciclar (un mensaje, 92; o solo reciclar, dejando fuera la de prioridad baja) deja sin
+      hueco la basura de las 21:00, y callar lo guarda para ella. Las tres respuestas son
+      defendibles.
 
   - id: l27
     title: Seis mensajes, queda uno y el gimnasio sigue sin hacer (★ 78)
