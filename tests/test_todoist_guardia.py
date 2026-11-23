@@ -40,7 +40,7 @@ from jimic.tools.todoist import (
 
 LOGGER = "jimic.tools.todoist"
 CLOCK = FixedClock(madrid("2030-01-07 09:00"))
-WRITES = ("update_task", "complete_task", "delete_task", "add_task")
+WRITES = ("update_task", "complete_task", "uncomplete_task", "delete_task", "add_task")
 
 
 def run(coroutine):
@@ -164,7 +164,7 @@ def operation(tools: TodoistTools, name: str, task_id: str):
     return getattr(tools.writer, name)(task_id)
 
 
-@pytest.mark.parametrize("name", ["move", "complete", "delete"])
+@pytest.mark.parametrize("name", ["move", "complete", "reopen", "delete"])
 def test_no_se_mueve_ni_se_completa_ni_se_borra_una_tarea_de_otro_proyecto(dev, name, caplog):
     """Pilla una escritura sin comprobar el proyecto: la API no recibe ninguna orden."""
     tools, api = dev
@@ -177,7 +177,7 @@ def test_no_se_mueve_ni_se_completa_ni_se_borra_una_tarea_de_otro_proyecto(dev, 
     assert api.find("real-1") is not None
 
 
-@pytest.mark.parametrize("name", ["move", "complete", "delete"])
+@pytest.mark.parametrize("name", ["move", "complete", "reopen", "delete"])
 def test_tampoco_si_la_tarea_no_existe(dev, name):
     tools, api = dev
     with pytest.raises(ToolFailure) as caught:
@@ -188,7 +188,12 @@ def test_tampoco_si_la_tarea_no_existe(dev, name):
 
 @pytest.mark.parametrize(
     ("name", "write"),
-    [("move", "update_task"), ("complete", "complete_task"), ("delete", "delete_task")],
+    [
+        ("move", "update_task"),
+        ("complete", "complete_task"),
+        ("reopen", "uncomplete_task"),
+        ("delete", "delete_task"),
+    ],
 )
 def test_con_una_tarea_de_pruebas_se_lee_fresca_y_despues_se_escribe(dev, name, write):
     tools, api = dev
@@ -266,3 +271,12 @@ def test_sin_api_dada_se_construye_la_de_la_biblioteca_con_el_token_de_la_config
     tools = build_todoist(settings_for("prod", monkeypatch), CLOCK)
     assert isinstance(tools.reader, ApiTodoistReader)
     run(tools.close())
+
+
+def test_las_completadas_de_hoy_de_otro_proyecto_no_se_ven(dev):
+    """El endpoint no filtra por proyecto: la guardia es la única barrera (tarea 1.15)."""
+    tools, api = dev
+    for task_id in ("prueba-1", "real-1"):
+        run(api.complete_task(task_id))
+    result = run(tools.reader.read_completed_today())
+    assert result.available and [task.id for task in result.tasks] == ["prueba-1"]

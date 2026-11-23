@@ -9,7 +9,7 @@ the code calls in a loop has a cap that raises a clear error.
 import asyncio
 import copy
 from collections.abc import AsyncIterator
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from typing import Any, Literal
 
 import httpx
@@ -72,6 +72,19 @@ def raw_task(
     }
 
 
+def next_day(due: str) -> str:
+    """The same due one day later, in the same form (day, floating moment or UTC with `Z`)."""
+    if "T" not in due:
+        return (date.fromisoformat(due) + timedelta(days=1)).isoformat()
+    utc = due.endswith("Z")
+    moment = datetime.fromisoformat(due.removesuffix("Z")) + timedelta(days=1)
+    return moment.isoformat() + ("Z" if utc else "")
+
+
+def _moment(text: str) -> datetime:
+    return datetime.fromisoformat(text.replace("Z", "+00:00"))
+
+
 def http_status_error(status: int) -> httpx.HTTPStatusError:
     request = httpx.Request("GET", "https://api.todoist.com/api/v1/tasks")
     response = httpx.Response(status, request=request, content=PRIVATE_TITLE.encode())
@@ -102,7 +115,10 @@ class FakeTodoistApi:
 
     It behaves as the real API did in the contract of 19-nov-2026: with `free_plan` (the default)
     it does not keep `duration`, and moving a recurring task without `due_string` makes it a plain
-    one.
+    one. And as in the contract of 23-nov-2026 (task 1.15): a completed task stays readable by its
+    id (`checked`) but leaves the active list and goes to the completed ones of its day; a
+    recurring one goes to its next day and **never** shows among the completed; reopening a
+    recurring one does nothing.
     """
 
     def __init__(
@@ -120,6 +136,8 @@ class FakeTodoistApi:
         self.closed = False
         self._next_id = 100
         self.hang = False
+        self.completed_at = "2030-01-07T07:30:00.000000Z"
+        """The moment a completion gets (UTC): the double has no clock."""
 
     # --- bookkeeping ---
 
@@ -169,7 +187,8 @@ class FakeTodoistApi:
         chosen = [
             Task.from_dict(raw)
             for raw in self.tasks
-            if (project_id is None or raw.get("project_id") == project_id)
+            if not raw["checked"]
+            and (project_id is None or raw.get("project_id") == project_id)
             and (parent_id is None or raw.get("parent_id") == parent_id)
         ]
         size = min(limit or self.page_size, self.page_size)
@@ -267,9 +286,35 @@ class FakeTodoistApi:
         raw = self.find(task_id)
         if raw is None:
             raise http_status_error(404)
-        if raw["due"] is None or not raw["due"]["is_recurring"]:
-            self.tasks.remove(raw)
+        if raw["due"] is not None and raw["due"]["is_recurring"]:
+            raw["due"]["date"] = next_day(raw["due"]["date"])
+        else:
+            raw["checked"] = True
+            raw["completed_at"] = self.completed_at
         return True
+
+    async def uncomplete_task(self, task_id: str) -> bool:
+        self.record("uncomplete_task", task_id=task_id)
+        await self.wait()
+        raw = self.find(task_id)
+        if raw is None:
+            raise http_status_error(404)
+        raw["checked"] = False
+        raw["completed_at"] = None
+        return True
+
+    async def get_completed_tasks_by_completion_date(
+        self, *, since: datetime, until: datetime, limit: int | None = None
+    ) -> AsyncIterator[list[Task]]:
+        self.record("get_completed_tasks_by_completion_date", since=since, until=until, limit=limit)
+        await self.wait()
+        chosen = [
+            Task.from_dict(raw)
+            for raw in self.tasks
+            if raw["checked"] and since <= _moment(raw["completed_at"]) <= until
+        ]
+        size = min(limit or self.page_size, self.page_size)
+        return _Pages(self, [chosen[i : i + size] for i in range(0, len(chosen), size)])
 
     async def delete_task(self, task_id: str) -> bool:
         self.record("delete_task", task_id=task_id)
@@ -304,3 +349,6 @@ class FixedTodoistReader:
         if task is None:
             return None
         return TaskPhoto(task=task, description="", labels=(), priority=1)
+
+    async def read_completed_today(self) -> TaskList:
+        return TaskList(available=True)

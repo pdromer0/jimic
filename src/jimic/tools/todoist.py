@@ -135,6 +135,12 @@ class TodoistReader(Protocol):
         """`get_task` with what a deletion keeps; for the code only. Raises like `get_task`."""
         ...
 
+    async def read_completed_today(self) -> TaskList:
+        """The tasks completed today (local day, from 00:00 until now), by their completion
+        date: what tells that a key task was done in the app (task 1.15). A recurring task
+        appears once per completion. It does not raise."""
+        ...
+
 
 class TodoistWriter(Protocol):
     """What only the code may do. Each one raises `ToolFailure` if it fails."""
@@ -153,6 +159,10 @@ class TodoistWriter(Protocol):
 
     async def complete(self, task_id: str) -> None:
         """Close a task; a recurring one goes to its next time instead of disappearing."""
+        ...
+
+    async def reopen(self, task_id: str) -> None:
+        """Open again a task JimiC closed (the [Deshacer] of [Ya entrené], task 1.15)."""
         ...
 
     async def delete(self, task_id: str) -> None:
@@ -204,6 +214,12 @@ class TodoistApi(Protocol):
 
     async def complete_task(self, task_id: str) -> bool: ...
 
+    async def uncomplete_task(self, task_id: str) -> bool: ...
+
+    async def get_completed_tasks_by_completion_date(
+        self, *, since: datetime, until: datetime, limit: int | None = None
+    ) -> AsyncIterator[list[Task]]: ...
+
     async def delete_task(self, task_id: str) -> bool: ...
 
     async def close(self) -> None: ...
@@ -238,7 +254,11 @@ async def _call[T](awaitable: Awaitable[T]) -> T:
 
 async def _all_pages(api: TodoistApi, project_id: str | None) -> list[Task]:
     """Every active task (of a project, if given), at most `MAX_PAGES` pages."""
-    pages = await _call(api.get_tasks(project_id=project_id, limit=PAGE_SIZE))
+    return await _drain(await _call(api.get_tasks(project_id=project_id, limit=PAGE_SIZE)))
+
+
+async def _drain(pages: AsyncIterator[list[Task]]) -> list[Task]:
+    """Every page, at most `MAX_PAGES`."""
     tasks: list[Task] = []
     for _ in range(MAX_PAGES):
         page = await _next_page(pages)
@@ -339,6 +359,23 @@ class ApiTodoistReader:
             labels=tuple(raw.labels or ()),
             priority=raw.priority,
         )
+
+    async def read_completed_today(self) -> TaskList:
+        try:
+            now = self._clock.now().astimezone(self._timezone)
+            start = datetime.combine(now.date(), time.min, tzinfo=self._timezone)
+            pages = await _call(
+                self._api.get_completed_tasks_by_completion_date(
+                    since=start, until=now, limit=PAGE_SIZE
+                )
+            )
+            raws = await _drain(pages)
+            tasks = [_to_task(raw, self._timezone, has_subtasks=False) for raw in raws]
+            result = TaskList(available=True, tasks=tasks)
+        except Exception as error:  # a failure here must not take the service down
+            result = TaskList.unavailable(failure_code(error))
+        self._warn.update(result.unavailable_reason)
+        return result
 
     async def _read(self, project_id: str | None, today_only: bool) -> TaskList:
         try:
@@ -451,6 +488,10 @@ class ApiTodoistWriter:
         if not await _call(self._api.complete_task(task_id)):
             raise ToolFailure("not_completed")
 
+    async def reopen(self, task_id: str) -> None:
+        if not await _call(self._api.uncomplete_task(task_id)):
+            raise ToolFailure("not_reopened")
+
     async def delete(self, task_id: str) -> None:
         if not await _call(self._api.delete_task(task_id)):
             raise ToolFailure("not_deleted")
@@ -482,6 +523,12 @@ class GuardedReader:
         if photo is not None and photo.task.project_id != self._project_id:
             raise ToolFailure(OUTSIDE_TEST_PROJECT)  # the code only, not the title
         return photo
+
+    async def read_completed_today(self) -> TaskList:
+        """The endpoint takes no project: this barrier is the only one."""
+        result = await self._inner.read_completed_today()
+        kept = [t for t in result.tasks if t.project_id == self._project_id]
+        return result.model_copy(update={"tasks": kept}) if result.available else result
 
     def _only_the_project(self, result: TaskList) -> TaskList:
         """A second barrier: the request was already limited, so nothing should be left to drop."""
@@ -521,6 +568,10 @@ class GuardedWriter:
     async def complete(self, task_id: str) -> None:
         await self._check(task_id)
         await self._inner.complete(task_id)
+
+    async def reopen(self, task_id: str) -> None:
+        await self._check(task_id)
+        await self._inner.reopen(task_id)
 
     async def delete(self, task_id: str) -> None:
         await self._check(task_id)
