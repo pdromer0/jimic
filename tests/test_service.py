@@ -445,7 +445,16 @@ def test_el_runtime_programa_el_latido_alineado_y_la_purga_y_para_en_orden(tmp_p
         runtime.heartbeat._on_handover == runtime.plan.handover
     )  # lo que se prueba es la conexión
     assert channel.handlers["undo"] == runtime.executor.handlers["undo"]
-    assert set(channel.handlers) == {"plan", "undo", "memory", "memory_view", "undo_list"}
+    # Tarea 1.15: los botones de las tareas clave y su [Deshacer].
+    assert set(channel.handlers) == {
+        "plan",
+        "undo",
+        "memory",
+        "memory_view",
+        "undo_list",
+        "key_task",
+        "key_undo",
+    }
     # Decisión 1.14-h: el [✏️] del canal pasa por el asistente, que lo recuerda.
     create: dict[str, JsonValue] = {
         "action": "create",

@@ -27,10 +27,12 @@ from jimic.channel.taps import Failed, HandlerOutcome, TapHandler
 from jimic.clock import Clock
 from jimic.execution import deletion
 from jimic.execution.plan_message import PLAN_KIND, UNDO_KIND, item_title, proposed_due
+from jimic.execution.rules import due_day
+from jimic.memory import key_marks
 from jimic.memory.live import LiveConfig
 from jimic.memory.schemas import Limits
 from jimic.tools.failures import ToolFailure
-from jimic.tools.todoist import TASK_NOT_FOUND, TodoistTask, TodoistTools
+from jimic.tools.todoist import TASK_NOT_FOUND, Due, TodoistTask, TodoistTools
 
 logger = logging.getLogger(__name__)
 
@@ -130,10 +132,19 @@ class Executor:
         return created
 
     async def _move(self, data: dict[str, Any]) -> None:
-        await self._todoist.writer.move(
-            str(data["task_id"]), proposed_due(str(data["due"]), self._timezone)
-        )
+        due = proposed_due(str(data["due"]), self._timezone)
+        await self._todoist.writer.move(str(data["task_id"]), due)
+        self._note_moved(str(data["task_id"]), due)
         logger.info("task moved")
+
+    def _note_moved(self, task_id: str, due: Due | None) -> None:
+        """A move of JimiC is not the jump of a key task (decision 1.15-j); one out of today
+        stops the insistence of today with «hoy no» (decision 145)."""
+        now = self._clock.now().astimezone(self._timezone)
+        key_marks.note_moved(self._conn, now.date(), task_id, now)
+        if due is None or due_day(due) != now.date():
+            if key_marks.moved_off_today(self._conn, now.date(), task_id, now):
+                logger.info("key task moved off today: not today")
 
     # --- At once ----------------------------------------------------------------------------
 
@@ -190,10 +201,11 @@ class Executor:
                     return CHANGED
                 await self._todoist.writer.delete(task_id)
             else:
-                before = data.get("before")
-                await self._todoist.writer.move(
-                    task_id, due_value(None if before is None else str(before))
-                )
+                before = due_value(None if data.get("before") is None else str(data["before"]))
+                await self._todoist.writer.move(task_id, before)
+                self._note_moved(task_id, before)
+                today = self._clock.now().astimezone(self._timezone).date()
+                key_marks.moved_back(self._conn, today, task_id)
         except ToolFailure as error:
             if error.code == TASK_NOT_FOUND:
                 return GONE

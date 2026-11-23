@@ -60,9 +60,9 @@ clave: el gimnasio y una prioridad diaria (revisar ofertas).
 | 10:00–11:00 | Reunión en curso: el ciclo se corta antes de llamar al modelo | Código, primera pasada |
 | 12:45 | Gimnasio previsto a las 12:00 sin hacer: primer aviso, tono amable | Haiku |
 | 13:00 | Sin respuesta: no se repite el aviso | Haiku; el código solo garantiza el tope de 3 (tarea 1.7) |
-| 13:30 | Segundo aviso, más directo; [Más tarde] mueve la tarea sin modelo | Haiku, después el código |
+| 13:30 | Segundo aviso, más directo; [Más tarde] pregunta la hora y la mueve con la respuesta (1.15-d) | Haiku, después el agente y el código |
 | 17:20 | La prioridad diaria se completa a tiempo: no habla | Haiku |
-| 20:15 | Gimnasio completado: una felicitación de una línea; se acaba la insistencia | Haiku |
+| 20:15 | Gimnasio completado con [Ya entrené]: una felicitación de una línea; se acaba la insistencia | El código (1.15-h) |
 | 21:30 | Cierre en un solo mensaje, con lo hecho, «la haré», lo pendiente y la valoración | Haiku |
 | 23:00 | Horas de silencio: el ciclo se corta sin modelo | Código, primera pasada |
 
@@ -202,7 +202,8 @@ pasadas cada uno, con un informe de porcentajes. Nunca en el CI.
 - `intenciones.yaml` gana una sección `habits`. Cada hábito tiene nombre, prioridad (`high`,
   `medium`, `low`), duración típica, momento del día y la tarea de Todoist con la que se reconoce.
   Una intención `key_task` apunta a un hábito con `habit: <id>`, y el nombre de Todoist sale del
-  hábito (1.3-c).
+  hábito (1.3-c). Un hábito, como mucho, lleva `training: true`: el entreno, que APEX da por hecho
+  (tarea 1.15).
 - `preferencias.md` gana una tabla corta de iconos para las tareas habituales.
 - `limites.yaml` gana `max_deletions_per_day: 5` (zona protegida: conversando, solo baja).
 
@@ -216,6 +217,7 @@ habits:
     duration: 75m
     moment: midday               # pista para el plan, no horario
     todoist_task: "Gimnasio"
+    training: true               # el entreno (uno como mucho)
   - id: estiramientos
     name: "Estiramientos"
     priority: medium
@@ -319,8 +321,28 @@ Un solo mensaje de unas 25 líneas como máximo:
 
 ### Tareas clave (CU-02)
 
-Sin cambios de fondo: tono que escala hasta 3 avisos, [Voy ahora] [Más tarde] [Ya entrené]
-[Hoy no], para en cuanto la tarea está hecha. El tono sigue H1-11; la frecuencia, `limites.yaml`.
+Tono que escala hasta 3 avisos, [Voy ahora] [Más tarde] [Ya entrené] [Hoy no], y para en cuanto la
+tarea está hecha. El tono sigue H1-11; la frecuencia, `limites.yaml`. Lo que hizo la tarea 1.15
+(decisiones 134 a 144 del diseño):
+
+```text
+Oye, que la pesa te echa de menos 😄 ¿Te da tiempo antes de comer?
+
+[🏃 Voy ahora] [⏰ Más tarde]
+[✅ Ya entrené] [⏭ Hoy no]
+```
+
+- **El estado del día** de cada tarea clave: hecha y por qué fuente (botón, Todoist o APEX en el
+  hábito con `training: true`), si ya no es de hoy (el salto), «hoy no», la pausa de [Voy ahora],
+  desde cuándo se puede insistir (hora de la tarea de hoy, o `default_time`, + `grace`), el nivel
+  del tono y sus avisos de hoy. La segunda pasada lo garantiza con su código.
+- **[Más tarde]** pregunta «¿A qué hora?» y la respuesta de Pedro va al agente, con la tarea y su
+  id: el `move` sale al momento con [Deshacer] si se cumplen las condiciones de la 97 (cambia el
+  criterio del issue, que decía «sin llamar al modelo»). Si la saca de hoy, cuenta como «hoy no»
+  hasta que se deshaga (decisión 145).
+- **[Ya entrené]/[Hecho]** completa la tarea de hoy y **[Hoy no]** lo anota, los dos con
+  [Deshacer]; **[Voy ahora]** pausa la insistencia lo que dura el hábito. Tras [Voy ahora] o [Más
+  tarde] quedan [Ya entrené] y [Hoy no]. Ningún toque llama al modelo.
 
 ### Cierre del día (CU-14, con H1-8 y H1-14)
 
@@ -2884,3 +2906,139 @@ explicados.
 
 **Para Pedro, tras fusionar:** bajar `daily_cap_usd` a 3 otra vez con `nano` si lo subió y reiniciar
 el servicio (aplica la 0008 y corrige el gasto de hoy).
+
+### Tarea 1.15: tareas clave
+
+**Qué se hizo.** Issue #29, rama `feat/h1-tareas-clave`, aprobada a las 18:51 del 23-nov-2026 con
+un ajuste de Pedro (la línea de [⏭ Hoy no] en `agent/prompt.md`) y dos decisiones suyas durante
+la tarea (el campo `training` y, tras el contrato, el salto y el [Deshacer] de una recurrente).
+Commits:
+- `feat(todoist)`: las completadas de hoy y `reopen`, con su contrato (2a18275);
+- `feat(ficheros)`: `training: true` en el hábito (106edba);
+- `feat(memoria)`: la migración 0009, `key_task_marks` y `task_moves` (4e4427c);
+- `feat(latido)`: el estado de las tareas clave y sus topes (c27883d); el prompt con los campos y
+  el tono, y la línea de [Hoy no] del agente (81ef8dc);
+- `feat(canal)`: el estilo `key` y el mensaje con botones tras un toque (1ff557c);
+- `refactor(plan)`: `read_icons` (d1165d5);
+- `feat(tareas-clave)`: los botones, los toques, los [Deshacer] y el día de ejemplo (156ddc1);
+- `feat(evals)`: los campos nuevos de `latido.yaml` y la demo (ae77d29);
+- `docs(diseno)` y `docs(decisiones)`: CU-02, las decisiones 134 a 144 y el ADR 0005 (388e940,
+  94d8b9e);
+- las correcciones: `fix(demo)` (14faa28, la N2) y las de la revisión propia, `fix(tareas-clave)`
+  (5ba051c), `fix(latido)` (a41fd7b, d4478c4) y `fix(canal)` (08b23df).
+
+Este anexo es `docs(hito-1)`.
+
+**Decisiones de la tarea:** 1.15-a y 1.15-c a 1.15-i son las decisiones 134 a 141 del diseño; las
+de Pedro durante la tarea, la 142 (el salto, 1.15-j), la 143 (`training`, 1.15-k) y la 144 (el
+[Deshacer] de una recurrente, 1.15-l). Sin ADR nuevo; lo que toca a la guardia, en el 0005.
+
+**El contrato** (`tests/test_contrato_tareas_clave.py`, plan gratuito, 23-nov-2026, cinco pasadas
+en el proyecto de pruebas, que quedó con 0 tareas en todas): una normal completada hoy sale en las
+completadas de hoy (endpoint por fecha de cierre) y reabrirla la devuelve a hoy; una completada se
+lee por su id. Una **recurrente** diaria (sin hora) completada pasa a mañana y **no sale** en las
+completadas, ni a los 10 s ni por fecha de vencimiento; reabrirla **no** la devuelve a hoy, y
+moverla a hoy sí (conserva la recurrencia). Era una condición de parada de las notas: Pedro decidió
+el salto (142) y el [Deshacer] por movimiento (144).
+
+**Decisiones del diff** (lo que el plan interpretaba, y lo que salió al implementar):
+- **Paquetes:** `heartbeat/key_tasks.py` (el estado de cada tarea clave), `heartbeat/key_message.py`
+  (el mensaje con botones), `execution/key_tasks.py` (los toques y sus [Deshacer]) y
+  `memory/key_marks.py` (las marcas).
+- **La tarea de hoy:** abierta, con fecha de hoy (la vencida de ayer no es la de hoy) y el título de
+  `todoist_task`; con varias, la primera con hora. Sin hora, cuenta `default_time`.
+- **Hecha por Todoist:** completada hoy **y** ninguna abierta de hoy con ese nombre (cubre el
+  [Deshacer], que la deja abierta otra vez). Con las completadas caídas, no se supone hecha.
+- **Nivel:** `min(avisos de hoy de esa tarea + 1, 3)`. **Pausa:** del último [Voy ahora] a
+  + `duration`. Si el margen cae mañana, hoy no se insiste.
+- **Las respuestas fijas** salen como mensaje aparte; las de [Ya entrené] y [Hoy no], con su
+  [Deshacer] (`key_undo`), que caduca al acabar el día.
+- **Tras [Voy ahora] o [Más tarde] quedan [Ya entrené] y [Hoy no]** (interpretación de la
+  implementación, no del plan): si el elemento se cerraba, a las 20:15 del día de ejemplo no había
+  botón para la felicitación.
+- **[Más tarde] sin tarea de hoy:** la línea lo dice («hoy no tiene tarea en Todoist»).
+- **[Ya entrené] sin tarea abierta de hoy** solo anota. **[Deshacer]** quita siempre la marca; si
+  Todoist cambió o la tarea ya no existe, no la toca y lo dice (revisión propia).
+- **Un mensaje con botones que no se puede montar o no cabe** sale como texto: se pierden los
+  botones, no el aviso.
+- **`TodoistTask.completed`**, excluido de lo que ve el modelo, para no completar dos veces.
+- **El latido anota la tarea de hoy que ve** (`seen`), antes y aparte del resto de la contabilidad;
+  solo relee las vistas que faltan y no están completadas ni son de una tarea hecha o con «hoy no».
+- **Con la API caída**, la plantilla de una tarea clave sale en el tramo de su margen o, si una
+  pausa lo tapa, en el que acaba la pausa.
+- **El e02** sigue pendiente, ahora de la 1.15-b.
+
+**Valores a mano** (código independiente, antes de implementar): gimnasio a las 12:00 + 45 min =
+12:45; sin tarea, 13:00 + 45 = 13:45; ofertas 17:15 (16:30 + 45) o 18:00 sin tarea; [Más tarde] a
+las 20:00 → 20:45; [Voy ahora] a las 13:30 con 75 min → 14:45; 23:30 + 45 = 00:15 del día
+siguiente; el día local del 10/01/2030 empieza en `2030-01-09T23:00Z` y los botones caducan a las
+`2030-01-10T23:00Z`; nivel 1/2/3/3 con 0/1/2/3 avisos; el día de ejemplo, dos avisos (12:45 y
+13:30); el domingo del cambio de hora dura 23 h; las etiquetas con icono, 11 a 15 caracteres.
+
+**Medida informativa** (23-nov-2026, 19:48, `jimic-dev`, `claude-haiku-5-5`, 3 pasadas):
+
+| Cifra | 1.15 | Referencia 1.9 | Diferencia |
+| --- | --- | --- | --- |
+| Acierto | 77,8 % (91/117) | 81,2 % (95/117) | −3,4 puntos |
+| Habla cuando no debía | 0,0 % (0/57) | 7,0 % (4/57) | −7,0 (mejor) |
+| Coste | 0,0333 $ en 117 llamadas | 0,0374 $ | — |
+
+Las huellas cambian todas por `training` en la base (decisión de Pedro), así que la comparación es
+con las cifras globales: ninguna empeora más de 5 puntos. Por escenarios:
+- **Arreglados por el dato nuevo:** l16 (el «hecho», que en la 1.9 hablaba las tres veces) y l07
+  (el margen).
+- **Nuevos fallos: l03 y l35 (0/3)**, el plan a las 7:45 con Haiku callado. La lectura posible es
+  que tome «antes de su `insist_from` no se elige» como «antes de la hora no toca» (el plan es a
+  las 8:00), pero sus motivos están en el `.md` de Pedro, que el agente no puede leer. **l18
+  (2/3)** insiste una vez con las ofertas, que el escenario da por hechas solo porque falta su tarea
+  (el riesgo que el plan preveía).
+- **Siguen fallando:** l05, l06, l22, l23, l25 y l27; l29 mejora a 2/3.
+Siguiendo las notas, el prompt no se tocó para recuperar nada: es de la 1.15-b.
+
+**Medidas.** La N3, tras la revisión propia: en verde en 1:39, 1708 tests y 13 de contrato saltados (eran 1594 antes de la tarea); pre-commit 0:14, pytest 1:24 y gitleaks de la historia 0:01. El contrato de la 1.15 tarda unos 14 s.
+
+**Versiones incorrectas** (aplicadas y deshechas con un script; el árbol quedó limpio):
+
+| # | Versión incorrecta | Predicción | Observado |
+| --- | --- | --- | --- |
+| 1 | La segunda pasada no frena una hecha | Rojo «completar corta»; verde «[Hoy no] la corta» | Rojo `frena_una_tarea_hecha` y tres del estado; los de «hoy no», verdes |
+| 2 | `insist_from` sin `grace` | Rojo el margen; verde el tope de 3 | Rojos los tres del margen; verde `nunca_mas_de_tres` |
+| 3 | La pausa no caduca | Rojo «después vuelve»; verde «durante no sale» | Al principio, rojos los dos, porque cada test comprobaba las dos cosas: se partieron. Después, como se predijo |
+| 4 | Los botones de dos tareas actúan sobre la primera | Rojo «cada botón la suya»; verde «con una» | Como se predijo |
+| 5 | El nivel cuenta todas las tareas | Rojo con dos tareas; verde con una | Como se predijo |
+| 6 | «Hecho por Todoist» sin exigir que no quede abierta | Rojo el del [Deshacer]; verde «completada en la app» | Rojo `completada_pero_con_otra_abierta`; verdes los demás |
+| 7 | La marca con el día UTC | Rojo «[Hoy no] a las 00:30»; verde el de mediodía | Como se predijo (el primer mutante no era válido: faltaba un import) |
+| 8 | El plan B a su `default_time` | Rojo «sale a su margen»; verdes los avisos | Rojos los tres de la tarea clave; verdes los avisos |
+| 9 | (Pedro) Un movimiento de JimiC cuenta como salto | Rojo su test | Rojo `un_movimiento_de_jimic_no_es_un_salto`; verdes los demás del salto |
+| 10 | (Ajuste) Deshacer el movimiento quita cualquier `not_today` | Rojo «un [Hoy no] tocado antes sigue» | Como se predijo; verdes los otros del movimiento |
+
+**Revisión propia** (`/code-review medium`, 10 hallazgos): nueve corregidos, el último en la
+ronda de ajustes; ocho en la propia revisión (la relectura que fallaba
+tras completar, el [Deshacer] que dejaba la marca, las lecturas repetidas del salto, `due_day`
+copiado, un mensaje con botones que no se podía montar, `seen` tras el resto de la contabilidad, la
+plantilla tapada por una pausa y `Answer.then` sobre la copia vieja); uno explicado (`Followup`
+repite `bot.Outgoing`, pero `taps` no puede importar `bot`); el de la tarea que JimiC pasa a mañana
+quedó como pregunta y lo resolvió Pedro en la revisión del PR (abajo).
+
+**Pendiente:**
+- **Para la 1.15-b:** l03 y l35, l18 (el «hecho» por ausencia de la tarea en el escenario) y lo que
+  ya fallaba; activar el e02.
+- **Para la 1.16:** `rescheduled` no es «hecho» (decisión 142); el cierre distingue las dos cosas.
+- **Para la 3.5:** el motivo del «hoy no».
+- **Para la 1.13 o la sesión de configuración:** la puesta en marcha no pregunta qué hábito es el
+  entreno; `training` se pone a mano.
+- **`jimic evaluar plan`** no se lanzó: el cambio del prompt del agente es una línea de la
+  conversación, no del plan.
+
+**Ajustes de la revisión** (Pedro, PR #53): **un movimiento de JimiC fuera de hoy es «hoy no»**
+(decisión 145, que Pedro llamó 1.15-j en su ajuste; aquí es la 1.15-m porque la j es el salto).
+Cuando JimiC saca de hoy la tarea de una tarea clave (con [Más tarde] → «mañana» o con cualquier
+`move` del agente), el código anota `not_today` con el id de la tarea y la insistencia de hoy se
+corta con el tope de siempre; el cierre no lo cuenta como hecho. Deshacer ese movimiento quita solo
+esa marca. La tarea clave se reconoce porque el latido la vio como la de hoy (`seen`); mover dentro
+de hoy no anota nada. Commit `feat(tareas-clave)` (9dbe6d0) y esta entrada.
+- **CodeQL `neutral` en a41988b:** con `scripts/gh.sh checks`, hoy las cuatro ejecuciones de ese
+  commit (`CodeQL`, `Analyze (python)`, `Analyze (actions)` y `tests`) salen `success`. El resumen
+  de la ejecución, que diría el motivo del `neutral`, no lo da `gh.sh`, y la lectura directa de la
+  API se denegó: queda para que Pedro lo mire en la pestaña de checks del PR.
+- **N3 de la ronda:** en verde en 1:41, 1712 tests y 13 de contrato saltados (pre-commit 0:11, pytest 1:30 y gitleaks de la historia 0:00).

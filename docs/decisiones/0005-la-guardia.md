@@ -150,3 +150,11 @@ H1-2 (decisiones 55 y 56), y la tarea 1.11 las implementa.
     descartar ([⏭ Nada], [⏭ Hoy sin plan]) los deja como «Déjala» para cerrar el mensaje.
   - **El contexto de [✏️]** (95d25d3, decisión 130): la línea del código que dice qué tocó Pedro
     va delante de su mensaje, pero el origen sigue siendo solo su texto.
+- **Tarea 1.15** (PR de `feat/h1-tareas-clave`; decisiones 134 a 144):
+  - **Los botones de las tareas clave los resuelve el código** (156ddc1): [Voy ahora], [Ya entrené]
+    y [Hoy no] no pasan por el modelo; [Ya entrené] completa la tarea con el escritor, que el
+    agente sigue sin tener. Su [Deshacer] comprueba antes que la tarea sigue como la dejó JimiC.
+  - **[Más tarde] deja su línea como el [✏️]** (156ddc1, decisión 136): `(JimiC) Pedro tocó ⏰ Más
+    tarde en: …` con el id de la tarea, para que el agente proponga el `move` sin leer Todoist; el
+    origen sigue siendo solo el texto de Pedro, y lo que sale al momento cumple las condiciones de
+    la 97.

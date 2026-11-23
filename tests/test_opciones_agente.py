@@ -161,6 +161,19 @@ def test_el_prompt_dice_las_reglas(conn):
         assert rule in text
 
 
+def test_el_prompt_manda_al_boton_hoy_no_sin_prometer_nada(conn):
+    """1.15-f, con el ajuste de Pedro: el agente no puede anotar «hoy no»; le recuerda el botón
+    del aviso, dice que antes del primer aviso no hay nada que tocar y no promete silencio."""
+    text = " ".join(prompt_text().split())  # sin los saltos de línea del fichero
+    for rule in (
+        "hoy no hará una tarea clave",
+        "toque [⏭ Hoy no] en el aviso de esa tarea",
+        "hasta que llegue el primer aviso no hay nada que tocar",
+        "No le prometas que no le insistirás",
+    ):
+        assert rule in text
+
+
 def test_la_guarda_impide_arrancar_el_motor_en_un_test_rapido(conn, tmp_path):
     transport = SubprocessCLITransport(prompt="x", options=options(conn, tmp_path))
     with pytest.raises(AssertionError, match="motor del agente"):

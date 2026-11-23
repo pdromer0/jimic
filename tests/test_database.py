@@ -26,9 +26,11 @@ TABLES = {
     "system_notices",
     "handovers",
     "conversations",
+    "key_task_marks",
+    "task_moves",
 }
-LATEST = 8
-"""La última migración del paquete (0008, la del gasto del agente)."""
+LATEST = 9
+"""La última migración del paquete (0009, la de las tareas clave)."""
 
 
 def table_names(conn: sqlite3.Connection) -> set[str]:

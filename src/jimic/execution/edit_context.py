@@ -14,6 +14,10 @@ message: `(JimiC) Pedro tocó ✏️ en: crear «Gimnasio» (2030-01-10T12:00)`.
 - The line is not Pedro's: it never enters the origin of the run (`RunState.origin` is his text
   alone), so nothing of it can become a memory change.
 
+[⏰ Más tarde] of a key task (decision 1.15-d) is remembered the same way, with its own line:
+`(JimiC) Pedro tocó ⏰ Más tarde en: «Gimnasio» (hoy 12:00, tarea t-1); su mensaje dice a qué
+hora moverla`, so the agent can propose the move without reading Todoist.
+
 It lives in the memory of the service: a restart forgets it, as Pedro would expect of a tap
 older than the restart.
 """
@@ -25,9 +29,11 @@ from datetime import date
 from zoneinfo import ZoneInfo
 
 from jimic.channel.message import Item
-from jimic.channel.taps import HandlerOutcome, TapHandler
+from jimic.channel.taps import Answer, HandlerOutcome, TapHandler
 from jimic.clock import Clock
 from jimic.execution.follow_up import EDITS, FOLLOW_KINDS, item_label
+from jimic.execution.key_tasks import LATER_LINE, later_label
+from jimic.heartbeat.key_message import KEY_KIND
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +43,7 @@ LINE = "Pedro tocó ✏️ en: {label}"
 @dataclass(frozen=True)
 class _Edit:
     approval_id: int
-    label: str
+    line: str
     day: date
     others: bool = False
     """Another item of the same message was tapped after the [✏️]."""
@@ -50,23 +56,34 @@ class EditContext:
         self._edit: _Edit | None = None
 
     def track(self, handlers: Mapping[str, TapHandler]) -> dict[str, TapHandler]:
-        """`handlers` with those of the proposals (`plan`, `memory`) watched for [✏️]."""
+        """`handlers` with those of the proposals (`plan`, `memory`) watched for [✏️], and
+        that of the key tasks for [⏰ Más tarde]."""
         return {
-            kind: self._watched(handler) if kind in FOLLOW_KINDS else handler
+            kind: self._watched(handler) if kind in FOLLOW_KINDS | {KEY_KIND} else handler
             for kind, handler in handlers.items()
         }
 
     def _watched(self, handler: TapHandler) -> TapHandler:
         async def watched(item: Item, option: str, approval_id: int) -> HandlerOutcome:
             outcome = await handler(item, option, approval_id)
-            if option in EDITS and isinstance(outcome, str):
+            line = self._line(item, option, outcome)
+            if line is not None:
                 day = self._clock.now().astimezone(self._timezone).date()
-                self._edit = _Edit(approval_id, item_label(item.data or {}), day)
+                self._edit = _Edit(approval_id, line, day)
             elif self._edit is not None and self._edit.approval_id == approval_id:
                 self._edit = replace(self._edit, others=True)
             return outcome
 
         return watched
+
+    def _line(self, item: Item, option: str, outcome: HandlerOutcome) -> str | None:
+        """The line a tap leaves for Pedro's next message, or `None`."""
+        data = item.data or {}
+        if option in EDITS and isinstance(outcome, str):
+            return LINE.format(label=item_label(data))
+        if option == "later" and isinstance(outcome, Answer) and "intent" in data:
+            return LATER_LINE.format(label=later_label(data, self._timezone))
+        return None
 
     def closed(self, approval_id: int) -> None:
         """A tap closed approval `approval_id`: if it was not the [✏️], forget it."""
@@ -80,4 +97,4 @@ class EditContext:
         if edit is None or edit.day != day:
             return None
         logger.info("edit context used")
-        return LINE.format(label=edit.label)
+        return edit.line

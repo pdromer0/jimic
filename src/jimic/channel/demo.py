@@ -6,8 +6,10 @@ sends six messages, as the assistant would: the plan of the day as the code pain
 create, a move and a delete under an answer, with the global row `[✅ Créalo todo] [⏭ Nada]`;
 what was done at once with its [Deshacer] (task 1.11); a step of the onboarding, the meals of the
 routine with [Guardar] (task 1.13); a change of memory with [Guardar] [Cambiar] [No] and an idea
-with [📝 Apuntar]; and a list of `/deshacer` (task 1.12). The taps edit the messages and touch
-nothing in Todoist or in the files: the handlers only say what would have happened. A text from
+with [📝 Apuntar]; a list of `/deshacer` (task 1.12); and two notices of key tasks (task 1.15),
+one alone and two in one message with a notice, with their buttons and their answers. The taps
+edit the messages and touch nothing in Todoist or in the files: the handlers only say what would
+have happened. A text from
 Pedro gets the fixed phrase. It is a process that does not end (stop it with Ctrl+C): **Pedro
 launches it, never the agent**.
 """
@@ -21,12 +23,27 @@ from typing import Any
 
 from jimic.channel.bot import TelegramChannel, build_channel
 from jimic.channel.message import InteractiveMessage, Item
-from jimic.channel.taps import HandlerOutcome, Show
+from jimic.channel.taps import Answer, Followup, HandlerOutcome, Show, TapHandler
 from jimic.clock import Clock, SystemClock
 from jimic.config import Settings, load_settings
 from jimic.execution.commands import UNDO, UNDO_HEADER, UNDO_LIST_KIND
+from jimic.execution.key_tasks import (
+    DONE,
+    DONE_TEXT,
+    GO_TEXT,
+    GOING,
+    LATER,
+    LATER_TEXT,
+    SKIP_TEXT,
+    SKIPPED,
+    key_undo_message,
+    still_open,
+)
 from jimic.execution.memory_message import MEMORY_KIND, memory_message
 from jimic.execution.plan_message import PLAN_KIND, UNDO_KIND, plan_message, undo_message
+from jimic.heartbeat.key_message import DONE as DONE_OPTION
+from jimic.heartbeat.key_message import GO, KEY_KIND, SKIP, TRAINED
+from jimic.heartbeat.key_message import LATER as LATER_OPTION
 from jimic.paths import Paths, resolve_paths
 from jimic.plan.day import day_view
 from jimic.plan.message import PlanContent, paint
@@ -201,6 +218,33 @@ UNDO_ITEMS = (
 )
 
 
+GYM_ITEM = Item(
+    title="🏋️ Gimnasio",
+    options=(GO, LATER_OPTION, TRAINED, SKIP),
+    icon="🏋️",
+    data={"intent": "insistir_gimnasio", "habit": "Gimnasio"},
+)
+OFFERS_ITEM = Item(
+    title="🛒 Revisar ofertas",
+    options=(GO, LATER_OPTION, DONE_OPTION, SKIP),
+    icon="🛒",
+    data={"intent": "insistir_ofertas", "habit": "Revisar ofertas"},
+)
+KEY_ONE = InteractiveMessage(
+    body="Oye, que la pesa te echa de menos 😄 ¿Te da tiempo antes de comer? (inventado)",
+    items=(GYM_ITEM,),
+    style="key",
+)
+KEY_TWO = InteractiveMessage(
+    body=(
+        "Segundo toque: el gimnasio sigue esperando y las ofertas también 💪 (inventado)"
+        "\n\nY de paso, la basura a la calle, que hoy toca."
+    ),
+    items=(GYM_ITEM, OFFERS_ITEM),
+    style="key",
+)
+
+
 def demo_messages(settings: Settings) -> list[tuple[str, InteractiveMessage]]:
     """The invented plan of the day (task 1.14), the invented proposal, the invented [Deshacer],
     a step of the onboarding with [Guardar] (task 1.13), a change of memory with [Guardar] and a
@@ -218,6 +262,8 @@ def demo_messages(settings: Settings) -> list[tuple[str, InteractiveMessage]]:
         (MEMORY_KIND, onboarding),
         (MEMORY_KIND, memory),
         (UNDO_LIST_KIND, undo_list),
+        (KEY_KIND, KEY_ONE),
+        (KEY_KIND, KEY_TWO),
     ]
 
 
@@ -245,7 +291,26 @@ async def demo_undo_list(item: Item, option: str, approval_id: int) -> HandlerOu
     return "↩️ deshecho"
 
 
-HANDLERS = {
+def key_handler(clock: Clock) -> TapHandler:
+    """The answers of the real buttons (task 1.15), without marks or Todoist; the [Deshacer]
+    lasts as long as the demo's other buttons."""
+
+    async def demo_key(item: Item, option: str, approval_id: int) -> HandlerOutcome:
+        habit = str((item.data or {}).get("habit", "")).lower()
+        if option == "go":
+            return Answer(GOING, GO_TEXT, then=still_open(item))
+        if option == "later":
+            return Answer(LATER, LATER_TEXT, then=still_open(item))
+        body, result = (
+            (DONE_TEXT, DONE) if option == "done" else (SKIP_TEXT.format(habit=habit), SKIPPED)
+        )
+        undo = key_undo_message(body, item, {"action": option})
+        return Answer(result, Followup(UNDO_KIND, undo, clock.now() + TTL, body))
+
+    return demo_key
+
+
+HANDLERS: dict[str, TapHandler] = {
     PLAN_KIND: demo_plan,
     UNDO_KIND: demo_undo,
     MEMORY_KIND: demo_memory,
@@ -271,7 +336,13 @@ def demo_factory(settings: Settings, clock: Clock) -> ChannelFactory:
         logger.info("demo sent; press Ctrl+C to stop")
 
     def factory(conn: sqlite3.Connection) -> TelegramChannel:
-        return build_channel(settings, conn, clock, handlers=HANDLERS, on_started=send_demo)
+        return build_channel(
+            settings,
+            conn,
+            clock,
+            handlers=HANDLERS | {KEY_KIND: key_handler(clock)},
+            on_started=send_demo,
+        )
 
     return factory
 

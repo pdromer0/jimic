@@ -6,9 +6,13 @@ messages, what waits) or the whole section of APEX (`meta`, `plan`, `entrenamien
 inherits only the state, never `now`, `expected`, `why` or `pending`.
 
 Each scenario becomes a `DayState` through the same `build_day_state` the heartbeat uses: the
-sent messages go to a temporary SQLite in memory (one message per hour, decision 92), APEX goes
-through `build_snapshot`, and the limits are the template of `limites.yaml`. Every value of the
-file is invented (decision 43): real cases will live outside the repository with this format.
+sent messages and the marks of the key tasks go to a temporary SQLite in memory (one message per
+hour, decision 92), APEX goes through `build_snapshot`, and the limits are the template of
+`limites.yaml`. What the code knows of a key task (task 1.15) comes from `completed_today` (tasks
+completed today in Todoist), `key_marks` (the taps of the day, and `seen` for today's task the
+heartbeat saw open) and `later_tasks` (open tasks of a later day: a `seen` one there jumped).
+Every value of the file is invented (decision 43): real cases will live outside the repository
+with this format.
 """
 
 import hashlib
@@ -34,6 +38,7 @@ from jimic.clock import local_day_bounds, to_db
 from jimic.heartbeat.decide import MAX_PICKS
 from jimic.heartbeat.limits import Outgoing, WaitingNotices
 from jimic.heartbeat.state import DayState, build_day_state
+from jimic.memory import key_marks
 from jimic.memory.database import load_migrations, migrate
 from jimic.memory.notices import sent_between
 from jimic.memory.personal import template
@@ -87,6 +92,22 @@ class SentIn(_Input):
     at: Hour
 
 
+class CompletedIn(_Input):
+    """A task completed today in Todoist (task 1.15)."""
+
+    id: str
+    title: str
+
+
+class MarkIn(_Input):
+    """A mark of a key task today (task 1.15): a tap, or `seen` with the task the heartbeat saw."""
+
+    intent: str
+    mark: Literal["going", "done", "not_today", "seen"]
+    at: Hour
+    task_id: str | None = None
+
+
 class _State(_Input):
     """What a scenario may change over the base day; `None` is «as the base day»."""
 
@@ -99,6 +120,9 @@ class _State(_Input):
     waiting: list[str] | None = None
     unavailable: dict[Source, str] | None = None
     """The sources that are down, with their code."""
+    completed_today: list[CompletedIn] | None = None
+    key_marks: list[MarkIn] | None = None
+    later_tasks: list[TaskIn] | None = None
 
 
 class ScenarioIn(_State):
@@ -135,6 +159,9 @@ class BaseDay(_Input):
     """As `apex_db.json`."""
     sent_today: list[SentIn] = []
     waiting: list[str] = []
+    completed_today: list[CompletedIn] = []
+    key_marks: list[MarkIn] = []
+    later_tasks: list[TaskIn] = []
 
 
 class EvalFile(_Input):
@@ -156,6 +183,9 @@ class Scenario:
     sent_today: tuple[SentIn, ...]
     waiting: tuple[str, ...]
     unavailable: dict[str, str]
+    completed_today: tuple[CompletedIn, ...]
+    key_marks: tuple[MarkIn, ...]
+    later_tasks: tuple[TaskIn, ...]
     expected: tuple[frozenset[str], ...]
     why: str | None
     pending: str | None
@@ -262,21 +292,23 @@ def build_state(suite: Suite, scenario: Scenario) -> DayState:
     tasks = (
         TaskList.unavailable(down["tasks"])
         if "tasks" in down
+        else TaskList(available=True, tasks=[_task(task, tz) for task in scenario.tasks])
+    )
+    completed = (
+        TaskList.unavailable(down["tasks"])
+        if "tasks" in down
         else TaskList(
             available=True,
             tasks=[
-                TodoistTask(
-                    id=task.id,
-                    title=task.title,
-                    project_id=PROJECT,
-                    due=local(task.due, tz) if isinstance(task.due, datetime) else task.due,
-                    is_recurring=False,
-                    has_subtasks=False,
-                    duration_minutes=task.duration_minutes,
-                )
-                for task in scenario.tasks
+                _task(TaskIn(id=done.id, title=done.title, due=day), tz)
+                for done in scenario.completed_today
             ],
         )
+    )
+    jumped = frozenset(
+        task.id
+        for task in scenario.later_tasks
+        if (task.due.date() if isinstance(task.due, datetime) else task.due) > day
     )
     apex = (
         ApexSnapshot.unavailable(down["apex"])
@@ -297,14 +329,54 @@ def build_state(suite: Suite, scenario: Scenario) -> DayState:
                 (to_db(moment), sent.intent, hours.index(sent.at) + 1),
             )
         sent_today = sent_between(conn, *local_day_bounds(day, tz))
+        for mark in scenario.key_marks:
+            moment = datetime.combine(day, mark.at, tzinfo=tz)
+            if mark.mark == "seen" and mark.task_id is not None:
+                key_marks.note_seen(conn, day, mark.intent, mark.task_id, moment)
+            else:
+                key_marks.record(conn, day, mark.intent, mark.mark, moment, mark.task_id)
+        marks = key_marks.of_day(conn, day)
     finally:
         conn.close()
     return build_day_state(
-        now, tz, calendar, tasks, apex, sent_today, suite.intentions, suite.limits, queue
+        now,
+        tz,
+        calendar,
+        tasks,
+        apex,
+        sent_today,
+        suite.intentions,
+        suite.limits,
+        queue,
+        completed=completed,
+        marks=marks,
+        jumped=jumped,
     )
 
 
-STATE_FIELDS = ("day", "events", "tasks", "sent_today", "waiting", "unavailable")
+def _task(task: TaskIn, tz: ZoneInfo) -> TodoistTask:
+    return TodoistTask(
+        id=task.id,
+        title=task.title,
+        project_id=PROJECT,
+        due=local(task.due, tz) if isinstance(task.due, datetime) else task.due,
+        is_recurring=False,
+        has_subtasks=False,
+        duration_minutes=task.duration_minutes,
+    )
+
+
+STATE_FIELDS = (
+    "day",
+    "events",
+    "tasks",
+    "sent_today",
+    "waiting",
+    "unavailable",
+    "completed_today",
+    "key_marks",
+    "later_tasks",
+)
 
 
 def _resolve(item: ScenarioIn, earlier: dict[str, dict[str, Any]]) -> dict[str, Any]:
@@ -382,6 +454,9 @@ def load_suite(path: Path = EVALS_FILE) -> Suite:
             "sent_today": tuple(own.get("sent_today", base.sent_today)),
             "waiting": tuple(own.get("waiting", base.waiting)),
             "unavailable": dict(own.get("unavailable", {})),
+            "completed_today": tuple(own.get("completed_today", base.completed_today)),
+            "key_marks": tuple(own.get("key_marks", base.key_marks)),
+            "later_tasks": tuple(own.get("later_tasks", base.later_tasks)),
         }
         expected = tuple(frozenset(alternative) for alternative in item.expected)
         fingerprint = fingerprint_of(

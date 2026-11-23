@@ -11,6 +11,10 @@ Rules of the format (task 1.4):
 - A tap removes the row of what it resolved and says what happened in the text of the item.
 - An item being executed is `running` (task 1.11): it has no row and no tap touches it, so a
   second tap never runs its effect twice. One that failed keeps its row with a `note`.
+- The `key` style (task 1.15) is the message of the heartbeat with key tasks: its text is the
+  body alone (the model's), and an item shows a line only once it has a status (`🏋️ Gimnasio —
+  🏃 a por ello`). Its buttons go `KEY_ROW` to a row, without numbers; with more than one item,
+  each label starts with the item's `icon`.
 - At most `MAX_ITEMS` items, and the text always fits in `TELEGRAM_TEXT_LIMIT`: if it cannot,
   `ensure_fits` raises `MessageTooLong` instead of cutting; `fit_titles` shortens the titles
   shown (never what an item does) until it fits.
@@ -40,6 +44,8 @@ RUNNING_TEXT = "en curso…"
 GLOBAL_TARGET = "g"
 MIN_TITLE_CHARS = 20
 """`fit_titles` never shortens a title below this."""
+KEY_ROW = 2
+"""Buttons per row in the `key` style: two rows of two per key task (decision 1.15-c)."""
 
 Key = Annotated[str, StringConstraints(pattern=r"^[a-z0-9]{1,8}$")]
 Label = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=32)]
@@ -104,6 +110,8 @@ class Item(BaseModel):
     """Shown while still pending: why the last try failed, or that the task changed."""
     data: dict[str, JsonValue] | None = None
     """What the handler of its kind needs (ids, the snapshot); never shown."""
+    icon: str | None = None
+    """In the `key` style with several items, what goes before each of its buttons."""
 
     @model_validator(mode="after")
     def _check(self) -> Self:
@@ -131,7 +139,7 @@ class Item(BaseModel):
         return any(option.key == key for option in self.options)
 
 
-type Style = Literal["list", "plan"]
+type Style = Literal["list", "plan", "key"]
 
 
 class InteractiveMessage(BaseModel):
@@ -146,7 +154,8 @@ class InteractiveMessage(BaseModel):
     footer: Text | None = None
     """Plain text after the items (the plan of the day: what was left out, 🧠 and 🏋️)."""
     style: Style = "list"
-    """`list` numbers the items `1.`; `plan` numbers them `1️⃣`, as the format of the plan."""
+    """`list` numbers the items `1.`; `plan` numbers them `1️⃣`, as the format of the plan; `key`
+    does not number them and shows an item only once it has a status (task 1.15)."""
     global_options: tuple[GlobalOption, ...] = ()
     expired: bool = False
     expired_text: Short = EXPIRED_RESULT
@@ -220,27 +229,55 @@ def _text(message: InteractiveMessage) -> str:
         else:
             lines += [f"<b>{_escape(message.header)}</b>", ""]
     for number, item in enumerate(message.items, start=1):
-        line = f"{number_mark(number, message.style)} {_escape(item.title)}"
         status = item.result or (RUNNING_TEXT if item.running else item.note)
+        if message.style == "key":
+            if status is not None:  # a pending item has no line: its buttons say it
+                lines.append(f"{_escape(item.title)} — {_escape(status)}")
+            continue
+        line = f"{number_mark(number, message.style)} {_escape(item.title)}"
         if status is not None:
             line += f" — {_escape(status)}"
         lines.append(line)
+    if message.style == "key" and lines and lines[-1] == "":
+        lines.pop()  # nothing with a status yet: the body's blank line goes
     if message.footer is not None:
         lines += ["", _escape(message.footer)]
     return "\n".join(lines)
 
 
+def _key_rows(message: InteractiveMessage, approval_id: int) -> list[tuple[Button, ...]]:
+    """`KEY_ROW` buttons to a row; with several items, each label after its item's icon."""
+    rows: list[tuple[Button, ...]] = []
+    several = len(message.items) > 1
+    for number, item in enumerate(message.items, start=1):
+        if not item.pending:
+            continue
+        mark = (item.icon or number_mark(number, "plan")) if several else None
+        buttons = [
+            Button(
+                option.label if mark is None else f"{mark} {option.label}",
+                f"{approval_id}:{number}:{option.key}",
+            )
+            for option in item.options
+        ]
+        rows += [tuple(buttons[i : i + KEY_ROW]) for i in range(0, len(buttons), KEY_ROW)]
+    return rows
+
+
 def _keyboard(message: InteractiveMessage, approval_id: int) -> tuple[tuple[Button, ...], ...]:
     if message.expired:
         return ()
-    rows = [
-        tuple(
-            Button(f"{number} {option.label}", f"{approval_id}:{number}:{option.key}")
-            for option in item.options
-        )
-        for number, item in enumerate(message.items, start=1)
-        if item.pending
-    ]
+    if message.style == "key":
+        rows = _key_rows(message, approval_id)
+    else:
+        rows = [
+            tuple(
+                Button(f"{number} {option.label}", f"{approval_id}:{number}:{option.key}")
+                for option in item.options
+            )
+            for number, item in enumerate(message.items, start=1)
+            if item.pending
+        ]
     # A global button is shown only while something pending can take it.
     global_row = tuple(
         Button(option.label, f"{approval_id}:{GLOBAL_TARGET}:{option.key}")

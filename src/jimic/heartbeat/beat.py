@@ -1,7 +1,8 @@
 """The heartbeat as the service runs it, every 15 minutes (6.3 of the design; task 1.8).
 
 `Heartbeat.beat` runs one cycle and does what the cycle does not: it sends the verdicts that say
-`send` (a grouped one is one message), hands the plan and the close over to the agent through an
+`send` (a grouped one is one message; with a key task, a message with its buttons, task 1.15),
+hands the plan and the close over to the agent through an
 injected hook (`on_handover`, which writes a row in `handovers`), writes one row in `decisions`
 per heartbeat (also when the first pass stops it, or when it finds the previous one still
 running), one row in `notices` per intention sent (only proactive messages), counts the spend and
@@ -17,18 +18,20 @@ log. Logs say codes, ids and counts.
 
 import logging
 import sqlite3
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from datetime import UTC, date, datetime, timedelta
 from typing import Protocol
 from zoneinfo import ZoneInfo
 
 from jimic.channel.bot import SendError
-from jimic.clock import Clock, to_db
+from jimic.channel.message import InteractiveMessage, MessageError
+from jimic.clock import Clock, local_day_bounds, to_db
 from jimic.heartbeat.cycle import CycleResult, Decision, run_cycle
+from jimic.heartbeat.key_message import KEY_KIND, key_message
 from jimic.heartbeat.limits import PENDING_TASK, SEPARATOR, Verdict, WaitingNotices, in_window
 from jimic.heartbeat.sources import Sources
 from jimic.heartbeat.state import DayState
-from jimic.memory import system_notices, usage
+from jimic.memory import key_marks, system_notices, usage
 from jimic.memory.changes import FILE_OF_STEM, stem
 from jimic.memory.live import LiveConfig
 from jimic.memory.notices import record_handover
@@ -64,6 +67,10 @@ def _files(detail: str) -> str:
 
 class Sender(Protocol):
     async def send_text(self, text: str) -> int: ...
+
+    async def deliver(
+        self, kind: str, content: InteractiveMessage | str, expires_at: datetime
+    ) -> int: ...
 
 
 type OnHandover = Callable[[str, DayState], Awaitable[None]]
@@ -126,9 +133,11 @@ class Heartbeat:
         sender: Sender,
         on_handover: OnHandover = log_handover,
         config: LiveConfig | None = None,
+        icons: Callable[[], Mapping[str, str]] = dict,
     ) -> None:
         """`config` is the live configuration of the service; without it, `limits` and
-        `intentions` are a fixed one."""
+        `intentions` are a fixed one. `icons` reads the table of `## Iconos` (task 1.15)."""
+        self._icons = icons
         self._clock = clock
         self._timezone = timezone
         self._config = config if config is not None else LiveConfig.fixed(intentions, limits)
@@ -206,15 +215,26 @@ class Heartbeat:
         of the heartbeat, then the bookkeeping, which can fail without losing either."""
         decision = result.decision
         assert decision is not None  # the cycle decides whenever the first pass goes on
-        failures = await self._send(result.verdicts)
         assert result.state is not None  # as the decision
+        failures = await self._send(result.verdicts, result.state)
         failures |= await self._hand_over(result.verdicts, result.state)
         reason = decision.reason + _verdict_codes(result.verdicts, failures)
         self._record(now, decision.speak, decision.intent, reason)
         try:
+            self._note_seen(now, result.state)
+        except Exception as error:
+            logger.error("heartbeat seen tasks failed (%s)", type(error).__name__)
+        try:
             self._bookkeeping(now, decision, result)
         except Exception as error:
             logger.error("heartbeat bookkeeping failed (%s)", type(error).__name__)
+
+    def _note_seen(self, now: datetime, state: DayState) -> None:
+        """Today's task of each key task, seen open: what tells a jump later (decision 1.15-j).
+        First and on its own, so a failure of the rest of the bookkeeping does not skip it."""
+        for status in state.key_tasks.values():
+            if status.task is not None:
+                key_marks.note_seen(self._conn, now.date(), status.intent, status.task.id, now)
 
     def _bookkeeping(self, now: datetime, decision: Decision, result: CycleResult) -> None:
         day = now.date()
@@ -232,7 +252,7 @@ class Heartbeat:
             if down:
                 system_notices.detect(self._conn, "source_down", day, now, ",".join(down))
 
-    async def _send(self, verdicts: tuple[Verdict, ...]) -> dict[int, str]:
+    async def _send(self, verdicts: tuple[Verdict, ...], state: DayState) -> dict[int, str]:
         """Send each `send` verdict as one message; return the failures by verdict index, as
         codes (`send_failed:<code>`)."""
         failures: dict[int, str] = {}
@@ -240,9 +260,7 @@ class Heartbeat:
             if verdict.action != "send":
                 continue
             try:
-                message_id = await self._sender.send_text(
-                    SEPARATOR.join(item.text for item in verdict.items)
-                )
+                message_id = await self._send_one(verdict, state)
             except SendError as error:
                 failures[index] = f"send_failed:{error}"
                 continue
@@ -253,6 +271,24 @@ class Heartbeat:
             )
             logger.info("heartbeat sent %s", ",".join(verdict.intents))
         return failures
+
+    async def _send_one(self, verdict: Verdict, state: DayState) -> int:
+        """Plain text, or, with a key task, a message with its buttons until the end of the day
+        (decision 1.15-c). One that cannot be built or fit goes as plain text: the buttons are
+        lost, the notice is not."""
+        text = SEPARATOR.join(item.text for item in verdict.items)
+        keys = [state.key_tasks[intent] for intent in verdict.intents if intent in state.key_tasks]
+        if not keys:
+            return await self._sender.send_text(text)
+        expires = local_day_bounds(state.now.date(), self._timezone)[1]
+        try:
+            message = key_message(text, keys, self._intentions, self._icons())
+            return await self._sender.deliver(KEY_KIND, message, expires)
+        except (MessageError, ValueError) as error:  # pydantic's `ValidationError` is one
+            logger.warning(
+                "key task message not built (%s): sent without buttons", type(error).__name__
+            )
+            return await self._sender.send_text(text)
 
     async def _hand_over(self, verdicts: tuple[Verdict, ...], state: DayState) -> dict[int, str]:
         """Call the hook for each `handover` verdict and mark it attended; return the failures

@@ -44,7 +44,7 @@ from jimic.channel.message import (
     Option,
     claim,
 )
-from jimic.channel.taps import Show
+from jimic.channel.taps import Answer, Followup, Show
 from jimic.memory.database import open_database
 
 NOW = datetime(2026, 11, 21, 19, 0, tzinfo=ZoneInfo("Europe/Madrid"))
@@ -1045,3 +1045,38 @@ def test_si_telegram_rechaza_la_propuesta_la_respuesta_del_agente_llega_igual(
     drive(application, text_update("hola"))
     texts = [params["text"] for params in request_double.params("sendMessage")]
     assert texts[-1] == "Te propongo esto"
+
+
+def test_un_toque_con_mensaje_de_respuesta_lo_envia_con_sus_botones(conn, clock, request_double):
+    """`Answer` con un `Followup` (tarea 1.15): el [Deshacer] de [Ya entrené] sale aparte."""
+
+    async def answers(item, option, approval_id):
+        return Answer("✅ hecho", Followup("undo", make_message(), EXPIRES, "¡Hecho! 💪"))
+
+    application = build_application(TOKEN, request_double)
+    channel = TelegramChannel(application, CHAT_ID, conn, clock, handlers={"demo": answers})
+    approval_id = send_and_drive(channel, application)
+    request_double.calls.clear()
+    drive(application, callback_update(f"{approval_id}:1:y", message_id=77))
+    assert request_double.methods() == ["editMessageText", "answerCallbackQuery", "sendMessage"]
+    (params,) = request_double.params("sendMessage")
+    assert "reply_markup" in params
+    kinds = conn.execute("SELECT kind FROM approvals ORDER BY id").fetchall()
+    assert kinds == [("demo",), ("undo",)]
+
+
+def test_si_el_mensaje_de_respuesta_no_cabe_sale_su_texto(conn, clock, request_double):
+    too_long = InteractiveMessage(
+        body="x" * 4090, items=(Item(title="t", options=(Option(key="u", label="u"),)),)
+    )
+
+    async def answers(item, option, approval_id):
+        return Answer("✅ hecho", Followup("undo", too_long, EXPIRES, "¡Hecho! 💪"))
+
+    application = build_application(TOKEN, request_double)
+    channel = TelegramChannel(application, CHAT_ID, conn, clock, handlers={"demo": answers})
+    approval_id = send_and_drive(channel, application)
+    request_double.calls.clear()
+    drive(application, callback_update(f"{approval_id}:1:y", message_id=77))
+    (params,) = request_double.params("sendMessage")
+    assert params["text"] == "¡Hecho! 💪" and "reply_markup" not in params

@@ -6,6 +6,10 @@ active intentions and what waits in the group window. Each source says whether i
 with its code (decision 1.7-c): a source that is down appears only as that, never as empty
 lists that would look like data.
 
+Each active key task carries what the code knows of it (`key_task`, task 1.15): done and by what
+source, no longer today's, «hoy no», the pause of [Voy ahora], from when it may insist, the level
+of the tone and its notices of today (`jimic.heartbeat.key_tasks`).
+
 The titles of tasks and events and the texts of the intentions go to the model; the `repr`
 hides them, so a log or a traceback never shows them.
 """
@@ -17,7 +21,9 @@ from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from jimic.heartbeat.key_tasks import KeyTaskStatus, key_task_status
 from jimic.heartbeat.limits import Quota, WaitingNotices, applies_on, cap_per_day
+from jimic.memory.key_marks import DayMarks
 from jimic.memory.notices import SentToday
 from jimic.memory.schemas import DailyPlan, DayClose, Intentions, KeyTask, Limits
 from jimic.tools.apex_schema import ApexSnapshot
@@ -66,6 +72,8 @@ class DayState(BaseModel):
     intentions: list[ActiveIntention]
     waiting: list[str]
     """The ids of the notices waiting in the group window (their text stays in the queue)."""
+    key_tasks: dict[str, KeyTaskStatus] = Field(default_factory=dict, repr=False)
+    """What the code knows of each active key task, by intention (task 1.15)."""
 
     def sources(self) -> dict[str, dict[str, Any]]:
         return {
@@ -99,12 +107,17 @@ class DayState(BaseModel):
             "sent_today": [entry.model_dump() for entry in self.sent_today],
             "messages_left": self.messages_left,
             "close_slot_kept": self.close_slot_kept,
-            "intentions": [
-                intention.model_dump(exclude_none=True) for intention in self.intentions
-            ],
+            "intentions": [self._intention(intention) for intention in self.intentions],
             "waiting": self.waiting,
         }
         return json.dumps(document, ensure_ascii=False, separators=(",", ":"))
+
+    def _intention(self, intention: ActiveIntention) -> dict[str, Any]:
+        entry = intention.model_dump(exclude_none=True)
+        status = self.key_tasks.get(intention.id)
+        if status is not None:
+            entry["key_task"] = status.to_json(self.now)
+        return entry
 
 
 def _hour(moment: datetime | time) -> str:
@@ -121,15 +134,38 @@ def build_day_state(
     intentions: Intentions,
     limits: Limits,
     queue: WaitingNotices,
+    *,
+    completed: TaskList | None = None,
+    marks: DayMarks | None = None,
+    jumped: frozenset[str] = frozenset(),
 ) -> DayState:
-    """The state of the day of `now`, in `timezone`."""
+    """The state of the day of `now`, in `timezone`. `completed` are the tasks completed today
+    (not read: unavailable), `marks` those of `key_task_marks` today and `jumped` the ids of the
+    tasks seen today that are now open on a later day (task 1.15)."""
     now = now.astimezone(timezone)
+    completed = completed if completed is not None else TaskList.unavailable("not_read")
+    marks = marks if marks is not None else DayMarks()
+    habits = {habit.id: habit for habit in intentions.habits}
+    key_tasks: dict[str, KeyTaskStatus] = {}
     quota = Quota.of(limits, intentions, sent)
     waiting = [item.intent for item in queue.items]
     active = []
     for intention in intentions.intentions:
         if not applies_on(intention, now.date()):
             continue
+        if isinstance(intention, KeyTask):
+            key_tasks[intention.id] = key_task_status(
+                now=now,
+                intention=intention,
+                habit=habits.get(intention.habit),
+                tasks=tasks,
+                completed=completed,
+                apex=apex,
+                marks=marks.of(intention.id),
+                jumped=jumped,
+                moved=marks.moved,
+                sent_today=sent.sent_count(intention.id),
+            )
         window = intention.window if isinstance(intention, DailyPlan | DayClose) else None
         if window is not None and window.start == window.end:
             window = None  # the whole day (decision 80, pending of task 1.7): no hint
@@ -166,4 +202,5 @@ def build_day_state(
         close_slot_kept=quota.close_slot_kept,
         intentions=active,
         waiting=waiting,
+        key_tasks=key_tasks,
     )

@@ -36,9 +36,11 @@ from jimic.tools.todoist import (
 LOGGER = "jimic.tools.todoist"
 NOW = madrid("2030-01-07 09:00")
 
-READ_MEMBERS = {"read_today", "read_project", "get_task", "get_photo"}
-WRITE_MEMBERS = {"create", "move", "complete", "delete", "recreate"}
-"""Las cuatro de la 1.5 y `recreate`, el /deshacer de un borrado (tarea 1.12)."""
+READ_MEMBERS = {"read_today", "read_project", "get_task", "get_photo", "read_completed_today"}
+"""`read_completed_today`, de la 1.15: el «hecho» de una tarea clave marcada en la app."""
+WRITE_MEMBERS = {"create", "move", "complete", "delete", "recreate", "reopen"}
+"""Las cuatro de la 1.5, `recreate` (el /deshacer de un borrado, 1.12) y `reopen` (el [Deshacer]
+de [Ya entrené], 1.15)."""
 
 
 def make_reader(api: FakeTodoistApi) -> ApiTodoistReader:
@@ -70,7 +72,7 @@ def test_el_lector_no_tiene_ninguna_funcion_que_escriba():
         assert public_members(cls) == READ_MEMBERS, cls
 
 
-def test_el_escritor_tiene_sus_cinco_funciones_y_ninguna_de_lectura():
+def test_el_escritor_tiene_sus_seis_funciones_y_ninguna_de_lectura():
     for cls in (TodoistWriter, ApiTodoistWriter, todoist.GuardedWriter):
         assert public_members(cls) == WRITE_MEMBERS, cls
 
@@ -438,7 +440,8 @@ def test_completar_cierra_la_tarea_y_borrar_la_borra():
     run(writer.delete("b"))
     assert api.calls_of("complete_task") == [{"task_id": "a"}]
     assert api.calls_of("delete_task") == [{"task_id": "b"}]
-    assert api.tasks == []
+    assert [raw["id"] for raw in api.tasks] == ["a"] and api.tasks[0]["checked"]
+    assert run(make_reader(api).read_project(TEST_PROJECT)).tasks == []
 
 
 @pytest.mark.parametrize("operation", ["move", "complete", "delete"])
@@ -659,3 +662,60 @@ def test_la_guardia_de_dev_niega_la_foto_de_otro_proyecto():
     with pytest.raises(ToolFailure) as caught:
         run(reader.get_photo("t1"))
     assert caught.value.code == "outside_test_project"
+
+
+# --- Completadas de hoy y reabrir (tarea 1.15) -------------------------------------------------
+
+
+def test_las_completadas_de_hoy_se_piden_desde_la_medianoche_local_hasta_ahora():
+    """Pilla un «desde» en UTC o en la medianoche equivocada: el día es el de Madrid."""
+    api = FakeTodoistApi([raw_task("a", "Gimnasio", due="2030-01-07")])
+    run(make_writer(api).complete("a"))
+    result = run(make_reader(api).read_completed_today())
+    assert result.available and ids(result) == ["a"]
+    (call,) = api.calls_of("get_completed_tasks_by_completion_date")
+    assert call["since"] == datetime(2030, 1, 6, 23, 0, tzinfo=UTC)
+    assert call["until"] == NOW
+
+
+def test_una_completada_antes_de_hoy_no_es_de_hoy():
+    api = FakeTodoistApi([raw_task("a", "Gimnasio", due="2030-01-06")])
+    api.completed_at = "2030-01-06T22:59:00.000000Z"  # las 23:59 de ayer en Madrid
+    run(make_writer(api).complete("a"))
+    assert ids(run(make_reader(api).read_completed_today())) == []
+
+
+def test_el_doble_imita_a_todoist_una_recurrente_completada_no_sale_en_las_completadas():
+    """Lo que vio el contrato del 23-nov-2026: pasa a mañana y no aparece entre las completadas."""
+    api = FakeTodoistApi([raw_task("r", "Gimnasio", due="2030-01-07T12:00:00", recurring=True)])
+    run(make_writer(api).complete("r"))
+    assert ids(run(make_reader(api).read_completed_today())) == []
+    task = run(make_reader(api).get_task("r"))
+    assert task is not None and task.due == datetime(2030, 1, 8, 12, tzinfo=MADRID)
+
+
+def test_si_fallan_las_completadas_la_lista_lo_dice_con_su_codigo_y_no_lanza():
+    api = FakeTodoistApi(error=http_status_error(503))
+    result = run(make_reader(api).read_completed_today())
+    assert not result.available and result.unavailable_reason == "http_503"
+
+
+def test_reabrir_devuelve_la_tarea_a_las_activas():
+    api = FakeTodoistApi([raw_task("a", due="2030-01-07")])
+    writer = make_writer(api)
+    run(writer.complete("a"))
+    run(writer.reopen("a"))
+    assert api.calls_of("uncomplete_task") == [{"task_id": "a"}]
+    assert ids(run(make_reader(api).read_today())) == ["a"]
+
+
+def test_si_la_api_dice_que_no_reabrio_es_un_error(monkeypatch):
+    api = FakeTodoistApi([raw_task("a", due="2030-01-07")])
+
+    async def refuse(task_id: str) -> bool:
+        return False
+
+    monkeypatch.setattr(api, "uncomplete_task", refuse)
+    with pytest.raises(ToolFailure) as caught:
+        run(make_writer(api).reopen("a"))
+    assert caught.value.code == "not_reopened"

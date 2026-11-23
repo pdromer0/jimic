@@ -107,7 +107,7 @@ def test_el_informe_tiene_sus_dos_ficheros_y_el_resumen_con_los_saltados(monkeyp
     assert run.md_path.name == "latido-20300120-1030.md"
     document = json.loads(run.json_path.read_text(encoding="utf-8"))
     assert len(document["scenarios"]) == 39
-    assert document["summary"]["skipped"] == [{"id": "e02", "pending": "1.15"}]
+    assert document["summary"]["skipped"] == [{"id": "e02", "pending": "1.15-b"}]
     # El doble siempre calla: aciertan los 19 de callar, l10 y l26 (callar es una de sus
     # alternativas, 1.9-k), y nadie habla de más.
     assert (document["summary"]["correct"], document["summary"]["passes"]) == (63, 117)
@@ -117,7 +117,7 @@ def test_el_informe_tiene_sus_dos_ficheros_y_el_resumen_con_los_saltados(monkeyp
     )
     assert "Acierto: 53,8 % (63/117) ❌" in run.screen
     assert "Habla cuando no debía: 0,0 % (0/57) ✅" in run.screen
-    assert "Saltados: 1: e02 (pendiente: 1.15)" in run.screen
+    assert "Saltados: 1: e02 (pendiente: 1.15-b)" in run.screen
     assert "l03 (0/3 bien): callar; callar; callar · esperado: {plan_del_dia}" in run.screen
     assert "Comparación: es el primer informe." in run.screen
     assert "Coste: 0,03744 $ en 117 llamadas (0,00032 $/llamada)" in run.screen

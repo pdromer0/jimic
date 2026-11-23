@@ -12,8 +12,10 @@ adelante, en una carpeta fuera del repositorio con el mismo formato.
 ## El latido
 
 `latido.yaml` tiene un día base (jueves 10-ene-2030) y 40 escenarios: 39 evaluables y el e02,
-pendiente de la tarea 1.15. Cada uno dice la hora, lo que cambia sobre el día base y los conjuntos
-de intenciones aceptables (`[]` es callar). El formato está en la cabecera del fichero.
+pendiente de la tarea 1.15-b. Cada uno dice la hora, lo que cambia sobre el día base y los
+conjuntos de intenciones aceptables (`[]` es callar). El formato está en la cabecera del fichero;
+desde la 1.15 admite lo que el código sabe de las tareas clave (`completed_today`, `key_marks` y
+`later_tasks`), y el gimnasio de la base es el hábito del entreno (`training: true`).
 
 ```bash
 JIMIC_ENTORNO=dev uv run jimic evaluar latido                    # todo, 3 pasadas

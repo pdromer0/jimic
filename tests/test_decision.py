@@ -6,6 +6,7 @@ red. Los textos y motivos son inventados y fáciles de buscar en un log.
 
 import asyncio
 import logging
+from datetime import date
 
 import anthropic
 import httpx2
@@ -41,8 +42,10 @@ from jimic.heartbeat.decide import (
     HaikuDecider,
     build_client,
     fixed_block,
+    prompt_template,
     usage_of,
 )
+from jimic.memory import key_marks
 from jimic.memory.database import open_database
 from jimic.memory.notices import record_handover
 from jimic.memory.usage import TokenUsage
@@ -257,7 +260,7 @@ def test_con_la_api_caida_lo_que_ya_salio_hoy_no_vuelve_a_salir(conn):
 
 def test_las_plantillas_tienen_su_texto_fijo(conn):
     """La tarea clave nombra su hábito; el aviso, su propósito."""
-    gym = down(conn, "2030-01-07T13:00").proposals
+    gym = down(conn, "2030-01-07T13:45").proposals
     assert [(p.intent, p.text) for p in gym] == [("insistir_gimnasio", "⏰ Toca Gimnasio")]
     offers = down(conn, "2030-01-07T16:30").proposals
     assert [p.text for p in offers] == ["⏰ Mirar las ofertas"]
@@ -286,7 +289,7 @@ def test_con_la_api_caida_el_cierre_sigue_sin_plantilla(conn):
 
 
 def test_dos_plantillas_en_el_mismo_tramo_van_las_dos(conn):
-    late_gym = {**GYM, "default_time": "16:35"}
+    late_gym = {**GYM, "default_time": "16:00"}  # se puede insistir desde las 16:45
     decision = down(
         conn,
         "2030-01-07T16:45",
@@ -294,6 +297,22 @@ def test_dos_plantillas_en_el_mismo_tramo_van_las_dos(conn):
     )
     assert decision.intent == "insistir_gimnasio,o2"
     assert len(decision.proposals) == 2
+
+
+@pytest.mark.parametrize(("now", "sent"), [("13:00", False), ("13:45", True), ("14:00", False)])
+def test_con_la_api_caida_la_tarea_clave_sale_en_el_tramo_de_su_margen(conn, now, sent):
+    """Tarea 1.15: sin tarea de hoy, 13:00 + 45 min = 13:45. Pilla la plantilla a su
+    `default_time`, que la segunda pasada frenaría siempre (`key_too_early`)."""
+    decision = down(conn, f"2030-01-07T{now}", (GYM,))
+    assert [p.intent for p in decision.proposals] == (["insistir_gimnasio"] if sent else [])
+
+
+def test_con_la_api_caida_una_tarea_clave_hecha_no_tiene_plantilla(conn):
+    """El botón [Ya entrené] la da por hecha: tampoco sale con la plantilla."""
+    key_marks.record(
+        conn, date(2030, 1, 7), "insistir_gimnasio", "done", madrid("2030-01-07T09:00")
+    )
+    assert down(conn, "2030-01-07T13:45", (GYM,)).proposals == ()
 
 
 def test_un_aviso_fuera_de_sus_dias_no_tiene_plantilla(conn):
@@ -368,3 +387,25 @@ def test_el_repr_de_la_decision_no_lleva_el_motivo(conn):
         conn, "2030-01-07T16:30", FakeMessages(api_message(answer(True, "ofertas", SECRET_TEXT)))
     )
     assert SECRET_REASON not in repr(decision) and SECRET_TEXT not in repr(decision)
+
+
+def test_el_prompt_del_latido_explica_los_campos_de_la_tarea_clave_y_el_tono():
+    """Tarea 1.15 (1.15-h): el único cambio de prompt del latido. Pilla un campo del estado que
+    el modelo no sabría leer o un nivel del tono sin describir."""
+    text = " ".join(prompt_template().split())
+    for field in ("done_by", "rescheduled", "not_today", "paused_until", "insist_from"):
+        assert f"`{field}`" in text
+    for level in ("1, amable", "2, más directo", "3, con un reto o con humor"):
+        assert level in text
+
+
+def test_con_la_api_caida_tras_una_pausa_que_tapa_su_tramo_sale_al_acabar_la_pausa(conn):
+    """Revisión propia: [Voy ahora] a las 13:30 (75 min) tapa el tramo de las 13:45; la
+    plantilla sale en el de las 14:45, cuando acaba la pausa."""
+    key_marks.record(
+        conn, date(2030, 1, 7), "insistir_gimnasio", "going", madrid("2030-01-07T13:30")
+    )
+    assert down(conn, "2030-01-07T13:45", (GYM,)).proposals == ()
+    assert [p.intent for p in down(conn, "2030-01-07T14:45", (GYM,)).proposals] == [
+        "insistir_gimnasio"
+    ]

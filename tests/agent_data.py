@@ -50,6 +50,9 @@ class SpyWriter:
     async def complete(self, *args: Any, **kwargs: Any) -> None:
         self._record("complete")
 
+    async def reopen(self, *args: Any, **kwargs: Any) -> None:
+        self._record("reopen")
+
     async def delete(self, *args: Any, **kwargs: Any) -> None:
         self._record("delete")
 

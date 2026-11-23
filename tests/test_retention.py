@@ -164,5 +164,35 @@ def test_una_base_vacia_se_purga_sin_error(conn):
         "day_ratings": 0,
         "day_plans": 0,
         "model_usage": 0,
+        "key_task_marks": 0,
+        "task_moves": 0,
         "conversations": 0,
     }
+
+
+def add_key_rows(conn: sqlite3.Connection, day: str) -> None:
+    moment = "2000-01-01T00:00:00+00:00"
+    conn.execute(
+        "INSERT INTO key_task_marks (day, intent, mark, marked_at) VALUES (?, 'x', 'done', ?)",
+        (day, moment),
+    )
+    conn.execute(
+        "INSERT INTO task_moves (day, todoist_task_id, moved_at) VALUES (?, 'tarea-falsa', ?)",
+        (day, moment),
+    )
+
+
+def test_las_marcas_de_las_tareas_clave_guardan_un_ano_y_los_movimientos_30_dias(conn):
+    """Pilla las dos retenciones de la 1.15 cambiadas o con `<=`, con días locales."""
+    now = datetime(2026, 11, 19, 0, 30, tzinfo=MADRID)  # en UTC aún es el 18
+    for day in ("2025-11-18", "2025-11-19", "2026-10-19", "2026-10-20"):
+        add_key_rows(conn, day)
+    deleted = purge(conn, FixedClock(now))
+    assert deleted["key_task_marks"] == 1
+    assert column_values(conn, "key_task_marks", "day") == [
+        "2025-11-19",
+        "2026-10-19",
+        "2026-10-20",
+    ]
+    assert deleted["task_moves"] == 3
+    assert column_values(conn, "task_moves", "day") == ["2026-10-20"]
