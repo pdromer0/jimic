@@ -54,6 +54,7 @@ from jimic.execution.plan_message import (
 )
 from jimic.memory import conversations
 from jimic.memory.onboarding import create_skeletons, progress
+from jimic.memory.personal import LIMITS_FILE
 
 logger = logging.getLogger(__name__)
 
@@ -167,7 +168,9 @@ class Assistant:
         notes = [turn.text]
         if run.memory_dropped:
             notes.append(DROPPED_TEXT)
-        manual = manual_note(run.manual)
+        # If the agent then offered a change of limites.yaml that holds, that is the answer.
+        offered = any(entry.get("file") == LIMITS_FILE for entry in run.memory)
+        manual = None if offered else manual_note(run.manual)
         if manual is not None:
             logger.info("manual change explained: %d", len(run.manual))
             notes.append(manual)

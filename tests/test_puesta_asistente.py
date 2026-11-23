@@ -577,3 +577,24 @@ def test_los_logs_no_llevan_contenido(conn, tmp_path, caplog):
     assert "onboarding: 3 skeleton(s) created" in caplog.text
     assert "memory proposal refused (relaxes)" in caplog.text
     assert "memory proposal refused (apex_copy)" in caplog.text
+
+
+# --- De la revisión propia ----------------------------------------------------------------------
+
+
+def test_sin_nota_a_mano_si_el_agente_corrige_y_se_ofrece_un_cambio_de_limites(conn, tmp_path):
+    agent = FakeAgent(
+        [result_message("Vamos")],
+        [
+            ToolCall("propose_change", quiet("00:00", "06:00")),
+            ToolCall("propose_change", quiet("22:00", "08:00")),
+            result_message("Te propongo más silencio"),
+        ],
+    )
+    w = OnboardingWorld(conn, tmp_path, agent)
+    w.say(COMMAND)
+
+    reply = w.say("Silencio por la noche")
+
+    assert [o.is_error for o in agent.tool_outcomes] == [True, False]
+    assert isinstance(reply, Reply) and reply.text == "Te propongo más silencio"
