@@ -408,8 +408,12 @@ def test_el_prompt_explica_cada_motivo_de_lo_que_toca_y_no_habla_de_horas():
     """Tarea 1.15-b: un código de `why` sin explicar sería un dato que Haiku no sabe leer; y el
     prompt ya no le pide comparar ventanas ni `insist_from`."""
     text = prompt_template()
+    # `too_soon` (decisión 149) llegó en la ronda de ajustes del PR #55, en la que Pedro pidió no
+    # tocar el prompt: va siempre con `due_now: false`, que el prompt ya dice que no se elige.
+    # Se explica la próxima vez que cambie el prompt.
+    unexplained = {"too_soon"}
     for code in get_args(DueWhy.__value__):
-        assert f"`{code}`" in text, code
+        assert (f"`{code}`" in text) != (code in unexplained), code
     for field in ("insist_from", "`window`", "default_time"):
         assert field not in text
 

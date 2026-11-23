@@ -391,3 +391,44 @@ def test_con_limites_roto_a_mano_se_dice_que_lo_arregle_pedro(config_dir):
     with pytest.raises(ChangeRefused) as raised:
         changes.check(config_dir, quiet("08:00"))
     assert "Pedro tiene que arreglarlo a mano" in raised.value.for_agent
+
+
+# --- El `spacing` de las tareas clave (decisión 149) --------------------------------------------
+
+KEY_INTENTIONS = """\
+intentions:
+  - id: insistir_lectura
+    type: key_task
+    purpose: "Que no se me pase"
+    habit: lectura
+    grace: 45m
+    spacing: 1h
+    max_per_day: 3
+    default_time: "21:00"
+    priority: medium
+habits:
+  - id: lectura
+    name: "Lectura"
+    priority: medium
+    duration: 20m
+    moment: evening
+    todoist_task: "Leer"
+"""
+
+
+def test_bajar_el_spacing_conversando_se_rechaza_y_subirlo_se_ofrece(config_dir):
+    (config_dir / "intenciones.yaml").write_text(KEY_INTENTIONS, encoding="utf-8")
+    changes.check(config_dir, replace("intenciones.yaml", "spacing: 1h", "spacing: 2h"))
+    with pytest.raises(ChangeRefused) as raised:
+        changes.check(config_dir, replace("intenciones.yaml", "spacing: 1h", "spacing: 15m"))
+    assert raised.value.code == "relaxes"
+    assert raised.value.relaxed == ("insistir_lectura.spacing",)
+    assert "a mano" in raised.value.for_agent
+
+
+def test_con_intenciones_invalidas_ahora_no_hay_spacing_con_que_comparar(config_dir):
+    """Un cambio puede ser el que arregla el fichero: sin valores de ahora, solo el esquema."""
+    broken = KEY_INTENTIONS.replace("priority: medium\nhabits:", "priority: alta\nhabits:")
+    (config_dir / "intenciones.yaml").write_text(broken, encoding="utf-8")
+    fixed = replace("intenciones.yaml", "priority: alta\nhabits:", "priority: medium\nhabits:")
+    changes.check(config_dir, fixed)

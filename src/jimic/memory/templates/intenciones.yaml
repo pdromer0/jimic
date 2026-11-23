@@ -31,6 +31,7 @@ habits: []                                  # tus hábitos; los rellena la puest
 #     purpose: "Que no se me pase la lectura"
 #     habit: lectura                        # id del hábito; su tarea de Todoist es la suya
 #     grace: 45m                            # margen tras la hora prevista
+#     spacing: 1h                           # opcional: mínimo entre dos avisos (sin él, grace)
 #     max_per_day: 3                        # avisos al día
 #     default_time: "21:00"                 # la hora si falla la decisión del modelo
 #     priority: medium                      # high, medium o low

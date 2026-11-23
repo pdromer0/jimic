@@ -265,3 +265,47 @@ def test_el_modelo_no_recibe_horas_que_comparar(conn):
         "insistir_gimnasio": (False, "too_early"),
         "regar": (False, "before_time"),
     }
+
+
+# --- El espacio entre avisos de una tarea clave (decisión 149) ----------------------------------
+# Sin tarea de hoy en Todoist, el gimnasio puede insistir desde las 13:45 (13:00 + 45 de margen).
+
+
+def gym_after_notice(conn, now: str, **changes: Any) -> tuple[bool, str]:
+    add_notice(conn, "insistir_gimnasio", madrid("2030-01-10T13:45"), 1)
+    its = intentions({**GYM, **changes}, habits=[HABIT])
+    (item,) = day_state(conn, madrid(f"2030-01-10T{now}"), its).intentions
+    return item.due_now, item.why
+
+
+def test_15_minutos_tras_un_aviso_la_tarea_clave_no_toca(conn):
+    """Versión incorrecta 8: el espacio cuenta desde el último aviso (13:45), no desde la hora
+    de la tarea; desde ella (13:00 + 45) ya tocaría a las 14:00."""
+    assert gym_after_notice(conn, "14:00") == (False, "too_soon")
+
+
+def test_sin_spacing_vale_su_grace(conn):
+    assert gym_after_notice(conn, "14:29") == (False, "too_soon")
+    assert gym_after_notice(conn, "14:30") == (True, "can_insist")
+
+
+def test_a_su_spacing_vuelve_a_tocar(conn):
+    assert gym_after_notice(conn, "14:44", spacing="1h") == (False, "too_soon")
+    assert gym_after_notice(conn, "14:45", spacing="1h") == (True, "can_insist")
+
+
+def test_el_spacing_no_toca_el_primer_aviso(conn):
+    """Sin avisos hoy, solo manda el margen (13:45)."""
+    its = intentions({**GYM, "spacing": "2h"}, habits=[HABIT])
+    (item,) = day_state(conn, madrid("2030-01-10T13:45"), its).intentions
+    assert (item.due_now, item.why) == (True, "can_insist")
+
+
+def test_el_tope_va_antes_que_el_espacio(conn):
+    """Tres avisos (13:45, 14:00 y 14:15): a las 14:20 dice el tope, no `too_soon`."""
+    for number, hour in enumerate(("13:45", "14:00", "14:15")):
+        add_notice(conn, "insistir_gimnasio", madrid(f"2030-01-10T{hour}"), number + 1)
+    (item,) = day_state(
+        conn, madrid("2030-01-10T14:20"), intentions(GYM, habits=[HABIT])
+    ).intentions
+    assert (item.due_now, item.why) == (False, "insist_cap")

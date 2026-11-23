@@ -7,9 +7,10 @@ applies decides:
 - **Not due:** a key task that is done, no longer today's, «hoy no», paused or before it may
   insist (`KeyTaskStatus.refusal`, without its `key_`); one that waits in the group window
   (`waiting`); one that may not go out again today (`insist_cap` for a key task, `sent_today` for
-  the rest); the plan or the close before their window (`before_window`), a notice before its
-  time (`before_time`); and anything but the close without a free message (`no_room`). The close
-  has the slot kept for it (decision 78), so it is due while it fits.
+  the rest); a key task less than its `spacing` (or `grace`) after its last notice of today
+  (`too_soon`, decision 149); the plan or the close before their window (`before_window`), a
+  notice before its time (`before_time`); and anything but the close without a free message
+  (`no_room`). The close has the slot kept for it (decision 78), so it is due while it fits.
 - **Due:** the plan or the close in their window (`in_window`) or after it without having gone
   out (`late`, as `late_after` says: the same late plan as the plan's runner; without a window,
   from its default time); a notice in its
@@ -37,6 +38,7 @@ type DueWhy = Literal[
     "not_today",
     "paused",
     "too_early",
+    "too_soon",
     "waiting",
     "insist_cap",
     "sent_today",
@@ -123,6 +125,8 @@ def due_now(
         due = _window_due(intention, now)
     elif isinstance(intention, Notice):
         due = _notice_due(intention, now)
+    elif key is not None and key.next_from is not None and now < key.next_from:
+        due = Due(False, "too_soon")
     else:
         due = Due(True, "can_insist")
     if not due.due:

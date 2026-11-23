@@ -508,8 +508,9 @@ prioridad diaria (por ejemplo, «revisar ofertas») entra también desde el H1: 
      («olvida que…») quita `before`.
   2. El **código valida** el fichero resultante, sin escribirlo: en `intenciones.yaml` y
      `limites.yaml`, el esquema (solo plantillas que existen); en los Markdown, su estructura (7.2);
-     en la zona protegida (`limites.yaml`), además, la regla asimétrica (decisión 11, tabla de
-     abajo): si el cambio relaja un límite, lo rechaza y explica que eso se edita a mano. Si Pedro
+     en la zona protegida (`limites.yaml`) y en el `spacing` de las tareas clave (decisión 149),
+     además, la regla asimétrica (decisión 11, tabla de abajo): si el cambio relaja un límite, lo
+     rechaza y explica que eso se edita a mano. Si Pedro
      pide algo que el código no sabe hacer, JimiC se lo dice y propone apuntarlo en `ideas.md`
      (`log_idea`, con [📝 Apuntar]).
   3. El código enseña el fichero y el antes y el después exactos, escapados y sin recortar (lo que
@@ -534,6 +535,7 @@ prioridad diaria (por ejemplo, «revisar ofertas») entra también desde el H1: 
 | `budget.*` (los cuatro) | Baja |
 | `tool_levels` | Solo de `free` a `blocked` (la que falta cuenta como `blocked`) |
 | `sensitive_categories` | Se rechaza cualquier cambio (llega en el H4) |
+| `intenciones.yaml`: el `spacing` de cada tarea clave (sin él, su `grace`) | Sube (decisión 149): se compara el espacio que aplica el código, así que bajar el `grace` de una sin `spacing` también se rechaza |
 
 Un cambio que solo toca comentarios o formato de `limites.yaml`, sin mover ningún valor, también
 se rechaza.
@@ -886,7 +888,7 @@ en `~/.config/jimic/`, puede leerlos y editarlos, pero no publicar nada ni leer 
 | `rutina.md` | El modelo | Markdown con secciones fijas: horario base, comidas, jornada, fines de semana | Pedro, a mano o conversando |
 | `objetivos.md` | El modelo y el código (para medir) | Markdown: una sección por área con su meta y prioridad; una línea por objetivo `[medible]`, `[declarado]` o `[enlazado]` (1.5) | Pedro, a mano o conversando |
 | `preferencias.md` | El modelo | Lista de frases cortas y la tabla de iconos de las tareas habituales (decisión 59) | Pedro, a mano o conversando |
-| `intenciones.yaml` | El código, y el modelo en su prompt (decisión 104) | YAML con esquema; incluye la sección `habits`, la lista de hábitos (decisión 66) | Pedro, a mano o conversando, con validación |
+| `intenciones.yaml` | El código, y el modelo en su prompt (decisión 104) | YAML con esquema; incluye la sección `habits`, la lista de hábitos (decisión 66) | Pedro, a mano o conversando, con validación; el `spacing` de una tarea clave, conversando solo sube (decisión 149) |
 | `limites.yaml` | El código, y el modelo en su prompt (decisión 104) | YAML con esquema; **zona protegida** | Pedro a mano; conversando, solo más discreto (decisión 11) |
 | `ideas.md` | Pedro | Lista con fecha | JimiC, con el [📝 Apuntar] de Pedro (decisión 103) |
 
@@ -934,6 +936,7 @@ intentions:
     purpose: "Que no se me pase el entreno"
     habit: gimnasio               # id del hábito; su tarea de Todoist es la suya
     grace: 45m                    # margen tras la hora prevista
+    spacing: 1h                   # opcional: mínimo entre dos avisos; sin él, grace (149)
     max_per_day: 3
     default_time: "13:30"
     priority: high

@@ -10,7 +10,8 @@ A symbolic link is refused: writing through it would write outside the config ro
 
 `check` applies the change to the text as it is **now** and validates the result: the schema of
 task 1.3 for a YAML file (loaded with `ruamel.yaml`), the Markdown checks of task 1.3, and for
-`limites.yaml` the asymmetric rule against the current values (`discreet.py`). The text written
+`limites.yaml`, and for the `spacing` of the key tasks of `intenciones.yaml`, the asymmetric rule
+against the current values (`discreet.py`). The text written
 is the patched text, never a dump: outside the fragment the file stays byte for byte.
 
 `save` checks again and writes atomically (0600), with a row in `changes`: the exact patch, the
@@ -33,9 +34,10 @@ from typing import Literal
 from jimic.clock import Clock, to_db
 from jimic.files import write_private
 from jimic.memory.database import transaction
-from jimic.memory.discreet import judge
+from jimic.memory.discreet import judge, relaxed_spacing
 from jimic.memory.edits import EditError, Operation, Patch, patch_for
 from jimic.memory.personal import (
+    INTENTIONS_FILE,
     LIMITS_FILE,
     MARKDOWN_CHECKS,
     YAML_SCHEMAS,
@@ -43,7 +45,7 @@ from jimic.memory.personal import (
     validate_yaml,
 )
 from jimic.memory.problems import Problem
-from jimic.memory.schemas import Limits
+from jimic.memory.schemas import Intentions, Limits
 from jimic.memory.yaml_io import YamlSyntaxError, parse_yaml
 
 logger = logging.getLogger(__name__)
@@ -157,6 +159,18 @@ def _limits(text: str) -> Limits | None:
     return Limits.model_validate(doc)
 
 
+def _intentions(text: str) -> Intentions | None:
+    """The intentions of the file as it is now, or `None` if it does not validate: a change may
+    be the one that fixes it, so then there is no `spacing` to compare with."""
+    try:
+        doc = parse_yaml(text.removeprefix(BOM))
+    except YamlSyntaxError:
+        return None
+    if validate_yaml(INTENTIONS_FILE, doc):
+        return None
+    return Intentions.model_validate(doc)
+
+
 def validate(name: str, old_text: str, new_text: str) -> None:
     """Raise `ChangeRefused` unless `new_text` is a valid `name` that `old_text` may become
     conversing (the asymmetric rule for `limites.yaml`)."""
@@ -176,6 +190,22 @@ def validate(name: str, old_text: str, new_text: str) -> None:
     problems = validate_yaml(name, _yaml_doc(name, new_text))
     if problems:
         raise _invalid(name, problems)
+    if name == INTENTIONS_FILE:
+        before = _intentions(old_text)
+        relaxed = (
+            ()
+            if before is None
+            else relaxed_spacing(before, Intentions.model_validate(_yaml_doc(name, new_text)))
+        )
+        if relaxed:
+            raise ChangeRefused(
+                "relaxes",
+                f"Eso baja el espacio entre avisos ({', '.join(relaxed)}) en intenciones.yaml:"
+                " conversando solo puedo hacer a JimiC más discreto. Si Pedro lo quiere, lo edita"
+                " él a mano.",
+                relaxed,
+            )
+        return
     if old is None:
         return
     new = Limits.model_validate(_yaml_doc(name, new_text))

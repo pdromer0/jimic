@@ -121,6 +121,14 @@ class KeyTask(_Intention):
     habit: Id
     grace: Duration
     max_per_day: Count
+    spacing: PositiveDuration | None = None
+    """The least time between two of its notices (decision 149, task 1.15-b); without it, its
+    `grace`. Talking, it may only go up (`discreet.py`)."""
+
+    @property
+    def gap(self) -> timedelta:
+        """`spacing`, or `grace` without it: what the code waits after its last notice."""
+        return self.spacing if self.spacing is not None else self.grace
 
 
 class Notice(_Intention):

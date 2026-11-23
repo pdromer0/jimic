@@ -541,6 +541,18 @@ def test_con_la_api_caida_el_plan_b_no_mira_lo_que_toca(conn):
     assert world.handed == ["plan_del_dia"]
 
 
+def test_la_insistencia_demasiado_pronto_la_frena_la_segunda_pasada(conn):
+    """Decisión 149: 15 minutos tras su aviso, la tarea clave no toca (`too_soon`) y lo que elija
+    Haiku se para con `not_due`; a los 45 de su `grace`, sale."""
+    add_notice(conn, "insistir_gimnasio", madrid("2030-01-07T15:00"), 1)
+    world = World(conn, FakeMessages(api_message(answer(True, "insistir_gimnasio", "Otra"))))
+    world.at("2030-01-07T15:15")
+    assert world.sender.texts == []
+    assert world.reasons()[0].endswith("[block not_due]")
+    world.at("2030-01-07T15:45")
+    assert world.sender.texts == ["Otra"]
+
+
 def test_un_lote_de_cuatro_no_sale(conn):
     four = [("ofertas", "a"), ("regar", "b"), ("basura", "c"), ("insistir_gimnasio", "d")]
     world = World(conn, FakeMessages(api_message(picks(*four))))

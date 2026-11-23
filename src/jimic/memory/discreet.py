@@ -1,4 +1,4 @@
-"""The asymmetric rule of `limites.yaml` (decision 11): talking, JimiC only gets more discreet.
+"""The asymmetric rule (decision 11): talking, JimiC only gets more discreet.
 
 The old and the new `Limits`, both valid, are compared field by field. A change is accepted only
 if some value moves and every value that moves goes the discreet way:
@@ -12,6 +12,11 @@ if some value moves and every value that moves goes the discreet way:
 | `budget.*` (the four) | Down |
 | `tool_levels` | Only from `free` to `blocked` |
 | `sensitive_categories` | Any change is refused (it comes in hito 4) |
+| `intenciones.yaml`: the `spacing` of each key task (its `grace` without it) | Up |
+
+In `intenciones.yaml` only `spacing` is protected (decision 149, task 1.15-b): what is compared is
+the gap the code applies (`KeyTask.gap`), so lowering `grace` of a key task without `spacing`
+also lowers it and is refused too. A key task that is new, or removed, has nothing to compare.
 
 A window is the set of minutes `[from, to)` of the day, crossing midnight when `from > to`;
 `from == to` is the whole day (decision 80). A tool missing from `tool_levels` counts as
@@ -21,7 +26,7 @@ A window is the set of minutes `[from, to)` of the day, crossing midnight when `
 from dataclasses import dataclass
 from datetime import time
 
-from jimic.memory.schemas import TOOL_NAMES, Limits, Window, is_free
+from jimic.memory.schemas import TOOL_NAMES, Intentions, KeyTask, Limits, Window, is_free
 
 MINUTES_PER_DAY = 24 * 60
 
@@ -148,3 +153,13 @@ def judge(old: Limits, new: Limits) -> Verdict:
             if now:
                 relaxed.append(f"tool_levels.{tool}")
     return Verdict(tuple(changed), tuple(relaxed))
+
+
+def relaxed_spacing(old: Intentions, new: Intentions) -> tuple[str, ...]:
+    """The key tasks, by id, whose gap between notices goes down: `<id>.spacing`."""
+    before = {i.id: i.gap for i in old.intentions if isinstance(i, KeyTask)}
+    return tuple(
+        f"{i.id}.spacing"
+        for i in new.intentions
+        if isinstance(i, KeyTask) and i.id in before and i.gap < before[i.id]
+    )

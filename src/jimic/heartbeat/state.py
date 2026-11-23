@@ -190,6 +190,7 @@ def build_day_state(
                 jumped=jumped,
                 moved=marks.moved,
                 sent_today=sent.sent_count(intention.id),
+                last_sent_at=sent.last_sent_of(intention.id),
             )
         left_today = max(
             0,
