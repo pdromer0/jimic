@@ -260,6 +260,29 @@ def test_una_ejecucion_cortada_por_su_tope_tambien_cuenta_sus_tokens(conn, tmp_p
     assert world.usage_rows()[0][-1] == pytest.approx(0.00602)
 
 
+def test_seis_rechazos_de_la_api_sin_tokens_cuentan_cero_y_a_la_septima_el_agente_contesta(
+    conn, tmp_path
+):
+    """Decisión F-c: la API rechaza la ejecución (`agent:api:503`) y no trae tokens: la fila vale
+    0 $, para que se vea. Seis seguidas a 0,50 $ (el tope de la ejecución) sumarían los 3 $ del
+    tope diario y la séptima ni llegaría al agente."""
+    down = [result_message(None, is_error=True, api_status=503, usage={})]
+    world = World(conn, tmp_path, FakeAgent(*[down] * 6, [result_message()]))
+    for _ in range(6):
+        assert world.say() == API_DOWN_TEXT
+    assert [row[-1] for row in world.usage_rows()] == [0.0] * 6
+    assert world.say() == AGENT_ANSWER
+    assert len(world.agent.runs) == 7
+
+
+def test_un_fallo_de_proceso_sin_tokens_sigue_contando_el_tope_de_la_ejecucion(conn, tmp_path):
+    """Solo la API que rechaza cuenta 0: el proceso que muere pudo gastar. Pilla contar 0 en
+    cualquier fallo sin tokens."""
+    world = World(conn, tmp_path, FakeAgent([SystemMessage("init", {}), ProcessError("x", 1)]))
+    world.say()
+    assert [row[-1] for row in world.usage_rows()] == [0.5]
+
+
 def test_con_el_gasto_real_bajo_el_tope_diario_el_agente_contesta_aunque_los_acumulados_lo_pasen(
     conn, tmp_path
 ):

@@ -340,7 +340,10 @@ class Conversation:
             # run may spend: the discreet count.
             tokens = outcome.usage or TokenUsage(0, 0)
             usd = Decimal(str(self._active_limits.budget.max_session_usd))
-            if tokens != TokenUsage(0, 0):
+            if tokens == TokenUsage(0, 0) and outcome.code.startswith("agent:api:"):
+                # The API refused the run and billed nothing: its row says so (decision 133).
+                usd = Decimal(0)
+            elif tokens != TokenUsage(0, 0):
                 try:
                     usd = usage.cost(self._settings.agent_model, tokens)
                 except usage.UnpricedError:
