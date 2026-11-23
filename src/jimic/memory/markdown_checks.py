@@ -127,20 +127,30 @@ def check_objectives(text: str) -> list[Problem]:
     return problems
 
 
+def _table_lines(text: str, start: int) -> list[tuple[int, str]]:
+    """The lines of tables of the section that starts at line `start`, separators included."""
+    lines = []
+    for number, line in _lines(text):
+        if number <= start:
+            continue
+        heading = HEADING.fullmatch(line)
+        if heading and len(heading[1]) <= 2:
+            break
+        if TABLE_ROW.fullmatch(line):
+            lines.append((number, line))
+    return lines
+
+
 def check_preferences(text: str) -> list[Problem]:
     starts = [number for number, title in _sections(text) if title == ICONS_SECTION]
     if not starts:
         return [Problem(None, f"falta la sección «{ICONS_SECTION}»")]
     problems = [Problem(n, f"la sección «{ICONS_SECTION}» está repetida") for n in starts[1:]]
-    rows = []
-    for number, line in _lines(text):
-        if number <= starts[0]:
-            continue
-        heading = HEADING.fullmatch(line)
-        if heading and len(heading[1]) <= 2:
-            break
-        if TABLE_ROW.fullmatch(line) and not SEPARATOR_ROW.fullmatch(line):
-            rows.append((number, line))
+    rows = [
+        (number, line)
+        for number, line in _table_lines(text, starts[0])
+        if not SEPARATOR_ROW.fullmatch(line)
+    ]
     if not rows:
         problems.append(Problem(starts[0], f"la sección «{ICONS_SECTION}» no tiene tabla"))
     for number, line in rows:
