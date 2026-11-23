@@ -2595,7 +2595,7 @@ Commits:
   toques (1055315, 6a9b699, b3e9261);
 - `feat(demo)`: el plan en `jimic telegram demo` (db1c7d6);
 - `refactor(evals)` y `feat(evals)`: `jimic evaluar plan` (d514dc3, fcda6c3);
-- `docs(diseno)`: las decisiones 118 a 128 (6795f3f);
+- `docs(diseno)`: las decisiones 118 a 128 (6795f3f); 129 y 130, en los ajustes de la revisión;
 - las correcciones de la revisión propia: `fix(latido)` (03eea0d), `fix(plan)` (498ea2e, cba0080,
   15e005b, 5e668e7), `fix(canal)` (a327780), `fix(ejecución)` (6ec47ef) y `refactor(plan)`
   (b02196d).
@@ -2652,6 +2652,18 @@ PR con esta medida y ajustar el prompt (reglas generales) como tarea aparte. El 
 pintado de cada pasada está en la copia `dev` (`plan-20261123-1443.md`); el agente no tiene permiso
 para leer esa carpeta, así que los mensajes pintados los añade Pedro.
 
+**Segunda medida** (23-nov-2026, 17:09, tras las reglas generales de la decisión 129; mismo
+`evals/plan.yaml` y mismo catálogo): **90 % (27/30)** ❌, en 0,92 $ (39 ejecuciones, 0,023 $ cada
+una), 3 minutos. Frente a la primera, sobre los 10 comunes, 90 % → 90 %, pero con otros fallos:
+- **p03** pasa de 1/3 a **3/3**: las atrasadas que duplican se borran y la del hábito se mueve.
+- **p04** baja de 2/3 a **1/3**: en dos pasadas falta el hábito «ofertas» (`includes_habit`). Es de
+  prioridad alta, su `moment` es la tarde y la tarde está entera ocupada, pero hay hueco de 11:15
+  a 15:00. Hipótesis, sin leer el informe: el agente aplica a la alta el «en su momento del día»
+  de la media y, con la regla nueva de «si no cabe en ningún hueco, a `left_out`», lo deja fuera.
+- **p05** baja de 3/3 a **2/3**: en una pasada, tras «pasa la revisión de ofertas a las 14:30»,
+  no crea «Revisar ofertas» de 14:30 a 15:00 (comprobación de después).
+Informe: `plan-20261123-1709.md` en la copia `dev`.
+
 **Versiones incorrectas** (aplicadas y deshechas; el árbol quedó limpio). Predicción frente a lo
 observado:
 
@@ -2693,17 +2705,34 @@ Cada corrección lleva su test, y se comprobó que ese test falla con el código
 tras la 1.9); pre-commit 0:11, pytest 1:46 y gitleaks de la historia 0:01. Está cerca de los 2
 minutos del disparador del módulo `xdist`.
 
+**Ajustes de la revisión** (Pedro, en el PR #50; paso 1 de 2):
+- **El contexto de [✏️]** (95d25d3, decisión 130): el código recuerda el último [✏️ Cámbialo] o
+  [✏️ Cambiar] que tocó Pedro, con la etiqueta de la nota de la reanudación, y su siguiente mensaje
+  de ese día que llega al agente lleva delante `(JimiC) Pedro tocó ✏️ en: …`. Se usa una vez y se
+  olvida, también al cambiar de día o si otro toque cierra ese mensaje (el [✏️] que cierra, no).
+  `EditContext` envuelve los manejadores `plan` y `memory`; el cierre lo avisa `on_closed`. Vive
+  en la memoria del servicio: un reinicio lo olvida. Un comando o un «sí» escrito no llegan al
+  agente y no lo gastan. La línea no entra en el origen. Seis tests nuevos en
+  `test_reanudacion.py`, y el de la conexión del `runtime` comprueba que el [✏️] del canal se
+  recuerda.
+  - Versión incorrecta (la línea entra en el origen): predicción, rojo «la línea no entra en el
+    origen» y verdes los demás; observado, como se predijo.
+- **Las reglas generales del plan** (cba69b3, decisión 129), en `agent/plan.md`, sin escenarios:
+  atrasadas (solo se borra la que duplica; la que no, se mueve), huecos (de inicio a fin, contra
+  eventos y tareas con hora; la alta que no cabe, a `left_out`) y prioridad media (hueco libre
+  para su duración en su `moment`). La segunda medida, arriba.
+- Paso 2, pendiente: un conjunto de reserva de 3 escenarios que pasa Pedro.
+
 **Pendiente.**
-- **El prompt del plan** (p03 y p04 de la primera medida): Pedro decide en el chat el ajuste, con
-  reglas generales y no por escenario, como la 1.15 con el latido.
+- **El prompt del plan** (p04 y p05 de la segunda medida): lo decide Pedro, con reglas generales y
+  no por escenario. La hipótesis de p04 apunta a dejar claro que «su momento del día» es solo de
+  la prioridad media; la alta cabe en cualquier hueco libre de hoy.
 - **El plan confirmado** (`day_plans` y `plan_items`, CU-01 paso 6): con el cierre, en la 1.16.
-- **El contexto de [✏️ Cámbialo]:** la respuesta de Pedro llega al agente sin decirle qué
-  elemento tocó; si molesta en el uso, una nota del código como la de la reanudación.
 - **Un hábito ya marcado hoy** no está entre las tareas abiertas y el plan mínimo lo volvería a
   proponer (raro: el plan sale a primera hora).
 - **El modelo juez** con rúbrica (13.3 y decisión 35): idea de Pedro; se revisa en el cierre del
   hito (1.17).
-- **Los mensajes pintados** de la primera medida y la captura del móvil: los añade Pedro.
+- **Los mensajes pintados** de las dos medidas y la captura del móvil: los añade Pedro.
 
 **Pruebas contra servicios reales:** solo la API de Anthropic con la clave de `jimic-dev` (la medida
 de arriba). Todo inventado; no toca Todoist, Calendar ni Telegram: no hay restos que comprobar.
