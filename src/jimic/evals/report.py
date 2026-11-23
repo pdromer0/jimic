@@ -474,10 +474,10 @@ def markdown(screen: str, results: Sequence[ScenarioResult], started: datetime) 
 
 
 def write_report(
-    folder: Path, started: datetime, report: dict[str, Any], text: str
+    folder: Path, started: datetime, report: dict[str, Any], text: str, prefix: str = PREFIX
 ) -> tuple[Path, Path]:
     folder.mkdir(mode=0o700, parents=True, exist_ok=True)
-    json_path, md_path = report_paths(folder, started)
+    json_path, md_path = report_paths(folder, started, prefix)
     json_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     md_path.write_text(text, encoding="utf-8")
     return json_path, md_path

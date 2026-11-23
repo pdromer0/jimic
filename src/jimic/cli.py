@@ -39,7 +39,7 @@ SETUP_ERRORS = (
     sqlite3.Error,
     OSError,
 )
-"""What `jimic run`, `jimic telegram demo` and `jimic evaluar latido` turn into a message and
+"""What `jimic run`, `jimic telegram demo` and `jimic evaluar` turn into a message and
 `SETUP_ERROR`."""
 
 CHECK_FAILED = 1
@@ -75,6 +75,15 @@ def build_parser() -> argparse.ArgumentParser:
         "--escenario", action="append", dest="scenarios", metavar="ID", help="solo este (repetible)"
     )
     heartbeat.add_argument(
+        "--pasadas", type=int, default=evals.DEFAULT_PASSES, dest="passes", help="por escenario"
+    )
+    plan = evaluate_commands.add_parser(
+        "plan", help="los escenarios de evals/plan.yaml con el agente real (cuesta dinero)"
+    )
+    plan.add_argument(
+        "--escenario", action="append", dest="scenarios", metavar="ID", help="solo este (repetible)"
+    )
+    plan.add_argument(
         "--pasadas", type=int, default=evals.DEFAULT_PASSES, dest="passes", help="por escenario"
     )
     return parser
@@ -135,8 +144,9 @@ def main(argv: list[str] | None = None) -> int:
     elif args.command == "google":
         return google_command()
     elif args.command == "evaluar":
+        evaluate = evals.run_plan if args.eval_command == "plan" else evals.run
         return setup_errors_as_exit(
-            lambda: print(evals.run(os.environ, args.scenarios, args.passes).text)
+            lambda: print(evaluate(os.environ, args.scenarios, args.passes).text)
         )
     elif args.command == "telegram":
         return setup_errors_as_exit(lambda: demo.run(os.environ))
