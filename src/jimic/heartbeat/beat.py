@@ -24,7 +24,7 @@ from typing import Protocol
 from zoneinfo import ZoneInfo
 
 from jimic.channel.bot import SendError
-from jimic.channel.message import InteractiveMessage, MessageTooLong
+from jimic.channel.message import InteractiveMessage, MessageError
 from jimic.clock import Clock, local_day_bounds, to_db
 from jimic.heartbeat.cycle import CycleResult, Decision, run_cycle
 from jimic.heartbeat.key_message import KEY_KIND, key_message
@@ -274,18 +274,20 @@ class Heartbeat:
 
     async def _send_one(self, verdict: Verdict, state: DayState) -> int:
         """Plain text, or, with a key task, a message with its buttons until the end of the day
-        (decision 1.15-c). One that cannot fit goes as plain text: the buttons are lost, the
-        notice is not."""
+        (decision 1.15-c). One that cannot be built or fit goes as plain text: the buttons are
+        lost, the notice is not."""
         text = SEPARATOR.join(item.text for item in verdict.items)
         keys = [state.key_tasks[intent] for intent in verdict.intents if intent in state.key_tasks]
         if not keys:
             return await self._sender.send_text(text)
-        message = key_message(text, keys, self._intentions, self._icons())
         expires = local_day_bounds(state.now.date(), self._timezone)[1]
         try:
+            message = key_message(text, keys, self._intentions, self._icons())
             return await self._sender.deliver(KEY_KIND, message, expires)
-        except MessageTooLong:
-            logger.warning("key task message too long: sent without buttons")
+        except (MessageError, ValueError) as error:  # pydantic's `ValidationError` is one
+            logger.warning(
+                "key task message not built (%s): sent without buttons", type(error).__name__
+            )
             return await self._sender.send_text(text)
 
     async def _hand_over(self, verdicts: tuple[Verdict, ...], state: DayState) -> dict[int, str]:

@@ -373,3 +373,17 @@ def test_lo_visto_se_anota_aunque_falle_el_resto_de_la_contabilidad(conn, monkey
     monkeypatch.setattr(day.heartbeat, "_bookkeeping", broken)
     day.run([at(12)])
     assert key_marks.of_day(conn, DAY).of("insistir_gimnasio").seen == {"t-gym"}
+
+
+def test_si_el_mensaje_con_botones_no_se_puede_montar_sale_como_texto(conn, monkeypatch):
+    """Revisión propia: el aviso no se pierde ni se pierde la fila del latido."""
+    day = Day(conn, tasks_of_the_day())
+
+    def broken(*args: Any) -> None:
+        raise ValueError("inventado")
+
+    monkeypatch.setattr("jimic.heartbeat.beat.key_message", broken)
+    day.run([at(12, 45)])
+    assert day.sender.texts == ["Aviso inventado de insistir_gimnasio"]
+    assert day.sent("insistir_gimnasio") == ["12:45"]
+    assert "send ok" in day.reasons()[-1]

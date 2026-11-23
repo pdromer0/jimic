@@ -276,7 +276,8 @@ def templates(intentions: Intentions, state: DayState) -> tuple[Outgoing, ...]:
             status = state.key_tasks.get(intention.id)
             if status is None or status.refusal(now) is not None:
                 continue
-            start = status.insist_from
+            # After a pause that covered its slot, the slot where the pause ends.
+            start = max(status.insist_from, status.paused_until or status.insist_from)
         if start <= now < start + SLOT and intention.id not in sent:
             chosen.append(Outgoing(intent=intention.id, text=template_text(intention, habits)))
     return tuple(chosen)
