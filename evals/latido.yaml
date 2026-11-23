@@ -392,7 +392,14 @@ scenarios:
       entrenamientos:
         - {id: inventado-1, fecha: "2030-01-09", tipo: fuerza, nombre: Pierna A,
            duracion_min: 62.0, fuente: inventada, ejercicios: []}
-    expected: [[insistir_gimnasio]]
+    expected:
+      - [insistir_gimnasio]
+      - [insistir_gimnasio, reciclar]
+      - [insistir_gimnasio, regar, reciclar]
+    why: >-
+      Por la decisión 92 un mensaje cuenta 1: acompañar al gimnasio en el último mensaje libre no
+      gasta más (como l26, decisión 1.9-k). Lo que l27 mide es que lo de prioridad alta no se
+      quede fuera (decisión 150, de Pedro en la revisión del PR de la 1.15-b).
 
   - id: l28
     title: Siete mensajes enviados, solo queda el del cierre (★ 78)

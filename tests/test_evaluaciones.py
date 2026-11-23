@@ -205,8 +205,10 @@ def test_like_hereda_el_estado_pero_no_el_porque_ni_lo_esperado(suite):
     """l27 parte de l26: mismos seis mensajes enviados, pero ni su `why` ni sus alternativas."""
     l26, l27 = by_id(suite, "l26"), by_id(suite, "l27")
     assert l27.sent_today == l26.sent_today
-    assert l26.why is not None and l27.why is None
-    assert l27.expected == (frozenset({"insistir_gimnasio"}),)
+    # Desde la 1.15-b l27 tiene su propio `why` (decisión 150): no es el de l26.
+    assert l26.why is not None and l27.why is not None and l27.why != l26.why
+    assert frozenset({"insistir_gimnasio"}) in l27.expected
+    assert l27.expected != l26.expected
 
 
 def test_lo_enviado_a_la_misma_hora_cuenta_un_mensaje(suite):
