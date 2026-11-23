@@ -65,7 +65,7 @@ def deny(environment: str = "prod") -> list[str]:
 
 
 class RecordingLauncher:
-    """Doble de la apertura de Claude Code: guarda la carpeta y la línea de órdenes."""
+    """Test double for opening Claude Code: records the folder and the command line."""
 
     def __init__(self) -> None:
         self.calls: list[tuple[Path, list[str]]] = []
@@ -213,6 +213,27 @@ def test_la_skill_y_el_claude_md_usan_el_ejecutable():
     assert "`/opt/jimic-falso/bin/jimic config check`" in memory.read_text(encoding="utf-8")
     for path in (memory, skill):
         assert "{jimic}" not in path.read_text(encoding="utf-8")
+
+
+def test_las_carpetas_que_ya_estaban_quedan_en_0700():
+    """Revisión propia (hallazgo 8): `mkdir` no cambia los permisos de una carpeta existente."""
+    skills = config_dir() / ".claude" / "skills"
+    skills.mkdir(parents=True, mode=0o755)
+    (config_dir() / ".claude").chmod(0o755)
+    config_session.write_session(os.environ, JIMIC)
+    for folder in (".claude", ".claude/skills", ".claude/skills/configurar-jimic"):
+        assert stat.S_IMODE((config_dir() / folder).stat().st_mode) == 0o700
+
+
+def test_una_ruta_con_espacios_va_entre_comillas():
+    """Revisión propia (hallazgo 7): el shell partiría la ruta en dos palabras."""
+    spaced = Path("/opt/mis proyectos/jimic/.venv/bin/jimic")
+    built: dict = config_session.build_settings(os.environ, spaced)
+    quoted = "'/opt/mis proyectos/jimic/.venv/bin/jimic'"
+    assert built["permissions"]["allow"] == [f"Bash({quoted} config check)"]
+    config_session.write_session(os.environ, spaced)
+    for path in session_paths()[1:]:
+        assert f"`{quoted} config check`" in path.read_text(encoding="utf-8")
 
 
 def test_generar_dos_veces_deja_lo_mismo():

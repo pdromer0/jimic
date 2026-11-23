@@ -12,6 +12,7 @@ are denied too, even with the network closed.
 
 import json
 import os
+import shlex
 import shutil
 import sys
 from collections.abc import Callable, Mapping, Sequence
@@ -77,7 +78,7 @@ def build_settings(environ: Mapping[str, str], jimic: Path) -> dict[str, object]
     deny += ["WebFetch", "WebSearch", "Bash(git push *)", "Bash(gh *)", "mcp__*"]
     return {
         "$schema": SETTINGS_SCHEMA,
-        "permissions": {"allow": [f"Bash({jimic} config check)"], "deny": deny},
+        "permissions": {"allow": [f"Bash({command(jimic)} config check)"], "deny": deny},
         "disableClaudeAiConnectors": True,
         "sandbox": {
             "enabled": True,
@@ -93,6 +94,11 @@ def build_settings(environ: Mapping[str, str], jimic: Path) -> dict[str, object]
         },
         "env": {ENVIRONMENT_VAR: paths.environment, "PYTHONDONTWRITEBYTECODE": "1"},
     }
+
+
+def command(jimic: Path) -> str:
+    """The executable as the shell must get it: quoted if the path has spaces or the like."""
+    return shlex.quote(str(jimic))
 
 
 def template(name: str) -> str:
@@ -123,13 +129,14 @@ def write_session(environ: Mapping[str, str], jimic: Path) -> Path:
     for part in (".claude", "skills", SKILL_NAME):
         folder = folder / part
         folder.mkdir(mode=0o700, exist_ok=True)
+        folder.chmod(0o700)  # `mkdir` leaves alone a folder that was already there
     settings = json.dumps(build_settings(environ, jimic), indent=2, ensure_ascii=False) + "\n"
     write_private(settings_file(config_dir), settings)
     for path, name in (
         (memory_file(config_dir), "claude.md"),
         (skill_file(config_dir), "skill.md"),
     ):
-        write_private(path, template(name).replace("{jimic}", str(jimic)))
+        write_private(path, template(name).replace("{jimic}", command(jimic)))
     return settings_file(config_dir)
 
 
