@@ -361,3 +361,15 @@ def test_el_latido_anota_la_tarea_de_hoy_que_ve(conn):
     ).fetchone()
     assert count == 1
     assert to_db(at(12))  # los momentos van en UTC
+
+
+def test_lo_visto_se_anota_aunque_falle_el_resto_de_la_contabilidad(conn, monkeypatch):
+    """Revisión propia: si no se anotara, una recurrente completada en la app no saltaría."""
+    day = Day(conn, tasks_of_the_day())
+
+    def broken(*args: Any) -> None:
+        raise RuntimeError("inventado")
+
+    monkeypatch.setattr(day.heartbeat, "_bookkeeping", broken)
+    day.run([at(12)])
+    assert key_marks.of_day(conn, DAY).of("insistir_gimnasio").seen == {"t-gym"}

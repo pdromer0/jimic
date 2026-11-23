@@ -445,3 +445,13 @@ def test_un_salto_que_no_se_puede_leer_no_cuenta():
             raise ToolFailure("timeout")
 
     assert asyncio.run(read_jumped(Failing(), {"t-gym"}, DAY)) == frozenset()
+
+
+def test_no_se_relee_lo_completado_hoy_ni_lo_de_una_tarea_hecha_o_con_hoy_no(conn):
+    """Revisión propia: cada lectura son dos llamadas a Todoist en cada latido."""
+    key_marks.note_seen(conn, DAY, "insistir_gimnasio", "t-gym", at(12))
+    key_marks.note_seen(conn, DAY, "insistir_ofertas", "t-ofertas", at(12))
+    key_marks.record(conn, DAY, "insistir_ofertas", "not_today", at(12, 5))
+    reader = Reader(tasks(), tasks(gym_task()), {})
+    run(conn, at(13), reader, intentions(GYM, OFFERS_KEY, habits=[HABIT, OFFERS_HABIT]))
+    assert reader.got == []

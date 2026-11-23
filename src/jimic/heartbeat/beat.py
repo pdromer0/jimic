@@ -221,9 +221,20 @@ class Heartbeat:
         reason = decision.reason + _verdict_codes(result.verdicts, failures)
         self._record(now, decision.speak, decision.intent, reason)
         try:
+            self._note_seen(now, result.state)
+        except Exception as error:
+            logger.error("heartbeat seen tasks failed (%s)", type(error).__name__)
+        try:
             self._bookkeeping(now, decision, result)
         except Exception as error:
             logger.error("heartbeat bookkeeping failed (%s)", type(error).__name__)
+
+    def _note_seen(self, now: datetime, state: DayState) -> None:
+        """Today's task of each key task, seen open: what tells a jump later (decision 1.15-j).
+        First and on its own, so a failure of the rest of the bookkeeping does not skip it."""
+        for status in state.key_tasks.values():
+            if status.task is not None:
+                key_marks.note_seen(self._conn, now.date(), status.intent, status.task.id, now)
 
     def _bookkeeping(self, now: datetime, decision: Decision, result: CycleResult) -> None:
         day = now.date()
@@ -233,10 +244,6 @@ class Heartbeat:
         if decision.api_error is not None:
             system_notices.detect(self._conn, "api_down", day, now, decision.api_error)
         if result.state is not None:
-            # Today's task of each key task, seen open: what tells a jump later (decision 1.15-j).
-            for status in result.state.key_tasks.values():
-                if status.task is not None:
-                    key_marks.note_seen(self._conn, day, status.intent, status.task.id, now)
             down = [
                 f"{name}:{source['unavailable_reason']}"
                 for name, source in result.state.sources().items()

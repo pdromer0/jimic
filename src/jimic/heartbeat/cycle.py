@@ -120,9 +120,16 @@ async def run_cycle(
         reader.read_completed_today() if has_key_tasks else _not_read(),
     )
     marks = key_marks.of_day(conn, day)
-    open_ids = {task.id for task in tasks.tasks} if tasks.available else set()
-    seen = {task_id for item in marks.by_intent.values() for task_id in item.seen}
-    missing = seen - open_ids if tasks.available else set()
+    # Only what may have jumped: seen today, not open now, not completed today, and of a key
+    # task that is not already done or «hoy no» (each read is two calls to Todoist).
+    settled = {task.id for task in tasks.tasks} | {task.id for task in completed.tasks}
+    seen = {
+        task_id
+        for item in marks.by_intent.values()
+        if not (item.done or item.not_today)
+        for task_id in item.seen
+    }
+    missing = seen - settled if tasks.available else set()
     jumped = await read_jumped(reader, missing, day) if missing else frozenset()
     state = build_day_state(
         now,

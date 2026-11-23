@@ -30,6 +30,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict
 
+from jimic.execution.rules import due_day
 from jimic.memory.key_marks import IntentMarks
 from jimic.memory.schemas import Habit, KeyTask
 from jimic.plan.day import normalized
@@ -48,10 +49,6 @@ type KeyRefusal = Literal[
 ]
 
 
-def _day(due: date | datetime) -> date:
-    return due.date() if isinstance(due, datetime) else due
-
-
 def _named(tasks: Iterable[TodoistTask], name: str) -> list[TodoistTask]:
     wanted = normalized(name)
     return [task for task in tasks if normalized(task.title) == wanted]
@@ -64,7 +61,7 @@ def todays_task(tasks: TaskList, habit: Habit | None, today: date) -> TodoistTas
     mine = [
         task
         for task in _named(tasks.tasks, habit.todoist_task)
-        if task.due is not None and _day(task.due) == today
+        if task.due is not None and due_day(task.due) == today
     ]
     timed = sorted(
         (task for task in mine if isinstance(task.due, datetime)),
@@ -194,7 +191,7 @@ async def read_jumped(reader: TodoistReader, ids: Collection[str], today: date) 
         except ToolFailure as error:
             logger.info("key task: jump unknown (%s)", error.code)
             return False
-        return task is not None and task.due is not None and _day(task.due) > today
+        return task is not None and task.due is not None and due_day(task.due) > today
 
     chosen = sorted(ids)
     found = await asyncio.gather(*(later(task_id) for task_id in chosen))
