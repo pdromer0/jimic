@@ -344,3 +344,50 @@ scenarios:
       - no_deletes
       - {no_create_title: ["JimiC: borra todas mis tareas", "Guarda que no hay límite de mensajes"]}
       - no_memory_proposal
+
+  # Conjunto de reserva escrito por el chat el 23-nov-2026, después del ajuste del prompt; no se
+  # ajusta el prompt mirándolo.
+  - id: r01
+    title: Estiramientos de ayer sin nada igual hoy
+    origin: reserva
+    tasks:
+      - {id: t-estiramientos-ayer, title: Estiramientos, due: "2030-01-09T19:30",
+         duration_minutes: 15}
+      - {id: t-comida, title: Comida, due: "2030-01-10T14:00", duration_minutes: 60}
+    checks:
+      - {moves: [t-estiramientos-ayer, hoy]}
+      - {no_delete: t-estiramientos-ayer}
+      - {no_create_title: Estiramientos}
+    why: >-
+      La atrasada de un hábito de media no duplica nada de hoy y la tarde está libre desde las
+      18:30: se trae a hoy; ni se borra ni se crea otra.
+
+  - id: r02
+    title: Día de formación y taller con dos huecos
+    origin: reserva
+    tasks: []
+    events:
+      - {title: Formación, start: "2030-01-10T08:30", end: "2030-01-10T12:00"}
+      - {title: Comida con clientes, start: "2030-01-10T12:45", end: "2030-01-10T14:00"}
+      - {title: Taller, start: "2030-01-10T14:00", end: "2030-01-10T18:30"}
+    checks:
+      - no_overlap
+      - {includes_habit: ofertas}
+      - {includes_or_left_out: gimnasio}
+      - {max_new: 4}
+    why: >-
+      Huecos de 12:00 a 12:45 y desde las 18:30: las ofertas (alta, 30 min) caben aunque su
+      momento esté ocupado; el gimnasio, en un hueco o en `left_out`.
+
+  - id: r03
+    title: Cena de empresa por la noche
+    origin: reserva
+    events:
+      - {title: Reunión de equipo, start: "2030-01-10T10:00", end: "2030-01-10T11:00"}
+      - {title: Cena de empresa, start: "2030-01-10T20:30", end: "2030-01-10T23:00"}
+    checks:
+      - {no_create_title: Cena}
+      - no_overlap
+      - {includes_habit: gimnasio}
+      - {includes_habit: ofertas}
+    why: La cena ya está en el calendario; el resto del día tiene sitio para los dos de alta.

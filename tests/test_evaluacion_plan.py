@@ -235,12 +235,17 @@ def test_una_comprobacion_fuera_del_catalogo_o_mal_escrita_se_rechaza(raw):
 # --- La carga ----------------------------------------------------------------------------------
 
 
-def test_el_fichero_real_carga_los_diez_escenarios_seis_del_piloto_y_el_e02():
+def test_el_fichero_real_carga_los_diez_escenarios_seis_del_piloto_y_el_e02_y_la_reserva():
     suite = load_plan_suite(REAL_FILE)
-    assert [scenario.id for scenario in suite.scenarios] == [f"p{n:02d}" for n in range(1, 11)]
+    assert [scenario.id for scenario in suite.scenarios] == [f"p{n:02d}" for n in range(1, 11)] + [
+        "r01",
+        "r02",
+        "r03",
+    ]
     origins = [scenario.origin or "" for scenario in suite.scenarios]
     assert origins.count("nuevo") == 3
-    assert sorted(o for o in origins if o != "nuevo") == [
+    assert origins.count("reserva") == 3  # el conjunto de reserva del chat
+    assert sorted(o for o in origins if o not in ("nuevo", "reserva")) == [
         "e01",
         "e02",
         "e03",
