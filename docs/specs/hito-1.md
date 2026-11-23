@@ -3183,3 +3183,4 @@ comparada con el último completo, la del paso 1):
 Coste 0,0316 $ en 138 llamadas. Sobre los 39 comunes con el paso 1: acierto 97,4 % → 100,0 % y
 habla cuando no debía 3,3 % → 0,0 %; nuevos, s01 a s06; cambiado, l27. l09 acierta ahora por
 `spacing` (Haiku ya no ve que toca), y l27, por su esperado nuevo.
+- **N3 de la ronda:** en verde en 2:34, 1789 tests y 13 de contrato saltados (pre-commit 0:11, pytest 2:22 y gitleaks de la historia 0:01).
