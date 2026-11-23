@@ -3,7 +3,8 @@
 `Runtime.start` opens the sources, the client of the model, the conversation with the agent, the
 executor of what Pedro approves, the memory (its buttons, `/memoria` and `/deshacer`, task 1.12),
 the onboarding (`/puesta_en_marcha`, task 1.13), the Telegram channel (Pedro's text goes to the
-assistant, the taps to their handlers) and the plan of the day (task 1.14: the hook of the
+assistant, the taps to their handlers, and a tap that closes a proposal may go on with the
+conversation, 1.13-c) and the plan of the day (task 1.14: the hook of the
 heartbeat for a `daily_plan`), all on one live configuration of the YAML files. Then it
 sweeps what expired while the service was down and schedules the heartbeat every 15 minutes (from
 the next quarter of an hour), the sweep of expired approvals every day at 00:01 (1.11-c) and the
@@ -23,7 +24,7 @@ from functools import partial
 
 from jimic.agent.conversation import Conversation
 from jimic.agent.transcripts import purge_agent_files
-from jimic.channel.bot import TelegramChannel, TextHandler, build_channel
+from jimic.channel.bot import ClosedHandler, TelegramChannel, TextHandler, build_channel
 from jimic.channel.taps import TapHandler
 from jimic.clock import Clock
 from jimic.config import Settings
@@ -53,7 +54,8 @@ expired."""
 
 
 type ChannelFactory = Callable[
-    [Settings, sqlite3.Connection, Clock, TextHandler, Mapping[str, TapHandler]], TelegramChannel
+    [Settings, sqlite3.Connection, Clock, TextHandler, Mapping[str, TapHandler], ClosedHandler],
+    TelegramChannel,
 ]
 type ModelFactory = Callable[[Settings], ModelApi]
 
@@ -64,8 +66,11 @@ def default_channel(
     clock: Clock,
     on_text: TextHandler,
     handlers: Mapping[str, TapHandler],
+    on_closed: ClosedHandler,
 ) -> TelegramChannel:
-    return build_channel(settings, conn, clock, handlers=handlers, on_text=on_text)
+    return build_channel(
+        settings, conn, clock, handlers=handlers, on_text=on_text, on_closed=on_closed
+    )
 
 
 class Runtime:
@@ -155,7 +160,12 @@ class Runtime:
             )
             handlers = executor.handlers | {MEMORY_KIND: memory.memory} | commands.handlers
             channel = self._channel_factory(
-                self._settings, self._conn, self._clock, assistant.reply, handlers
+                self._settings,
+                self._conn,
+                self._clock,
+                assistant.reply,
+                handlers,
+                assistant.follow_up,
             )
             plan = DailyPlanRunner(
                 conversation=conversation,

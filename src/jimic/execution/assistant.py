@@ -25,6 +25,11 @@ The onboarding (CU-12, task 1.13), with a `config_dir`:
   run, nor in what the heartbeat sends, and it is no message of its own: it costs no quota.
 
 Everything an approval offers expires at the end of the local day (RF-07, 1.11-c).
+
+After a tap that closes a proposal, `follow_up` may run the agent once more, without a message
+of Pedro, so that the conversation goes on (decisions 1.13-c and 1.13-d, `follow_up.py`). Its
+answer goes like any other, without the suggestion of the onboarding; if it does not run or
+fails, nothing is sent: Pedro did not write.
 """
 
 import logging
@@ -44,6 +49,7 @@ from jimic.clock import Clock
 from jimic.execution import confirm
 from jimic.execution.commands import Commands, command_of
 from jimic.execution.execute import Executor
+from jimic.execution.follow_up import follow_up_note
 from jimic.execution.immediate import runs_now
 from jimic.execution.memory_message import DROPPED_TEXT, MEMORY_KIND, memory_message
 from jimic.execution.plan_message import (
@@ -210,6 +216,36 @@ class Assistant:
             item = message.items[0].model_copy(update={"note": failure_note(done.code)})
             message = message.model_copy(update={"items": (item,)})
         return Outgoing(PLAN_KIND, message, expires)
+
+    async def follow_up(self, approval_id: int) -> str | Reply | None:
+        """What follows a tap that closed approval `approval_id` (1.13-c), or `None`. Never
+        raises: what goes wrong only reaches the log."""
+        try:
+            return await self._follow_up(approval_id)
+        except Exception as error:
+            logger.error("follow-up failed (%s)", type(error).__name__)
+            return None
+
+    async def _follow_up(self, approval_id: int) -> str | Reply | None:
+        try:
+            approval = store.load(self._conn, approval_id)
+        except ValueError:
+            return None
+        if approval is None or approval.status not in ("approved", "rejected"):
+            return None
+        note = follow_up_note(approval.kind, approval.message)
+        if note is None:
+            return None
+        turn = await self._conversation.run_note(
+            note, "follow_up", unless_written_after=approval.created_at
+        )
+        if turn is None:
+            return None
+        if turn.code != "ok":
+            logger.info("follow-up not sent (%s)", turn.code)
+            return None
+        logger.info("follow-up of approval %d", approval_id)
+        return await self._reply(turn, suggest=False)
 
     async def _confirm(self, found: confirm.Target) -> Reply:
         """The «sí»: a tap of `del` on that item, by the code; it counts as Pedro writing."""

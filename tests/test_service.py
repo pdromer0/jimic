@@ -355,9 +355,10 @@ class FakeRuntimeChannel:
     async def send_text(self, text: str) -> int:
         raise AssertionError("the runtime test sends nothing")
 
-    def wired(self, on_text, handlers):
+    def wired(self, on_text, handlers, on_closed):
         self.on_text = on_text
         self.handlers = handlers
+        self.on_closed = on_closed
         return self
 
     async def sweep(self) -> None:
@@ -387,8 +388,8 @@ def runtime_with(conn, events, fail_start=False):
         conn,
         intentions(),
         limits(),
-        channel_factory=lambda settings, conn, clock, on_text, handlers: channel.wired(  # pyright: ignore[reportArgumentType] - a double of the channel
-            on_text, handlers
+        channel_factory=lambda settings, conn, clock, on_text, handlers, closed: channel.wired(  # pyright: ignore[reportArgumentType] - a double of the channel
+            on_text, handlers, closed
         ),
         model_factory=lambda settings: ModelApi(FakeMessages().create, close_model),
         todoist_api=todoist,
@@ -426,6 +427,12 @@ def test_el_runtime_programa_el_latido_alineado_y_la_purga_y_para_en_orden(tmp_p
     # comandos (1.12); nunca al agente solo.
     assert runtime.assistant is not None and runtime.executor is not None
     assert channel.on_text == runtime.assistant.reply
+    # Tarea 1.14: el toque que cierra va a la reanudación, y el plan del latido, al runner.
+    assert channel.on_closed == runtime.assistant.follow_up
+    assert runtime.plan is not None and runtime.heartbeat is not None
+    assert (
+        runtime.heartbeat._on_handover == runtime.plan.handover
+    )  # lo que se prueba es la conexión
     assert runtime.executor.handlers.items() <= channel.handlers.items()
     assert set(channel.handlers) == {"plan", "undo", "memory", "memory_view", "undo_list"}
 

@@ -181,6 +181,43 @@ def test_un_toque_edita_el_mismo_mensaje_y_no_envia_otro(make_channel, request_d
     assert keyboard_rows(params) == [["2 Sí", "2 No"], ["Créalo todo"]]
 
 
+def test_el_toque_que_cierra_el_mensaje_sigue_la_conversacion_despues_de_editar(
+    make_channel, request_double
+):
+    """Decisión 1.13-c: `on_closed` corre solo con el toque que cierra (el segundo), y su
+    respuesta sale después de editar el mensaje y de responder al toque."""
+    closed: list[int] = []
+
+    async def on_closed(approval_id: int) -> str:
+        closed.append(approval_id)
+        return "Seguimos 👍"
+
+    channel, application = make_channel(on_closed=on_closed)
+    approval_id = send_and_drive(channel, application)
+    request_double.calls.clear()
+    drive(application, callback_update(f"{approval_id}:1:y", message_id=77))
+    assert closed == []
+    drive(application, callback_update(f"{approval_id}:2:n", message_id=77, update_id=2))
+    assert closed == [approval_id]
+    assert request_double.methods()[-3:] == [
+        "editMessageText",
+        "answerCallbackQuery",
+        "sendMessage",
+    ]
+    assert request_double.params("sendMessage")[-1]["text"] == "Seguimos 👍"
+
+
+def test_si_la_reanudacion_no_tiene_nada_que_decir_no_se_envia_nada(make_channel, request_double):
+    async def on_closed(approval_id: int) -> None:
+        return None
+
+    channel, application = make_channel(on_closed=on_closed)
+    approval_id = send_and_drive(channel, application)
+    request_double.calls.clear()
+    drive(application, callback_update(f"{approval_id}:g:all", message_id=77))
+    assert "sendMessage" not in request_double.methods()
+
+
 def test_un_toque_de_otro_chat_se_ignora_sin_responder_ni_editar(
     make_channel, request_double, caplog
 ):

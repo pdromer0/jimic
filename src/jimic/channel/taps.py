@@ -90,6 +90,10 @@ class TapResult:
     view: View | None = None
     send: tuple[str, ...] = ()
     """Texts to send after editing the message (`Show`), in the order of the items."""
+    closed: bool = False
+    """This tap resolved the last pending item: the approval left `pending` now (approved or
+    rejected, not expired). Only one tap can (the save is a compare and swap), so whatever
+    follows a closed message (the follow-up of 1.13-d) happens once."""
 
 
 def failure_note(code: str) -> str:
@@ -182,7 +186,8 @@ async def process_tap(
         return TapResult("not_pending")
     updated, done = _apply(latest.message, outcomes)
     now = clock.now()
-    if not store.save(conn, approval.id, updated, final_status(updated), now):
+    status = final_status(updated)
+    if not store.save(conn, approval.id, updated, status, now):
         return TapResult("not_pending")
     logger.info("approval %d: %d of %d item(s) done", approval.id, done, len(chosen))
     texts = tuple(
@@ -198,7 +203,8 @@ async def process_tap(
         code = "partially_resolved" if done else "handler_failed"
     else:
         code = "renewed"
-    return TapResult(code, render(updated, approval.id), texts)
+    closed = status in ("approved", "rejected")
+    return TapResult(code, render(updated, approval.id), texts, closed)
 
 
 def _expire(

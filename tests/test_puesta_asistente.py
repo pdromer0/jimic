@@ -188,6 +188,10 @@ def test_el_comando_crea_los_esqueletos_y_va_a_la_conversacion_del_dia(conn, tmp
     assert "## La puesta en marcha" in w.prompt()
     assert "Sigue por: la rutina: Horario base, Comidas, Jornada, Fines de semana." in w.prompt()
     assert "Ya guardado (no lo vuelvas a preguntar): nada aún." in w.prompt()
+    # 1.13-d: el guion pide seguir tras los toques en todas las partes menos la última.
+    assert "Marca `follow_up: true` en las propuestas de todas las partes menos la última" in (
+        w.prompt()
+    )
 
 
 @pytest.mark.parametrize(

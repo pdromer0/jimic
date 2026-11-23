@@ -115,6 +115,9 @@ class Reply:
 
 type TextHandler = Callable[[Incoming], Awaitable[str | Reply]]
 """Called with what Pedro wrote; returns the reply, as plain text or a `Reply`."""
+type ClosedHandler = Callable[[int], Awaitable[str | Reply | None]]
+"""Called with the id of an approval that a tap just closed (decision 1.13-c): what to send
+after it, or `None`."""
 type OnStarted = Callable[["TelegramChannel"], Awaitable[None]]
 type Task = Callable[[], Awaitable[None]]
 """What a scheduled job runs: the heartbeat, the purge."""
@@ -185,8 +188,12 @@ class TelegramChannel:
         on_text: TextHandler = reply_not_yet,
         on_started: OnStarted | None = None,
         typing_every: float = TYPING_EVERY,
+        on_closed: ClosedHandler | None = None,
     ) -> None:
+        """`on_closed` runs after a tap that closes a message, as one more turn: in order with
+        the answers to Pedro's messages and with «escribiendo…» (decision 1.13-c)."""
         self._app = application
+        self._on_closed = on_closed
         self._chat_id = chat_id
         self._conn = conn
         self._clock = clock
@@ -388,6 +395,8 @@ class TelegramChannel:
         await self._answer(query.id, self._toast(result.code))
         for text in result.send:
             await self._send_chunks(text)
+        if result.closed and self._on_closed is not None and not self._stopping:
+            self._start_turn(self._on_closed(tap.approval_id))
 
     @staticmethod
     def _toast(code: str) -> str | None:
@@ -420,7 +429,11 @@ class TelegramChannel:
         self._pedro_wrote_since = True
         # `on_text` starts here, before any wait on the network: the conversation notes the
         # moment and takes its place in the order of the turns as the message arrives.
-        answer = asyncio.ensure_future(self._on_text(incoming))
+        self._start_turn(self._on_text(incoming))
+
+    def _start_turn(self, coroutine: Awaitable[str | Reply | None]) -> None:
+        """Start an answer now and send it after the answer before it."""
+        answer = asyncio.ensure_future(coroutine)
         turn = asyncio.create_task(self._converse(answer, self._last_turn))
         self._last_turn = turn
         for task in (answer, turn):
@@ -428,7 +441,7 @@ class TelegramChannel:
             task.add_done_callback(self._turns.discard)
 
     async def _converse(
-        self, answer: asyncio.Future[str | Reply], previous: asyncio.Task[None] | None
+        self, answer: asyncio.Future[str | Reply | None], previous: asyncio.Task[None] | None
     ) -> None:
         """One answer: «escribiendo…» while `answer` is thinking, then the answer, after the
         answer to the message before (the replies go out in the order the messages came)."""
@@ -442,6 +455,8 @@ class TelegramChannel:
             typing.cancel()
         if previous is not None:
             await asyncio.wait([previous])
+        if result is None:
+            return  # nothing to say (a follow-up that did not run)
         reply = Reply(text=result) if isinstance(result, str) else result
         for approval_id in reply.refresh:
             await self.refresh(approval_id)
@@ -559,6 +574,7 @@ def build_channel(
     handlers: Mapping[str, TapHandler] | None = None,
     on_started: OnStarted | None = None,
     on_text: TextHandler = reply_not_yet,
+    on_closed: ClosedHandler | None = None,
 ) -> TelegramChannel:
     """The channel of the bot in `settings`, ready to `start` (nothing connects before that)."""
     application = build_application(settings.telegram_token.get_secret_value())
@@ -570,4 +586,5 @@ def build_channel(
         handlers=handlers,
         on_text=on_text,
         on_started=on_started,
+        on_closed=on_closed,
     )
