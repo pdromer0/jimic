@@ -311,9 +311,12 @@ class _Pass:
             taken.add(item.intent)
             kind = self.by_id[item.intent].type
             if kind in HANDOVER_TYPES:
-                # What 1.14 and 1.16 will send must fit; handing over spends nothing yet.
+                # What the agent will send must fit. The plan goes out (task 1.14): it takes its
+                # message now, so the rest of this batch sees one fewer. The close does not yet.
                 refusal = self.quota.refusal(is_close=kind == "day_close")
                 self.decide("block" if refusal else "handover", refusal or "ok", item)
+                if refusal is None and kind not in PENDING_TASK:
+                    self.quota = self.quota.after_sending(is_close=False)
             else:
                 (urgent if kind in URGENT_TYPES else notices).append(item)
         released: list[Outgoing] = []
