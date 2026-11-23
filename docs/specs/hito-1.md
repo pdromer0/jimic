@@ -2722,6 +2722,8 @@ minutos del disparador del módulo `xdist`.
   eventos y tareas con hora; la alta que no cabe, a `left_out`) y prioridad media (hueco libre
   para su duración en su `moment`). La segunda medida, arriba.
 - Paso 2, pendiente: un conjunto de reserva de 3 escenarios que pasa Pedro.
+- N3 de la ronda: en verde en 2:20, 1566 tests (pre-commit 0:14, pytest 2:05 y gitleaks de la
+  historia 0:01). pytest pasa de los 2 minutos: se cumple el disparador del módulo `xdist`.
 
 **Pendiente.**
 - **El prompt del plan** (p04 y p05 de la segunda medida): lo decide Pedro, con reglas generales y
