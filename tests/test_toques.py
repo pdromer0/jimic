@@ -436,3 +436,22 @@ def test_answer_con_mensaje_lo_deja_para_el_canal(conn, clock, approval_id):
 
     result = run(conn, clock, answers, Tap(approval_id, 1, "y"))
     assert result.send == () and result.messages == (followup,)
+
+
+def test_answer_con_then_deja_el_elemento_pendiente_con_sus_opciones_y_la_nota(
+    conn, clock, approval_id
+):
+    """Tarea 1.15: [Voy ahora] deja [Ya entrené] y [Hoy no]. Solo cambian las opciones y la
+    nota, sobre el elemento guardado (revisión propia)."""
+
+    async def answers(item, option, approval_id):
+        then = item.model_copy(update={"title": "título viejo", "options": item.options[:1]})
+        return Answer("🏃 a por ello", "¡Vamos! 💪", then=then)
+
+    result = run(conn, clock, answers, Tap(approval_id, 1, "y"))
+    assert result.code == "resolved" and not result.closed
+    stored = store.load(conn, approval_id)
+    assert stored is not None
+    item = stored.message.items[0]
+    assert item.pending and [o.key for o in item.options] == ["y"]
+    assert item.note == "🏃 a por ello" and item.title == "Gimnasio 13:00"

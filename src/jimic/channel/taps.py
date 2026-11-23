@@ -95,7 +95,8 @@ class Answer:
     """The item is resolved with `result`, and after the tap the code answers with `reply`: a
     fixed text, or a message with buttons (task 1.15, the key tasks). With `then`, the item is
     not resolved: it becomes `then`, pending, with `result` as its note ([Voy ahora] and [Más
-    tarde] leave [Ya entrené] and [Hoy no] to tap later)."""
+    tarde] leave [Ya entrené] and [Hoy no] to tap later). Only the options of `then` are taken,
+    on the item as it is stored now."""
 
     result: str
     reply: str | Followup
@@ -169,7 +170,10 @@ def _apply(message: InteractiveMessage, outcomes: dict[int, tuple[str, HandlerOu
         elif isinstance(outcome, Renew):
             updated = release(updated, index, outcome.item)
         elif isinstance(outcome, Answer) and outcome.then is not None:
-            then = outcome.then.model_copy(update={"note": clip_result(outcome.result)})
+            # On the latest stored item: only its options and its note change.
+            then = updated.items[index].model_copy(
+                update={"options": outcome.then.options, "note": clip_result(outcome.result)}
+            )
             updated = release(updated, index, then)
     return updated, len(done)
 
