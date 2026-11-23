@@ -99,7 +99,7 @@ def demo_settings():
 def test_la_demo_ensena_una_propuesta_con_sus_filas_y_la_global_bajo_una_respuesta():
     """La forma que Pedro verá en el móvil (la captura de la 1.11): las etiquetas del formato
     del plan, la fila global sin el borrado y el texto de la respuesta encima."""
-    (kind, proposal), (undo_kind, undo), *_ = demo.demo_messages(demo_settings())
+    _, (kind, proposal), (undo_kind, undo), *_ = demo.demo_messages(demo_settings())
     assert (kind, undo_kind) == ("plan", "undo")
     view = render(proposal, approval_id=1)
     assert [[b.label for b in row] for row in view.keyboard] == [
@@ -122,7 +122,7 @@ def test_la_demo_ensena_una_propuesta_con_sus_filas_y_la_global_bajo_una_respues
     ],
 )
 def test_los_toques_de_la_demo_solo_marcan_el_resultado(index, option, result):
-    (_, proposal), *_ = demo.demo_messages(demo_settings())
+    _, (_, proposal), *_ = demo.demo_messages(demo_settings())
     assert asyncio.run(demo.demo_plan(proposal.items[index], option, 1)) == result
 
 
@@ -147,7 +147,7 @@ def test_la_demo_ensena_un_cambio_con_guardar_y_un_deshacer():
 
 def test_la_demo_ensena_un_paso_de_la_puesta_en_marcha_con_guardar():
     """La captura de la 1.13: las comidas de la rutina, con el antes y el después y [Guardar]."""
-    _, _, (kind, onboarding), *_ = demo.demo_messages(demo_settings())
+    _, _, _, (kind, onboarding), *_ = demo.demo_messages(demo_settings())
     assert kind == "memory"
     view = render(onboarding, 3)
     assert view.text.startswith(demo.ONBOARDING_ANSWER)
@@ -194,7 +194,14 @@ def test_con_dev_la_demo_arranca_el_canal_manda_el_plan_y_para_con_sigterm(
         signal.signal(signal.SIGTERM, previous)
     (channel,) = built
     (kind, message, expires_at), *rest = channel.sent
-    assert [kind, *(sent[0] for sent in rest)] == ["plan", "undo", "memory", "memory", "undo_list"]
+    assert [kind, *(sent[0] for sent in rest)] == [
+        "plan",
+        "plan",
+        "undo",
+        "memory",
+        "memory",
+        "undo_list",
+    ]
     assert message == demo.demo_messages(demo_settings())[0][1]
     assert channel.stopped
     assert list(channel.handlers) == ["plan", "undo", "memory", "undo_list"]
@@ -221,3 +228,16 @@ def test_la_factoria_de_la_demo_pasa_su_manejador_y_envia_el_plan_al_empezar(mon
         (kind, message, NOW + timedelta(hours=1)) for kind, message in demo.demo_messages(settings)
     ]
     assert isinstance(built[0].sent[0][1].items[0], Item)
+
+
+def test_la_demo_ensena_el_plan_del_dia_pintado_con_sus_botones():
+    """La captura de la 1.14: el plan como lo pinta el código, con [✏️] al crear y la fila
+    global del plan; [✏️] solo marca su pregunta."""
+    (kind, plan), *_ = demo.demo_messages(demo_settings())
+    assert kind == "plan" and plan.style == "plan"
+    view = render(plan, 1)
+    assert view.text.startswith("¡Pedro! Lunes de empuje")
+    assert "🍽️ 14:00 Comida" in view.text and "🤖 15:30 Trabajo en el proyecto" in view.text
+    assert [b.label for b in view.keyboard[0]] == ["1 ✅", "1 ✏️", "1 ⏭"]
+    assert [b.label for b in view.keyboard[-1]] == ["✅ Créalo todo", "⏭ Hoy sin plan"]
+    assert asyncio.run(demo.demo_plan(plan.items[0], "edit", 1)) == "✏️ ¿cómo la quieres?"
