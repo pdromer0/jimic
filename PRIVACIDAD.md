@@ -39,8 +39,8 @@ usuario. **No lee la descripción**, la ubicación ni los correos de los asisten
   de sus datos (`agent/`), legible solo por su propietario. Todo lo que el motor escribe ahí se
   borra a los 7 días, salvo los pocos ficheros que necesita para funcionar, que no llevan contenido
   (identificadores, contadores y ajustes). La base guarda, también 7 días, el identificador de la
-  sesión de cada día, la hora del último mensaje del usuario y si la sesión leyó el calendario o las
-  tareas; sin texto.
+  sesión de cada día, la hora del último mensaje del usuario, si la sesión leyó el calendario o las
+  tareas y si ese día ya sugirió la puesta en marcha; sin texto.
 - **Lo que propone el agente.** Un plan (crear, mover o borrar tareas, con la foto de cada tarea
   que mueve o borra: título, fecha y proyecto) o un cambio de memoria se guarda como propuesta en la
   base, con el identificador del mensaje de Telegram que la enseña, sin ejecutarse, hasta que el

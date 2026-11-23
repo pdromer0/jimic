@@ -2251,7 +2251,6 @@ base).
     tocara los tests. Va a Pendiente.
 
 **Pendiente.**
-- **1.13:** crear los Markdown que faltan (hoy `propose_change` los rechaza con «aún no existe»).
 - **1.9:** medir con las evaluaciones lo que propone el agente con la memoria. Ante «15 veces al
   día», el modelo ni llama a la herramienta.
 - **1.14:** el plan que pasa el latido al agente ejecuta sin `origin`: no habrá cambios de
