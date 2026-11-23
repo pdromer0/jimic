@@ -598,3 +598,31 @@ def test_sin_nota_a_mano_si_el_agente_corrige_y_se_ofrece_un_cambio_de_limites(c
 
     assert [o.is_error for o in agent.tool_outcomes] == [True, False]
     assert isinstance(reply, Reply) and reply.text == "Te propongo más silencio"
+
+
+def test_un_fallo_al_leer_el_progreso_no_impide_guardar_ni_apuntar(conn, tmp_path, monkeypatch):
+    import jimic.execution.memory_message as memory_message
+
+    line = {"file": "preferencias.md", "operation": "add", "after": "- Sin emojis", "reason": "r"}
+    agent = FakeAgent(
+        [
+            ToolCall("propose_change", line),
+            ToolCall("log_idea", {"text": "una idea inventada"}),
+            result_message("Va"),
+        ]
+    )
+    w = OnboardingWorld(conn, tmp_path, agent, finished=True)
+    (approval,) = w.send(w.say("Sin emojis, y apunta una idea"))
+
+    def broken(config_dir):
+        raise PermissionError("sin permiso (inventado)")
+
+    monkeypatch.setattr(memory_message, "progress", broken)
+    handlers = {MEMORY_KIND: w.memory.memory}
+    for item in (1, 2):
+        option = "save" if item == 1 else "note"
+        tap = Tap(approval, item, option)
+        assert asyncio.run(process_tap(conn, w.clock, handlers, tap)).code == "resolved"
+
+    assert "- Sin emojis" in (w.config_dir / "preferencias.md").read_text(encoding="utf-8")
+    assert "una idea inventada" in (w.config_dir / "ideas.md").read_text(encoding="utf-8")

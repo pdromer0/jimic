@@ -123,7 +123,7 @@ class MemoryHandlers:
             logger.warning("memory: option %s does not fit the item", option)
             return Failed("invalid_option")
         proposed = proposed_of(entry)
-        was_finished = progress(self._config_dir).finished
+        was_finished = True if action == "idea" else self._finished()
         try:
             changes.save(
                 self._conn,
@@ -140,9 +140,17 @@ class MemoryHandlers:
             self._config.reload()
         if action == "idea":
             return NOTED
-        if not was_finished:
-            state = progress(self._config_dir)
-            if state.finished:
-                logger.info("onboarding finished")
-                return Show(f"{FINISHED_TEXT}\n\n{state.summary()}", result=SAVED)
+        if not was_finished and self._finished():
+            logger.info("onboarding finished")
+            summary = progress(self._config_dir).summary()
+            return Show(f"{FINISHED_TEXT}\n\n{summary}", result=SAVED)
         return SAVED
+
+    def _finished(self) -> bool:
+        """Whether the onboarding is finished; a folder that cannot be read counts as finished,
+        so that it never stops a [Guardar] nor sends the end by mistake."""
+        try:
+            return progress(self._config_dir).finished
+        except OSError as error:
+            logger.warning("onboarding progress failed (%s)", type(error).__name__)
+            return True
