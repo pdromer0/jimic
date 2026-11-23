@@ -2269,3 +2269,136 @@ agente contra la API de Anthropic (los dos contratos nuevos y los de la 1.10 y l
   PR.
 - Las métricas del PR se completan con las cifras del chat: 5 idas y vueltas y 1 ronda de
   revisión.
+
+### Tarea 1.13: puesta en marcha
+
+**Qué se hizo.** Issue #27, rama `feat/h1-puesta-en-marcha`, aprobada a las 09:36 del
+23-nov-2026. Commits:
+- `refactor(memory)`: `create_private` público, sin tocar tests (75a9182);
+- `feat(memory)`: los esqueletos y el progreso (990e407), y la migración 0006 (f0cbc02);
+- `feat(agent)`: `/puesta_en_marcha`, la sugerencia, la nota de lo que va a mano y la guarda de
+  APEX (854b750), y el prompt (b7ccf19);
+- `feat(channel)`: la demo (e876e36);
+- `test(contrato)` (18f589d);
+- `docs(diseno)` (c120a34).
+
+Este anexo es el último, `docs(hito-1)`.
+
+**Decisiones de la tarea:**
+- **1.13-a:** la regla asimétrica manda también en la entrevista. Aplica la decisión 11 tal cual,
+  sin fila nueva.
+- **1.13-b:** la lanza Pedro y JimiC la sugiere una vez al día. Es la decisión 106, que revisa el
+  disparador de CU-12.
+- **El nombre del comando**, `/puesta_en_marcha`, lo decidió Pedro en la sesión: Telegram solo
+  enlaza comandos con `a-z`, `0-9` y `_`. `/puesta-en-marcha` queda como alias.
+
+Sin ADR: todo se revierte sin dificultad.
+
+**Decisiones del diff** (lo que el plan interpretaba, aprobado sin ajustes):
+- **Paquetes:**
+  - `memory/onboarding.py`: los esqueletos, el progreso, «terminada» y el resumen;
+  - `memory/templates/*.md`: los tres esqueletos;
+  - `agent/onboarding.md` y `agent/onboarding_context.py`: el guion y el bloque;
+  - `markdown_checks.outline`: las secciones, sin comentarios ni código.
+- **Los esqueletos** llevan la estructura de 7.2 y pistas en comentarios `<!-- … -->`, que los
+  checks ya se saltaban. Se crean con `O_CREAT | O_EXCL` y 0600.
+- **«Terminada»** es la definición del plan, en el docstring de `onboarding.py`:
+  1. `config check` da `ok` en los cinco ficheros;
+  2. las cuatro secciones de la rutina tienen contenido;
+  3. las nueve áreas tienen `Prioridad:` válida, `Meta:` si no es «ahora no», y Gestión del
+     tiempo, un `[medible]`;
+  4. hay al menos un hábito;
+  5. hay una frase de tono y una fila de iconos además de la cabecera.
+
+  El silencio y la insistencia no cuentan: lo de serie puede valer.
+- **En curso** quiere decir que existe `objetivos.md` y no está terminada. Mientras tanto, el
+  *system prompt* lleva, después de los ficheros, el guion y «Ya guardado», «Falta» y «Sigue por».
+  Se rehace en cada ejecución desde los ficheros.
+- **El comando:**
+  - crea los esqueletos que faltan, pasa a la conversación del día y gasta la sugerencia del día;
+  - terminada la puesta en marcha, contesta el código, sin el agente.
+- **La sugerencia** sale al final de la primera respuesta del día que acaba bien, si no está
+  terminada. Usa el bit `conversations.onboarding_suggested` de la 0006, que se reclama con un
+  `UPDATE` condicionado.
+- **1.13-a:** la herramienta guarda en `RunState.manual` las claves y el fragmento que relajan, y
+  el código añade la nota con la clave y la línea a mano. Una ejecución que leyó el calendario o
+  las tareas no la da: una inyección no puede decirle a Pedro qué relajar.
+- **APEX:** `propose_change` sobre `objetivos.md` rechaza (`apex_copy`) un `after` que contiene la
+  descripción de un objetivo en curso (sin distinguir mayúsculas ni espacios). Si APEX no se puede
+  leer, no compara.
+- **El final:** el [Guardar] que deja la puesta en marcha terminada manda `Show` con «terminada» y
+  las metas por prioridad. Las monta el código desde `objetivos.md` (la parte 5).
+- **El guion**, a la vista del contrato: la rutina tiene cuatro secciones y el tope es de tres
+  propuestas por respuesta (1.12). El guion pide rellenarla con un solo `replace`, desde
+  `## Horario base` hasta el final.
+
+**Valores a mano** (código independiente, antes de implementar):
+- **`quiet_hours`** contra 23:00–07:00 (480 minutos):
+  - 0:00–6:00 son 360 y relaja;
+  - 22:00–8:00 son 600 y se ofrece;
+  - 23:00–8:00 son 540 y se ofrece.
+- **Las áreas:** 9. Tras la rutina y dos áreas, se sigue por Hábitos.
+- **El corte del día en Madrid:**
+  - 22:59:59Z y 23:00Z del 7 de enero caen el 7 y el 8;
+  - con horario de verano, las mismas horas del 30 de marzo caen el 30 y el 31.
+- **La línea de la sugerencia:** 62 caracteres.
+
+Todos los comprueban los tests.
+
+**Contratos** (23-nov-2026, `JIMIC_CONTRATO=1`, `jimic-dev`, esqueletos en un temporal, el APEX
+inventado de la 1.6):
+- **La rutina:**
+  - en la primera ejecución, el agente propuso tres `replace` para las cuatro secciones, y la
+    cuarta chocó con el tope;
+  - con el guion ajustado, propone un solo `replace` que valida, y con su [Guardar] la rutina queda
+    completa (0,0224 $).
+- **El entrenamiento:** lee APEX y propone solo la meta y la prioridad, sin copiar sus objetivos;
+  la guarda no saltó (0,0338 $).
+- No tocan Todoist, Calendar ni Telegram.
+
+**Versiones incorrectas** (aplicadas y deshechas con un script; el árbol quedó limpio). Predicción
+antes, observado después:
+
+| # | Versión | Predicción | Observado |
+| --- | --- | --- | --- |
+| 1 | Los esqueletos sobrescriben | Rojo «no sobrescribe»; siguen «config check» y «0600» | **4**: también el enlace simbólico, el del comando y el reanudable, que escriben la rutina a mano antes |
+| 2 | El progreso en una tabla aparte, marcada al guardar | Rojos «tras [Deshacer]» y «edición a mano»; sigue «sigue por Hábitos» | **25**: los dos de deshacer, el de la edición a mano y todos los que escriben los ficheros a mano; «sigue por Hábitos» sigue en verde, como se predijo |
+| 3 | La entrevista deja relajar `limites.yaml` | Rojo «0:00–6:00» y su nota; siguen «22:00–8:00» y los de la 1.12 | **4**: también el de los logs y dos de la 1.12 (5 → 8 y la inyección en la ejecución limpia siguiente). Los inventados de la 1.12 son una puesta en marcha a medias: la predicción sobre ellos falló |
+| 4 | La sugerencia, en memoria del proceso | Rojo «un reinicio no la repite»; siguen «primera sí, segunda no» y «el día siguiente» | **1**, el del reinicio |
+
+Además, cada corrección de la revisión se comprobó quitando su código: sus tests nuevos fallan
+sin ella (el de la 9, un `refactor`, no tiene rojo posible).
+
+**Revisión propia** (`/code-review medium`, 10 hallazgos: 7 corregidos y 3 explicados):
+- **Corregidos:**
+  - (1) la guarda de APEX comparaba subcadenas: una descripción de una palabra («Fuerza»)
+    bloqueaba metas legítimas. Ahora compara palabras enteras y desde dos palabras (3e94f06);
+  - (2) un objetivo de APEX que ya estaba en el fichero bloqueaba cualquier cambio de su sección.
+    Ahora solo cuenta lo que el cambio añade (3e94f06);
+  - (4) `**Meta:**` o `Prioridad: **alta**` no contaban (b747594);
+  - (5) la nota «a mano» salía junto a un cambio de límites válido que el agente corrigió después
+    (02b398c);
+  - (7) [📝 Apuntar] calculaba el progreso sin usarlo, y un fallo al leerlo paraba el [Guardar]
+    (12743ac);
+  - (9) el progreso leía los ficheros por su cuenta. Ahora usa `changes.read_text`, en un
+    `refactor` sin tocar tests (17ac1a2);
+  - (10) un `###` o un `---` sueltos rellenaban una sección de la rutina (e41a3f3).
+- **Explicados:**
+  - (3) la sugerencia sale aunque Pedro siga la entrevista sin el comando. Es la 1.13-b al pie de
+    la letra: una línea al día, que no estorba. Va a Pendiente.
+  - (6) `progress` lee los ficheros varias veces por mensaje: son de pocos KB, y es cosa de
+    milisegundos.
+  - (8) el día de la sugerencia se toma al llegar el mensaje, antes del *lock*: es el mismo día
+    con el que la conversación anota el mensaje (1.10-c).
+
+**Pendiente.**
+- **Uso real:**
+  - si molesta que la sugerencia salga cuando Pedro retoma la entrevista sin el comando
+    (hallazgo 3);
+  - si Sonnet rellena bien el primer hábito, que exige un `replace` de la línea entera de
+    `habits: []`. El contrato no lo cubre.
+- **1.18:** la sesión de configuración que menciona la nota de lo que va a mano.
+- **Después de la fusión:** Pedro hace la puesta en marcha de verdad en su bot (`jimic`).
+
+**Pruebas contra servicios reales:** cuatro ejecuciones del contrato contra la API de Anthropic,
+unos 0,18 $, que no crean nada. Ni Todoist, ni Calendar, ni Telegram: no hay restos que comprobar.
