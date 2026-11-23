@@ -72,8 +72,10 @@ NOT_NOW = "ahora no"
 PRIORITIES = ("alta", "media", "baja", NOT_NOW)
 """Also the order of the summary."""
 
-GOAL_LINE = re.compile(r"[ \t]*Meta:(.*)")
-PRIORITY_LINE = re.compile(r"[ \t]*Prioridad:(.*)")
+# The label may go in emphasis (`**Meta:**`, `*Prioridad*:`), as the model sometimes writes it.
+GOAL_LINE = re.compile(r"[ \t]*[*_]{0,2}Meta[*_]{0,2}:[*_]{0,2}(.*)")
+PRIORITY_LINE = re.compile(r"[ \t]*[*_]{0,2}Prioridad[*_]{0,2}:[*_]{0,2}(.*)")
+EMPHASIS = "*_ \t"
 
 
 def create_skeletons(config_dir: Path) -> list[tuple[str, bool]]:
@@ -205,7 +207,7 @@ def _value(pattern: re.Pattern[str], section: Section) -> str | None:
     for _, line in section.body:
         match = pattern.fullmatch(line)
         if match:
-            return match[1].strip() or None
+            return match[1].strip(EMPHASIS) or None
     return None
 
 
@@ -213,7 +215,7 @@ def _priority(section: Section) -> str | None:
     value = _value(PRIORITY_LINE, section)
     if value is None:
         return None
-    normalized = " ".join(value.casefold().rstrip(".").split())
+    normalized = " ".join(value.casefold().rstrip(".").strip(EMPHASIS).split())
     return normalized if normalized in PRIORITIES else None
 
 

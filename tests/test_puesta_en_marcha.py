@@ -384,3 +384,23 @@ APEX_GOALS = ["Subir la fuerza", "Moverse más", "Fuerza"]
 )
 def test_la_guarda_de_apex_solo_ve_lo_que_el_cambio_anade(before, after, copied):
     assert onboarding.copied_goal(before, after, APEX_GOALS) is copied
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "**Meta:** llegar a todo\n**Prioridad:** alta\n\n- [medible] Cerrar 5 tareas\n",
+        "Meta: **llegar a todo**\nPrioridad: **alta**.\n\n- [medible] Cerrar 5 tareas\n",
+        "*Meta*: llegar a todo\n__Prioridad__: Alta\n\n- [medible] Cerrar 5 tareas\n",
+    ],
+    ids=["etiqueta-en-negrita", "valor-en-negrita", "cursiva-y-subrayado"],
+)
+def test_la_meta_y_la_prioridad_con_enfasis_cuentan(tmp_path, text):
+    config_dir = write_finished(tmp_path / "config")
+    _area_change("Gestión del tiempo", text)(config_dir)
+
+    state = progress(config_dir)
+
+    area = next(area for area in state.areas if area.name == "Gestión del tiempo")
+    assert (area.priority, area.goal) == ("alta", "llegar a todo")
+    assert state.finished
