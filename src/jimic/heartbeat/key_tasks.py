@@ -86,6 +86,10 @@ class KeyTaskStatus(BaseModel):
     """Aware, local: it may fall tomorrow (a task late at night), and then it is not today."""
     tone_level: int
     sent_today: int
+    next_from: datetime | None = None
+    """Its last notice of today plus its `spacing` (or `grace`), local: before it, it is not due
+    (`too_soon`, decision 149). It is `due_now`'s, not `refusal`'s, so the second pass says
+    `not_due`, and the plan B, which only goes out at `insist_from`, is not affected."""
 
     def refusal(self, now: datetime) -> KeyRefusal | None:
         """Why the code does not let it go out now, or `None`. In this order."""
@@ -102,7 +106,8 @@ class KeyTaskStatus(BaseModel):
         return None
 
     def to_json(self, now: datetime) -> dict[str, Any]:
-        """For the model: only what is set; hours `HH:MM`, local."""
+        """For the model: only what is set; hours `HH:MM`, local. Not `insist_from`: whether it
+        may insist now is the intention's `due_now` (task 1.15-b), so the model compares no hour."""
         document: dict[str, Any] = {}
         if self.task is not None:
             due = self.task.due
@@ -115,8 +120,6 @@ class KeyTaskStatus(BaseModel):
             document["not_today"] = True
         if self.paused_until is not None and now < self.paused_until:
             document["paused_until"] = self.paused_until.strftime("%H:%M")
-        same_day = self.insist_from.date() == now.date()
-        document["insist_from"] = self.insist_from.strftime("%H:%M") if same_day else "mañana"
         document["tone_level"] = self.tone_level
         document["sent_today"] = self.sent_today
         return document
@@ -134,9 +137,11 @@ def key_task_status(
     jumped: Collection[str],
     moved: Collection[str],
     sent_today: int,
+    last_sent_at: datetime | None = None,
 ) -> KeyTaskStatus:
     """The status of `intention` at `now` (aware, local). `jumped` are the ids of the tasks seen
-    today that are open on a later day; `moved`, those JimiC moved today."""
+    today that are open on a later day; `moved`, those JimiC moved today; `last_sent_at`, its
+    last notice of today."""
     today = now.date()
     task = todays_task(tasks, habit, today)
     done_by: DoneBy | None = None
@@ -178,6 +183,9 @@ def key_task_status(
         insist_from=start + intention.grace,
         tone_level=min(sent_today + 1, MAX_TONE),
         sent_today=sent_today,
+        next_from=None
+        if last_sent_at is None
+        else (last_sent_at + intention.gap).astimezone(now.tzinfo),
     )
 
 

@@ -155,5 +155,8 @@ async def run_cycle(
         queue,
         last_message_at(conn),
         state.key_tasks,
+        # Only the model's picks must be due (task 1.15-b), the room left to the quota: the
+        # plan B keeps its default times.
+        None if decision.api_down else state.may_pick,
     )
     return CycleResult(None, dropped, state, decision, tuple(verdicts))

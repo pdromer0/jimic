@@ -13,12 +13,11 @@ from jimic.clock import to_db
 from jimic.memory.database import open_database
 from jimic.memory.markdown_checks import icon_rows
 from jimic.memory.notices import record_sent
-from jimic.plan.day import day_view
+from jimic.plan.day import day_view, late_after
 from jimic.plan.message import (
     MAX_LINES,
     PlanContent,
     icon_table,
-    late_after,
     learned_line,
     line_count,
     paint,

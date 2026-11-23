@@ -68,11 +68,14 @@ def run(
     eval_file: Path = EVALS_FILE,
     model_api: Callable[[Settings], ModelApi] = build_model_api,
     clock: Clock | None = None,
+    compare_to: str | None = None,
 ) -> EvalRun:
-    """Run the evaluation and write its report. `model_api` and `clock` are for the tests.
+    """Run the evaluation and write its report. `compare_to` is the report of `--comparar-con`
+    (without it, the last complete one); `model_api` and `clock` are for the tests.
 
-    Raises `EvalError` outside `dev` (before anything else) or with a wrong file or id, and
-    `PathsError`, `ConfigError` or `UnpricedError` like `jimic run`.
+    Raises `EvalError` outside `dev` (before anything else), with a wrong file or id or a report
+    of `--comparar-con` that cannot be read, and `PathsError`, `ConfigError` or `UnpricedError`
+    like `jimic run`. All before spending.
     """
     paths = resolve_paths(environ)
     refuse_unless_dev(paths)
@@ -83,14 +86,21 @@ def run(
     settings = load_settings(paths)
     model = settings.heartbeat_model
     require_cache_prices(model)
+    folder = paths.data_dir / REPORTS
+    reference = report.chosen_report(folder, compare_to) if compare_to is not None else None
+    complete = {scenario.id for scenario in chosen} == {scenario.id for scenario in suite.scenarios}
     started = (clock or SystemClock(settings.timezone)).now().astimezone(settings.timezone)
     results = asyncio.run(_run(model_api(settings), model, suite, chosen, passes))
     skipped = [scenario for scenario in chosen if scenario.pending is not None]
     paid = report.spend(model, results)
-    folder = paths.data_dir / REPORTS
-    comparison = report.compare_with_previous(folder, [item.outcome for item in results])
+    outcomes = [item.outcome for item in results]
+    if reference is not None:
+        name, previous = reference
+        comparison = report.compare(name, outcomes, previous)
+    else:
+        comparison = report.compare_with_previous(folder, outcomes)
     screen = report.summary(model, passes, results, skipped, paid, comparison)
-    document = report.document(started, model, passes, results, skipped, paid, comparison)
+    document = report.document(started, model, passes, results, skipped, paid, comparison, complete)
     json_path, md_path = report.write_report(
         folder, started, document, report.markdown(screen, results, started)
     )

@@ -77,6 +77,12 @@ def build_parser() -> argparse.ArgumentParser:
     heartbeat.add_argument(
         "--pasadas", type=int, default=evals.DEFAULT_PASSES, dest="passes", help="por escenario"
     )
+    heartbeat.add_argument(
+        "--comparar-con",
+        dest="compare_to",
+        metavar="INFORME",
+        help="el informe con el que comparar (sin él, el último completo)",
+    )
     plan = evaluate_commands.add_parser(
         "plan", help="los escenarios de evals/plan.yaml con el agente real (cuesta dinero)"
     )
@@ -144,9 +150,14 @@ def main(argv: list[str] | None = None) -> int:
     elif args.command == "google":
         return google_command()
     elif args.command == "evaluar":
-        evaluate = evals.run_plan if args.eval_command == "plan" else evals.run
+        if args.eval_command == "plan":
+            return setup_errors_as_exit(
+                lambda: print(evals.run_plan(os.environ, args.scenarios, args.passes).text)
+            )
         return setup_errors_as_exit(
-            lambda: print(evaluate(os.environ, args.scenarios, args.passes).text)
+            lambda: print(
+                evals.run(os.environ, args.scenarios, args.passes, compare_to=args.compare_to).text
+            )
         )
     elif args.command == "telegram":
         return setup_errors_as_exit(lambda: demo.run(os.environ))

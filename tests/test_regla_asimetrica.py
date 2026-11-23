@@ -9,8 +9,8 @@ from typing import Any
 import pytest
 from heartbeat_data import LIMITS, limits
 
-from jimic.memory.discreet import holds, judge, minutes
-from jimic.memory.schemas import Budget, Window
+from jimic.memory.discreet import holds, judge, minutes, relaxed_spacing
+from jimic.memory.schemas import Budget, Intentions, Window
 
 BUDGET = LIMITS["budget"]
 
@@ -184,3 +184,49 @@ def test_la_tabla_cubre_todos_los_campos_de_limites():
         "tool_levels",
         "sensitive_categories",
     }
+
+
+# --- El `spacing` de las tareas clave (decisión 149) --------------------------------------------
+
+
+def key_tasks(**changes: Any) -> Intentions:
+    gym = {
+        "id": "insistir_gimnasio",
+        "type": "key_task",
+        "purpose": "Que no se me pase",
+        "habit": "gimnasio",
+        "grace": "45m",
+        "max_per_day": 3,
+        "default_time": "13:00",
+        "priority": "high",
+    }
+    habit = {
+        "id": "gimnasio",
+        "name": "Gimnasio",
+        "priority": "high",
+        "duration": "75m",
+        "moment": "midday",
+        "todoist_task": "Gimnasio",
+    }
+    return Intentions.model_validate({"intentions": [{**gym, **changes}], "habits": [habit]})
+
+
+@pytest.mark.parametrize(
+    ("old", "new", "relaxed"),
+    [
+        ({}, {"spacing": "1h"}, ()),  # sube de 45 (su grace) a 60
+        ({"spacing": "1h"}, {"spacing": "2h"}, ()),
+        ({"spacing": "1h"}, {"spacing": "30m"}, ("insistir_gimnasio.spacing",)),
+        ({}, {"spacing": "30m"}, ("insistir_gimnasio.spacing",)),  # baja de 45 a 30
+        ({"spacing": "1h"}, {}, ("insistir_gimnasio.spacing",)),  # quitarlo deja 45
+        ({}, {"grace": "30m"}, ("insistir_gimnasio.spacing",)),  # sin spacing, vale el grace
+        ({"spacing": "1h"}, {"spacing": "1h", "grace": "30m"}, ()),
+    ],
+)
+def test_el_spacing_conversando_solo_sube(old, new, relaxed):
+    assert relaxed_spacing(key_tasks(**old), key_tasks(**new)) == relaxed
+
+
+def test_una_tarea_clave_nueva_no_tiene_con_que_compararse():
+    empty = Intentions.model_validate({"intentions": [], "habits": []})
+    assert relaxed_spacing(empty, key_tasks(spacing="15m")) == ()

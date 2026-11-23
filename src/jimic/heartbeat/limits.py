@@ -4,14 +4,16 @@ The **first pass** runs before the model and ends the cycle without calling it: 
 event in progress, or no room left even for the day close. The **second pass** runs on what the
 decision proposes and guarantees the limits whatever the model says: the cap per intention, no
 repeating, the slot kept for the day close (decision 1.7-a), grouping (decision 1.7-b) and, for a
-key task (task 1.15), done, no longer today's, «hoy no», paused or before it may insist.
+key task (task 1.15), done, no longer today's, «hoy no», paused or before it may insist. What the
+model picks must also be due now (`not_due`, task 1.15-b); the templates of the plan B and what
+waited in the queue are not checked against it.
 
 Every verdict carries a reason that is a code. Logs say codes and intention ids, never the text
 of a message.
 """
 
 import logging
-from collections.abc import Awaitable, Callable, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import date, datetime, time
 from typing import Literal
@@ -243,8 +245,10 @@ class _Pass:
         queue: WaitingNotices,
         last_chat: datetime | None,
         key_tasks: Mapping[str, KeyTaskStatus],
+        due: Collection[str] | None,
     ) -> None:
         self.now = now
+        self.due = due
         self.key_tasks = key_tasks
         self.last_chat = last_chat
         self.day = now.date()
@@ -299,6 +303,8 @@ class _Pass:
             refusal = "already_waiting"
         if refusal is None and item.intent in taken:
             refusal = "duplicate"
+        if refusal is None and self.due is not None and item.intent not in self.due:
+            refusal = "not_due"
         return refusal
 
     def batch(self, proposals: Sequence[Outgoing]) -> None:
@@ -380,15 +386,17 @@ def second_pass(
     queue: WaitingNotices,
     last_chat: datetime | None = None,
     key_tasks: Mapping[str, KeyTaskStatus] | None = None,
+    due: Collection[str] | None = None,
 ) -> list[Verdict]:
     """The verdicts of this heartbeat for the proposals and for what waits. `queue` changes.
     `last_chat` is the last moment Pedro wrote, if any; `key_tasks`, what the state of the day
-    knows of each key task (task 1.15).
+    knows of each key task (task 1.15); `due`, the ids due now (task 1.15-b): given, a proposal
+    that is not among them is blocked with `not_due`. `None` checks nothing (the plan B).
 
     The proposals (the model's picks, or the templates of a heartbeat with the API down) are
     one batch: whatever goes out goes out as one message, so a heartbeat never sends two.
     """
-    state = _Pass(now, intentions, limits, sent, queue, last_chat, key_tasks or {})
+    state = _Pass(now, intentions, limits, sent, queue, last_chat, key_tasks or {}, due)
     state.batch(proposals)
     for verdict in state.verdicts:
         logger.info(

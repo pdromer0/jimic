@@ -179,3 +179,20 @@ def template_free(name: str) -> str:
     if name == "objetivos.md":
         return "## Salud\n- [declarado] Dormir más\n"
     return "## Iconos\n| Tarea | Icono |\n| --- | --- |\n| Leer | 📚 |\n"
+
+
+def test_check_dice_un_spacing_que_no_es_mayor_que_0(config_dir, capsys):
+    """Decisión 149: `spacing` es opcional, y si está, mayor que 0; `config check` lo dice."""
+    run(["config", "init"], capsys)
+    for markdown in ("rutina.md", "objetivos.md", "preferencias.md"):
+        (config_dir / markdown).write_text(
+            ROUTINE if markdown == "rutina.md" else template_free(markdown), encoding="utf-8"
+        )
+    with_spacing = intentions().replace("    grace: 45m\n", "    grace: 45m\n    spacing: 1h\n")
+    (config_dir / "intenciones.yaml").write_text(with_spacing, encoding="utf-8")
+    assert run(["config", "check"], capsys)[0] == 0
+    zero = with_spacing.replace("spacing: 1h", "spacing: 0m")
+    (config_dir / "intenciones.yaml").write_text(zero, encoding="utf-8")
+    code, out, _ = run(["config", "check"], capsys)
+    assert code == jimic.cli.CHECK_FAILED
+    assert "intentions[2].spacing: la duración debe ser mayor que 0" in out

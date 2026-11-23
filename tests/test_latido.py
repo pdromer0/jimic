@@ -53,6 +53,17 @@ MODEL = "claude-haiku-5-5"
 MONDAY = date(2030, 1, 7)
 MEETING = event(madrid("2030-01-07T10:00"), minutes=60)
 ALL = (PLAN, CLOSE, GYM, PLANTS, BINS, OFFERS)
+DUE_EARLY = (
+    PLAN,
+    {**CLOSE, "default_time": "07:00"},
+    GYM,
+    {**PLANTS, "default_time": "07:00"},
+    {**BINS, "default_time": "07:00"},
+    {**OFFERS, "default_time": "07:00"},
+)
+"""The notices and the close (without a window) already due from 7:00 (task 1.15-b: the second pass
+blocks a pick that is not due), for the tests of batches, the queue and the handover, which do
+not look at the hour."""
 
 
 @pytest.fixture
@@ -182,7 +193,7 @@ def test_un_agrupado_es_un_mensaje_con_una_fila_por_intencion_y_el_mismo_id(conn
             api_message(answer(True, "basura", "Basura")),
         ]
     )
-    world = World(conn, FakeMessages(lambda request: next(replies)))
+    world = World(conn, FakeMessages(lambda request: next(replies)), items=DUE_EARLY)
     world.at("2030-01-07T10:15")
     assert world.sender.texts == []
     world.at("2030-01-07T10:30")
@@ -222,7 +233,9 @@ def test_un_envio_rechazado_se_descarta_sin_gastar_y_el_siguiente_latido_puede_e
 def test_el_plan_y_el_cierre_de_haiku_los_envia_el_enganche_no_el_latido(conn, intent, task_id):
     """Decisión 1.8-b: el latido no envía su texto ni los anota en `notices`; los pasa al
     enganche (el plan lo envía la 1.14; el cierre, la 1.16)."""
-    world = World(conn, FakeMessages(api_message(answer(True, intent, SECRET_TEXT))))
+    world = World(
+        conn, FakeMessages(api_message(answer(True, intent, SECRET_TEXT))), items=DUE_EARLY
+    )
     world.at("2030-01-07T08:00")
     assert world.sender.texts == []
     assert world.notices() == []
@@ -243,7 +256,9 @@ def test_el_plan_elegido_a_las_830_no_se_ofrece_a_las_845_y_un_aviso_si_sale(con
     con `left_today` 0 y, si Haiku lo elige otra vez, la segunda pasada lo para como repetido;
     el aviso del mismo lote sale. Pilla el plan que se puede elegir dos veces (versión
     incorrecta 7)."""
-    world = World(conn, FakeMessages(api_message(answer(True, "plan_del_dia", None))))
+    world = World(
+        conn, FakeMessages(api_message(answer(True, "plan_del_dia", None))), items=DUE_EARLY
+    )
     world.at("2030-01-07T08:30")
     assert plan_json(world.fake.requests[0])["left_today"] == 1
     world.fake.reply = api_message(picks(("plan_del_dia", None), ("basura", "Fuera")))
@@ -286,7 +301,7 @@ def test_si_el_enganche_falla_el_plan_no_queda_atendido(conn):
 
 def test_el_enganche_de_serie_solo_escribe_en_el_log(conn, caplog):
     caplog.set_level(logging.INFO)
-    its = intentions(*ALL)
+    its = intentions(*DUE_EARLY)
     heartbeat = Heartbeat(
         clock=FixedClock(madrid("2030-01-07T08:30")),
         timezone=MADRID,
@@ -474,6 +489,7 @@ def test_tres_avisos_a_las_1630_salen_en_un_mensaje_y_cuentan_uno(conn):
     world = World(
         conn,
         FakeMessages(api_message(picks(("ofertas", "Uno"), ("regar", "Dos"), ("basura", "Tres")))),
+        items=DUE_EARLY,
     )
     world.at("2030-01-07T16:30")
     assert world.sender.texts == ["Uno\n\nDos\n\nTres"]
@@ -490,11 +506,51 @@ def test_tres_avisos_a_las_1630_salen_en_un_mensaje_y_cuentan_uno(conn):
 
 def test_el_plan_en_un_lote_no_sale_y_los_demas_si(conn):
     world = World(
-        conn, FakeMessages(api_message(picks(("plan_del_dia", None), ("basura", "Fuera"))))
+        conn,
+        FakeMessages(api_message(picks(("plan_del_dia", None), ("basura", "Fuera")))),
+        items=DUE_EARLY,
     )
     world.at("2030-01-07T08:00")
     assert world.sender.texts == ["Fuera"]
     assert world.notices() == [("basura", 1001)]
+
+
+def test_un_aviso_elegido_antes_de_su_hora_no_sale(conn):
+    """Versión incorrecta 7 (ajuste de Pedro, 1.15-b): la segunda pasada descarta lo que Haiku
+    elige con `due_now: false`, con su código, y lo demás del lote sale."""
+    world = World(conn, FakeMessages(api_message(picks(("regar", "Pronto"), ("ofertas", "Ya")))))
+    world.at("2030-01-07T16:30")
+    assert world.sender.texts == ["Ya"]
+    assert world.notices() == [("ofertas", 1001)]
+    assert world.reasons()[0].endswith("[block not_due; send ok]")
+
+
+def test_un_aviso_que_toca_si_sale(conn):
+    """Lo que sigue verde con la versión incorrecta 7."""
+    world = World(conn, FakeMessages(api_message(answer(True, "regar", "Riega"))))
+    world.at("2030-01-07T19:00")
+    assert world.sender.texts == ["Riega"]
+
+
+def test_con_la_api_caida_el_plan_b_no_mira_lo_que_toca(conn):
+    """El plan B sigue su hora por defecto aunque caiga antes de la ventana: solo lo que elige
+    Haiku tiene que tocar (1.15-b)."""
+    early = {**PLAN, "default_time": "07:00"}
+    world = World(conn, FakeMessages(api_down()), items=(early,))
+    world.at("2030-01-07T07:00")
+    assert world.handed == ["plan_del_dia"]
+
+
+def test_la_insistencia_demasiado_pronto_la_frena_la_segunda_pasada(conn):
+    """Decisión 149: 15 minutos tras su aviso, la tarea clave no toca (`too_soon`) y lo que elija
+    Haiku se para con `not_due`; a los 45 de su `grace`, sale."""
+    add_notice(conn, "insistir_gimnasio", madrid("2030-01-07T15:00"), 1)
+    world = World(conn, FakeMessages(api_message(answer(True, "insistir_gimnasio", "Otra"))))
+    world.at("2030-01-07T15:15")
+    assert world.sender.texts == []
+    assert world.reasons()[0].endswith("[block not_due]")
+    world.at("2030-01-07T15:45")
+    assert world.sender.texts == ["Otra"]
 
 
 def test_un_lote_de_cuatro_no_sale(conn):
@@ -581,7 +637,7 @@ def test_si_falla_el_contador_lo_que_esperaba_sale_igual_y_hay_una_sola_fila(con
     un fallo al contar el gasto no puede perderlo ni dejar dos filas en el latido."""
     add_notice(conn, "plan_del_dia", madrid("2030-01-07T10:00"), 1)
     replies = iter([api_message(answer(True, "regar", "Riega")), api_message(answer())])
-    world = World(conn, FakeMessages(lambda request: next(replies)))
+    world = World(conn, FakeMessages(lambda request: next(replies)), items=DUE_EARLY)
     world.at("2030-01-07T10:15")
 
     def broken(*args, **kwargs):

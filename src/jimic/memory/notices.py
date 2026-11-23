@@ -52,6 +52,10 @@ class SentToday:
     def last_sent_at(self) -> datetime | None:
         return self.notices[-1].sent_at if self.notices else None
 
+    def last_sent_of(self, intent: str) -> datetime | None:
+        """When `intent` last went out today (UTC), if it did."""
+        return max((n.sent_at for n in self.notices if n.intent == intent), default=None)
+
 
 def sent_between(conn: sqlite3.Connection, start: datetime, end: datetime) -> SentToday:
     """The notices with `start <= sent_at < end`, oldest first, and the handovers in the same

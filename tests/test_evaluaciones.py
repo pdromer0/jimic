@@ -42,17 +42,68 @@ def test_el_fichero_real_carga_y_cada_escenario_monta_su_estado_con_lo_esperado_
     """Pilla una errata en `evals/latido.yaml` (un id, una hora, una intención que ese día no
     está activa) antes de gastar un céntimo."""
     ids = [item.id for item in suite.scenarios]
-    assert len(ids) == len(set(ids)) == 40
-    assert [(item.id, item.pending) for item in suite.scenarios if item.pending] == [
-        ("e02", "1.15-b")
+    assert len(ids) == len(set(ids)) == 46
+    assert [item.id for item in suite.scenarios if item.pending] == []  # e02, activo (1.15-b)
+    assert sum(item.silent_only for item in suite.scenarios) == 22
+    # La reserva del chat (paso 2 de la 1.15-b): s01 a s06, al final.
+    assert [item.id for item in suite.scenarios if item.origin == "reserva"] == [
+        f"s0{n}" for n in range(1, 7)
     ]
-    runnable = [item for item in suite.scenarios if item.pending is None]
-    assert len(runnable) == 39
-    assert sum(item.silent_only for item in runnable) == 19
     for item in suite.scenarios:
         active = {intention.id for intention in build_state(suite, item).intentions}
         for alternative in item.expected:
             assert alternative <= active, item.id
+
+
+def test_cada_esperado_cabe_en_lo_que_toca(suite):
+    """1.15b-b: ningún esperado cambia y todos caben en lo que el código dice que toca (40 de 40,
+    valor a mano del plan); si no, Haiku no podría acertar. Pilla un `due_now` que niega algo
+    que un escenario espera."""
+    for item in suite.scenarios:
+        due = build_state(suite, item).due
+        for alternative in item.expected:
+            assert alternative <= due, (item.id, sorted(alternative - due))
+
+
+def test_lo_que_toca_en_los_escenarios_del_plan(suite):
+    """Valores a mano del plan: el plan a las 7:45 y a las 9:00 en su ventana y a las 11:15
+    tardío; el riego que se quedó sin salir; sin cupo, solo el cierre con su hueco."""
+    whys = {
+        scenario: {i.id: i.why for i in build_state(suite, by_id(suite, scenario)).intentions}
+        for scenario in ("l03", "l35", "l05", "l06", "l25", "l29")
+    }
+    assert whys["l03"]["plan_del_dia"] == whys["l35"]["plan_del_dia"] == "in_window"
+    assert whys["l05"]["plan_del_dia"] == "in_window"
+    assert whys["l06"]["plan_del_dia"] == "late"
+    assert whys["l25"]["regar"] == "late"
+    assert (whys["l29"]["cierre_del_dia"], whys["l29"]["basura"]) == ("in_window", "no_room")
+
+
+@pytest.mark.parametrize(
+    ("scenario_id", "intent"),
+    [
+        ("l12", "insistir_gimnasio"),
+        ("l16", "insistir_gimnasio"),
+        ("l16", "insistir_ofertas"),
+        ("l18", "insistir_ofertas"),
+        ("l37", "insistir_gimnasio"),
+        ("l39", "insistir_gimnasio"),
+    ],
+)
+def test_las_tareas_clave_que_el_escenario_da_por_hechas_estan_hechas(suite, scenario_id, intent):
+    """1.15b-b (versión incorrecta 6): lo que un escenario quería decir con quitar la tarea lo
+    dice `completed_today`. Sin él, l18 dejaba insistir con las ofertas (el 2/3 de la 1.15)."""
+    item = next(
+        i for i in build_state(suite, by_id(suite, scenario_id)).intentions if i.id == intent
+    )
+    assert (item.due_now, item.why) == (False, "done")
+
+
+def test_el_e02_no_deja_insistir_tras_el_hoy_no(suite):
+    item = next(
+        i for i in build_state(suite, by_id(suite, "e02")).intentions if i.id == "insistir_gimnasio"
+    )
+    assert (item.due_now, item.why) == (False, "not_today")
 
 
 def test_una_intencion_esperada_que_ese_dia_no_esta_activa_es_un_error(tmp_path):
@@ -111,10 +162,15 @@ def key_state(tmp_path, changes: str, now: str = "13:30"):
     return build_state(suite, by_id(suite, "zz1")).key_tasks["insistir_gimnasio"]
 
 
-def test_la_base_marca_el_gimnasio_como_entreno_y_apex_lo_da_por_hecho(suite):
-    """l12: con el entreno de hoy en APEX, el estado lo dice (decisión de Pedro, `training`)."""
-    status = build_state(suite, by_id(suite, "l12")).key_tasks["insistir_gimnasio"]
-    assert status.done_by == "apex"
+def test_la_base_marca_el_gimnasio_como_entreno_y_apex_lo_da_por_hecho(tmp_path, suite):
+    """Con el entreno de hoy en APEX, el estado lo dice (decisión de Pedro, `training`). Desde la
+    1.15-b, l12 lo dice también con `completed_today`, que va antes: aquí, sin él."""
+    apex = (
+        "    tasks: []\n    apex:\n      entrenamientos:\n"
+        '        - {id: inventado-2, fecha: "2030-01-10", tipo: cardio, nombre: Cardio suave,\n'
+        "           duracion_min: 75.0, fuente: inventada, ejercicios: []}\n"
+    )
+    assert key_state(tmp_path, apex).done_by == "apex"
     assert build_state(suite, by_id(suite, "l08")).key_tasks["insistir_gimnasio"].done_by is None
 
 
@@ -153,8 +209,10 @@ def test_like_hereda_el_estado_pero_no_el_porque_ni_lo_esperado(suite):
     """l27 parte de l26: mismos seis mensajes enviados, pero ni su `why` ni sus alternativas."""
     l26, l27 = by_id(suite, "l26"), by_id(suite, "l27")
     assert l27.sent_today == l26.sent_today
-    assert l26.why is not None and l27.why is None
-    assert l27.expected == (frozenset({"insistir_gimnasio"}),)
+    # Desde la 1.15-b l27 tiene su propio `why` (decisión 150): no es el de l26.
+    assert l26.why is not None and l27.why is not None and l27.why != l26.why
+    assert frozenset({"insistir_gimnasio"}) in l27.expected
+    assert l27.expected != l26.expected
 
 
 def test_lo_enviado_a_la_misma_hora_cuenta_un_mensaje(suite):
@@ -360,12 +418,27 @@ def test_sin_escenarios_de_callar_no_se_divide_entre_cero():
 # --- El lanzador -------------------------------------------------------------------------------
 
 
-def test_el_pendiente_no_se_lanza_ni_cuenta(suite):
+def test_el_pendiente_no_se_lanza_ni_cuenta(tmp_path):
+    path = variant(
+        tmp_path,
+        '\n  - id: zz1\n    title: futuro\n    now: "19:00"\n'
+        '    expected: [[regar]]\n    pending: "1.99"\n',
+    )
+    suite = load_suite(path)
     fake = FakeMessages()
-    chosen = suite.select(["l01", "e02", "l02"])
+    chosen = suite.select(["l01", "zz1", "l02"])
     results = asyncio.run(run_scenarios(fake.create, "claude-haiku-5-5", suite, chosen, 3))
     assert [item.scenario.id for item in results] == ["l01", "l02"]
     assert fake.calls == 6
+
+
+def test_el_e02_ya_no_se_salta(suite):
+    """Activado en la 1.15-b: entra en la evaluación como los demás."""
+    fake = FakeMessages()
+    results = asyncio.run(
+        run_scenarios(fake.create, "claude-haiku-5-5", suite, suite.select(["e02"]), 3)
+    )
+    assert [item.scenario.id for item in results] == ["e02"] and fake.calls == 3
 
 
 def test_las_pasadas_salen_en_el_orden_del_fichero(suite):

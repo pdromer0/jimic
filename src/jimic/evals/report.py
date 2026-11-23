@@ -8,12 +8,17 @@ The comparison is scenario by scenario: only the scenarios with the same id and 
 fingerprint in both reports count, the figures of both are recomputed over them, and a figure
 that gets worse by more than 5 points is flagged (the regression of 13.3). New, removed and
 changed scenarios are listed apart, so adding one never breaks the comparison of the others.
+
+It is made with the last **complete** report (decision 1.15b-c): one that ran every scenario of
+its file (`complete`, from version 2), so a run with `--escenario` never becomes the reference of
+the next one. `--comparar-con` names another by hand. The scenarios of the reserve set
+(`origin: reserva`) are in the figures and also get their own, apart (task 1.15-b).
 """
 
 import json
 import re
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from decimal import Decimal
 from fractions import Fraction
@@ -21,14 +26,16 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from jimic.evals.heartbeat import Outcome, PassResult, ScenarioResult, Score, is_correct, score
-from jimic.evals.scenarios import Scenario
+from jimic.evals.scenarios import EvalError, Scenario
 from jimic.memory.usage import TokenUsage, cost
 
 MIN_ACCURACY = Fraction(90, 100)
 MAX_FALSE_SPEAK = Fraction(5, 100)
 REGRESSION = Fraction(5, 100)
 """More than this drop (5 points) is a regression; exactly 5 is not."""
-VERSION = 1
+VERSION = 2
+"""2: `complete` (task 1.15-b). A version 1 report never counts as complete: it is not guessed."""
+RESERVE = "reserva"
 PREFIX = "latido"
 """The name of the reports of the heartbeat; the plan's are `plan-` (task 1.14)."""
 
@@ -70,8 +77,9 @@ def spend(model: str, results: Sequence[ScenarioResult]) -> Spend:
 
 @dataclass(frozen=True)
 class Comparison:
-    previous: str
-    """The name of the previous report."""
+    previous: str | None
+    """The name of the previous report; `None` when there is no complete one, but some that
+    could not be read were skipped (`skipped`)."""
     before: Score | None
     """`None` when no scenario is common to both: nothing to compare."""
     after: Score | None
@@ -84,6 +92,9 @@ class Comparison:
     changed: tuple[str, ...]
     """The same id with another fingerprint: left out of the comparison."""
     unreadable: bool = False
+    skipped: tuple[str, ...] = ()
+    """Newer reports that could not be read, so could not say they were complete (task 1.15-b):
+    the screen names them, so a broken run is never hidden."""
 
 
 def worsened(before: Score, after: Score) -> tuple[str, ...]:
@@ -170,27 +181,82 @@ def read_outcomes(document: object) -> list[Outcome]:
         raise UnreadableReport(type(error).__name__) from None
 
 
-def previous_report(folder: Path, prefix: str = PREFIX) -> Path | None:
-    """The most recent report of `folder` named `<prefix>-…`, by the time in its name."""
+def _reports(folder: Path, prefix: str) -> list[Path]:
+    """The reports of `folder` named `<prefix>-…`, the most recent first, by the time in their
+    name."""
     found = []
     pattern = _name(prefix)
     for path in folder.glob(f"{prefix}-*.json"):
         match = pattern.fullmatch(path.name)
         if match is not None:
             found.append(((match[1], int(match[2] or 1)), path))
-    return max(found)[1] if found else None
+    return [path for _, path in sorted(found, reverse=True)]
+
+
+def previous_report(folder: Path, prefix: str = PREFIX) -> Path | None:
+    """The most recent report of `folder` named `<prefix>-…`, by the time in its name."""
+    found = _reports(folder, prefix)
+    return found[0] if found else None
+
+
+def _read(path: Path) -> object:
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+@dataclass(frozen=True)
+class Latest:
+    """The last complete report, read once, and the newer ones that could not be read."""
+
+    path: Path | None
+    document: object
+    skipped: tuple[str, ...]
+
+
+def latest_complete(folder: Path) -> Latest:
+    """The most recent heartbeat report of `folder` that is complete. One that cannot be read
+    cannot say so: it is skipped, and named."""
+    skipped: list[str] = []
+    for path in _reports(folder, PREFIX):
+        try:
+            document = _read(path)
+        except OSError, ValueError:
+            skipped.append(path.name)
+            continue
+        if isinstance(document, dict) and document.get("complete") is True:
+            return Latest(path, document, tuple(skipped))
+    return Latest(None, None, tuple(skipped))
+
+
+def chosen_report(folder: Path, name: str) -> tuple[str, list[Outcome]]:
+    """The report of `--comparar-con` and its outcomes: a path (with a folder, `./` included),
+    or a bare file name looked up in `folder`. `EvalError` if it does not exist or cannot be
+    read, before spending anything."""
+    bare = "/" not in name and "\\" not in name and not name.startswith("~")
+    path = folder / name if bare else Path(name).expanduser()
+    try:
+        return path.name, read_outcomes(_read(path))
+    except FileNotFoundError:
+        raise EvalError(f"--comparar-con: no existe {path}") from None
+    except (OSError, ValueError, UnreadableReport) as error:
+        raise EvalError(
+            f"--comparar-con: {path} no se puede leer ({type(error).__name__})"
+        ) from None
 
 
 def compare_with_previous(folder: Path, current: Sequence[Outcome]) -> Comparison | None:
-    """`None` when there is no previous report."""
-    path = previous_report(folder)
-    if path is None:
-        return None
+    """With the last complete report; `None` when there is none and nothing was skipped."""
+    latest = latest_complete(folder)
+    skipped = latest.skipped
+    if latest.path is None:
+        return (
+            Comparison(None, None, None, (), (), (), (), (), skipped=skipped) if skipped else None
+        )
+    name = latest.path.name
     try:
-        previous = read_outcomes(json.loads(path.read_text(encoding="utf-8")))
-    except OSError, ValueError, UnreadableReport:
-        return Comparison(path.name, None, None, (), (), (), (), (), unreadable=True)
-    return compare(path.name, current, previous)
+        previous = read_outcomes(latest.document)
+    except UnreadableReport:
+        return Comparison(name, None, None, (), (), (), (), (), unreadable=True, skipped=skipped)
+    return replace(compare(name, current, previous), skipped=skipped)
 
 
 def report_paths(folder: Path, started: datetime, prefix: str = PREFIX) -> tuple[Path, Path]:
@@ -259,10 +325,15 @@ def _figures(total: Score) -> list[str]:
 
 def _comparison_lines(comparison: Comparison | None) -> list[str]:
     if comparison is None:
-        return ["Comparación: es el primer informe."]
+        return ["Comparación: no hay un informe completo anterior."]
+    skipped = (
+        [f"  ilegibles, saltados: {', '.join(comparison.skipped)}"] if comparison.skipped else []
+    )
+    if comparison.previous is None:
+        return ["Comparación: no hay un informe completo anterior.", *skipped]
     if comparison.unreadable:
-        return [f"Comparación: {comparison.previous} no se puede leer; sin comparación."]
-    lines = [f"Comparación con {comparison.previous}:"]
+        return [f"Comparación: {comparison.previous} no se puede leer; sin comparación.", *skipped]
+    lines = [f"Comparación con {comparison.previous}:", *skipped]
     before, after = comparison.before, comparison.after
     if before is None or after is None:
         lines.append("  sin informe anterior comparable (ningún escenario en común)")
@@ -288,6 +359,11 @@ def _comparison_lines(comparison: Comparison | None) -> list[str]:
     return lines
 
 
+def reserve_outcomes(results: Sequence[ScenarioResult]) -> list[Outcome]:
+    """The outcomes of the reserve set alone, measured apart too; empty without it."""
+    return [item.outcome for item in results if item.scenario.origin == RESERVE]
+
+
 def summary(
     model: str,
     passes: int,
@@ -302,6 +378,10 @@ def summary(
         f"Evaluación del latido · {model} · {passes} pasadas · {len(results)} escenarios",
         *_figures(total),
     ]
+    reserve = reserve_outcomes(results)
+    if reserve:
+        lines.append(f"Reserva, aparte ({len(reserve)} escenarios):")
+        lines.extend(f"  {line}" for line in _figures(score(reserve)))
     if skipped:
         listed = ", ".join(f"{item.id} (pendiente: {item.pending})" for item in skipped)
         lines.append(f"Saltados: {len(skipped)}: {listed}")
@@ -363,6 +443,7 @@ def _comparison_json(comparison: Comparison | None) -> dict[str, Any] | None:
     return {
         "previous": comparison.previous,
         "unreadable": comparison.unreadable,
+        "skipped": list(comparison.skipped),
         "before": figures(comparison.before),
         "after": figures(comparison.after),
         "worse": list(comparison.worse),
@@ -370,6 +451,18 @@ def _comparison_json(comparison: Comparison | None) -> dict[str, Any] | None:
         "new": list(comparison.new),
         "removed": list(comparison.removed),
         "changed": list(comparison.changed),
+    }
+
+
+def _score_json(total: Score | None) -> dict[str, int] | None:
+    if total is None:
+        return None
+    return {
+        "correct": total.correct,
+        "passes": total.passes,
+        "spoke_when_silent": total.spoke_when_silent,
+        "silent_passes": total.silent_passes,
+        "errors": total.errors,
     }
 
 
@@ -381,11 +474,15 @@ def document(
     skipped: Sequence[Scenario],
     paid: Spend,
     comparison: Comparison | None,
+    complete: bool,
 ) -> dict[str, Any]:
-    """The JSON report: everything, every pass with its reason and messages (invented data)."""
+    """The JSON report: everything, every pass with its reason and messages (invented data).
+    `complete`: every scenario of the file was chosen (the pending ones, skipped)."""
     total = score([item.outcome for item in results])
+    reserve = reserve_outcomes(results)
     return {
         "version": VERSION,
+        "complete": complete,
         "started": started.isoformat(timespec="seconds"),
         "model": model,
         "passes": passes,
@@ -399,6 +496,7 @@ def document(
             "usd": str(paid.usd),
             "calls": paid.calls,
             "usage": _usage_json(paid.usage),
+            "reserve": _score_json(score(reserve) if reserve else None),
         },
         "comparison": _comparison_json(comparison),
         "scenarios": [
@@ -407,6 +505,7 @@ def document(
                 "title": item.scenario.title,
                 "fingerprint": item.scenario.fingerprint,
                 "silent_only": item.scenario.silent_only,
+                "origin": item.scenario.origin,
                 "expected": [sorted(alternative) for alternative in item.scenario.expected],
                 "why": item.scenario.why,
                 "passes": [
