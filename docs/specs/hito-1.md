@@ -388,9 +388,10 @@ editar los ficheros personales y ejecutar `jimic config check`; tiene prohibidos
 la web y leer los secretos (el `.env` y las credenciales de Google, de las dos copias). La abre
 `jimic config sesion` (con `JIMIC_ENTORNO=dev`, en `~/.config/jimic-dev/`), que escribe en
 `.claude/` el `settings.json`, un `CLAUDE.md` y la skill `/configurar-jimic` desde las plantillas
-del paquete y abre `claude --settings …`; dentro, `/configurar-jimic` explica los límites y guía
-los cambios. Los secretos tienen dos capas: las reglas `deny` y el sandbox de Claude Code,
-obligatorio y con la red cerrada (decisiones 151 y 152; necesita `bubblewrap` y `socat`).
+del paquete y abre `claude --settings … --setting-sources project`; dentro, `/configurar-jimic`
+explica los límites y guía los cambios. Los secretos tienen dos capas: las reglas `deny` y el
+sandbox de Claude Code, obligatorio y con la red cerrada; tampoco lee las raíces de datos ni usa
+MCP (decisiones 151 y 152; necesita `bubblewrap` y `socat`).
 `jimic config check` valida los ficheros personales y dice dónde falla (fichero, línea y motivo)
 sin enseñar su contenido.
 
