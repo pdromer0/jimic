@@ -77,22 +77,26 @@ class PlanWorld(AssistantWorld):
         tasks: list[dict[str, Any]] | None = None,
         habits: list[dict[str, Any]] | None = None,
         now: str = "2030-01-07T07:45",
+        plans: tuple[dict[str, Any], ...] = (PLAN,),
         **kwargs: Any,
     ):
         super().__init__(conn, tmp_path, agent, tasks if tasks is not None else [], **kwargs)
         self.clock.moment = madrid(now)
         chosen = habits if habits is not None else [HABIT]
-        self.config = LiveConfig.fixed(intentions(PLAN, CLOSE, habits=chosen), self.limits)
+        self.config = LiveConfig.fixed(intentions(*plans, CLOSE, habits=chosen), self.limits)
         self.sender = SpyPlanSender()
-        self.runner = DailyPlanRunner(
+        self.runner = self.make_runner(self.sender)
+
+    def make_runner(self, sender: SpyPlanSender | None) -> DailyPlanRunner:
+        return DailyPlanRunner(
             conversation=self.conversation,
             sources=self.sources,
             config=self.config,
-            conn=conn,
+            conn=self.conn,
             clock=self.clock,
             timezone=MADRID,
             config_dir=self.paths.config_dir,
-            sender=self.sender,
+            sender=sender,
         )
 
     def handover(self, intent: str = "plan_del_dia") -> None:

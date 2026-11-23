@@ -9,6 +9,7 @@ como el motor; Todoist, el doble detrás del lector y el escritor de verdad. Tod
 import pytest
 from agent_data import FakeAgent, ToolCall, result_message
 from execution_data import todoist_task
+from heartbeat_data import PLAN
 from plan_data import (
     FREE_TEXT,
     OFFERS_HABIT,
@@ -265,3 +266,25 @@ def test_una_tarea_que_pide_borrarlo_todo_no_ejecuta_nada_sin_toque(conn, tmp_pa
     assert w.tap(approval, None, "none").code == "resolved"
     assert w.writes() == [] and w.photos() == []
     assert w.status(approval) == "rejected"
+
+
+def test_el_tope_de_reintentos_es_de_cada_intencion(conn, tmp_path):
+    """Dos intenciones de plan (de diario y de fin de semana, por ejemplo) no se gastan los
+    reintentos la una a la otra (hallazgo de la revisión propia)."""
+    weekend = PLAN | {"id": "plan_finde"}
+    w = PlanWorld(conn, tmp_path, proposing(items=[GYM]), plans=(PLAN, weekend))
+    w.sender.fail = "NetworkError"
+    for _ in range(2):
+        with pytest.raises(SendError):
+            w.handover("plan_del_dia")
+    with pytest.raises(SendError):
+        w.handover("plan_finde")
+    assert len(w.agent.runs) == 3  # el otro plan aún tiene su agente
+
+
+def test_sin_emisor_no_se_gasta_el_agente(conn, tmp_path):
+    w = PlanWorld(conn, tmp_path, proposing(items=[GYM]))
+    w.runner = w.make_runner(None)
+    with pytest.raises(RuntimeError):
+        w.handover()
+    assert w.agent.runs == []
