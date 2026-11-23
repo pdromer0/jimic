@@ -11,15 +11,22 @@ adelante, en una carpeta fuera del repositorio con el mismo formato.
 
 ## El latido
 
-`latido.yaml` tiene un día base (jueves 10-ene-2030) y 40 escenarios: 39 evaluables y el e02,
-pendiente de la tarea 1.15-b. Cada uno dice la hora, lo que cambia sobre el día base y los
+`latido.yaml` tiene un día base (jueves 10-ene-2030) y 40 escenarios, todos evaluables desde la
+1.15-b (el e02 se activó allí). Cada uno dice la hora, lo que cambia sobre el día base y los
 conjuntos de intenciones aceptables (`[]` es callar). El formato está en la cabecera del fichero;
 desde la 1.15 admite lo que el código sabe de las tareas clave (`completed_today`, `key_marks` y
-`later_tasks`), y el gimnasio de la base es el hábito del entreno (`training: true`).
+`later_tasks`), y el gimnasio de la base es el hábito del entreno (`training: true`). Una tarea
+clave hecha se dice con `completed_today`, no quitando su tarea (decisión 147 del diseño).
+
+Desde la 1.15-b el código calcula qué toca a cada hora (`due_now` y su motivo, decisión 146) y
+Haiku elige entre ello: todo esperado tiene que caber en lo que toca, y un test lo comprueba.
+Los escenarios con `origin: reserva` son el **conjunto de reserva**, que el chat escribe después
+de ajustar el prompt: entran en las cifras y se miden también aparte.
 
 ```bash
 JIMIC_ENTORNO=dev uv run jimic evaluar latido                    # todo, 3 pasadas
 JIMIC_ENTORNO=dev uv run jimic evaluar latido --escenario l08 --escenario l10 --pasadas 1
+JIMIC_ENTORNO=dev uv run jimic evaluar latido --comparar-con latido-20261123-1948.json
 ```
 
 - **Solo con la copia `dev`**: con `prod` se niega antes de leer el `.env`. Usa
@@ -27,12 +34,16 @@ JIMIC_ENTORNO=dev uv run jimic evaluar latido --escenario l08 --escenario l10 --
 - **Qué hace:** monta el estado de cada escenario con el código del latido, llama a la API real
   (4 llamadas a la vez) y corrige lo que decide Haiku. No toca Todoist, Calendar ni Telegram, ni
   escribe en la base de datos.
-- **Cuánto cuesta:** unos 0,03 $ la evaluación completa (117 llamadas a Haiku), según el
+- **Cuánto cuesta:** unos 0,04 $ la evaluación completa (120 llamadas a Haiku), según el
   informe.
 - **El informe:** el resumen sale por pantalla y el completo queda en
   `~/.local/share/jimic-dev/evals/latido-AAAAMMDD-HHMM.json` y `.md`, con cada pasada, su motivo
-  y sus mensajes. Se compara con el informe anterior escenario a escenario, solo sobre los que no
-  han cambiado, y se avisa de lo que empeore más de 5 puntos.
+  y sus mensajes. Se compara con el **último informe completo** (el que lanzó todos los escenarios
+  del fichero; uno con `--escenario` no cuenta) escenario a escenario, solo sobre los que no han
+  cambiado, y se avisa de lo que empeore más de 5 puntos. `--comparar-con <informe>` elige otro:
+  un nombre se busca en esa carpeta y también vale una ruta; si no existe o no se puede leer, se
+  para antes de gastar. Los informes de antes de la 1.15-b no dicen si eran completos: solo se
+  comparan con `--comparar-con`.
 - **El umbral** (13.3 del diseño): ≥ 90 % de acierto y ≤ 5 % de «habla cuando no debía»,
   contado solo sobre los escenarios cuyo único resultado aceptable es callar. Es el umbral para
   cerrar el hito.

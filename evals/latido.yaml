@@ -18,6 +18,8 @@
 #   (tareas abiertas de otro día: una `seen` que está aquí saltó, decisión 1.15-j).
 # - `expected`: los conjuntos aceptables de intenciones, sin orden; `[]` es callar.
 # - `pending: "<tarea>"`: el programa lo salta y lo cuenta aparte hasta esa tarea.
+# - `origin: reserva`: el conjunto de reserva, escrito después de ajustar el prompt; se mide
+#   también aparte. No se hereda con `like`.
 #
 # Rutina del día base (contexto para quien lee; Haiku no la recibe): se levanta a las 7:00,
 # café hacia las 7:40 y jornada de 9:30 a 18:30. Límites: los de la plantilla de limites.yaml.

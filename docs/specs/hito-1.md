@@ -490,6 +490,7 @@ GitHub; la primera tarea es la P1.
 | 1.13 | **Puesta en marcha**: rutina, nueve áreas, preferencias, hábitos, jornada e iconos; por partes y reanudable; los objetivos de APEX los lee solo el lector (H1-20) | `feat/h1-puesta-en-marcha` | 1.6, 1.12 |
 | 1.14 | **Plan del día**: el formato y las reglas de esta especificación; el prompt destilado del piloto; plan mínimo si falla la API; 10 escenarios (6 del piloto) | `feat/h1-plan` | 1.9, 1.11, 1.13 |
 | 1.15 | **Tareas clave**: gimnasio y la prioridad diaria; tono que escala; [Ya entrené]; para al completar | `feat/h1-tareas-clave` | 1.8, 1.11 |
+| 1.15-b | **El latido al umbral**: el código calcula lo que toca; el prompt elige entre ello; la evaluación con el último informe completo y un conjunto de reserva | `feat/h1-latido-umbral` | 1.15 |
 | 1.16 | **Cierre del día**: un solo mensaje que se actualiza, `plan_items`, «plan cumplido» a la mañana siguiente, adelanto de mañana y valoración que no insiste; escenario e08 | `feat/h1-cierre-dia` | 1.14 |
 | 1.17 | **Día real y cierre del hito**: un día completo en el PC; evaluaciones por encima del umbral; 10 planes revisados por Pedro; los módulos P1 a P4 decididos; `/cerrar-hito` | `docs/h1-cierre` | 1.13 a 1.16, 1.18 |
 
