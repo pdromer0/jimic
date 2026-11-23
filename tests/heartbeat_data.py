@@ -153,6 +153,7 @@ def day_state(
     now: datetime,
     its: Intentions | None = None,
     calendar: CalendarDay | None = None,
+    queue: WaitingNotices | None = None,
 ) -> DayState:
     """The state at `now`, with what `notices` and `key_task_marks` say and fixed, invented
     sources."""
@@ -165,7 +166,7 @@ def day_state(
         sent_between(conn, *local_day_bounds(now.date(), MADRID)),
         its if its is not None else intentions(),
         limits(),
-        WaitingNotices(),
+        queue if queue is not None else WaitingNotices(),
         completed=TaskList(available=True),
         marks=key_marks.of_day(conn, now.astimezone(MADRID).date()),
     )

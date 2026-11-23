@@ -110,14 +110,16 @@ def test_el_aviso_de_un_fichero_recortado_lo_manda_el_latido(conn, tmp_path):
 WHOLE_DAY = PLAN | {"window": {"from": "09:00", "to": "09:00"}}
 
 
-def test_una_ventana_from_igual_a_to_es_el_dia_entero_y_no_es_pista(conn):
-    """El pendiente de la 1.7 (ajuste 7): como `quiet_hours` en la decisión 80, el día entero;
-    para el modelo, lo mismo que no tener ventana."""
-    moment = madrid("2030-01-07T09:00")
+def test_una_ventana_from_igual_a_to_es_el_dia_entero(conn):
+    """El pendiente de la 1.7 (ajuste 7): como `quiet_hours` en la decisión 80, el día entero.
+    Desde la 1.15-b el modelo no ve ventanas: el plan toca a cualquier hora y nunca es tardío."""
     its = intentions(WHOLE_DAY)
-    assert '"window"' not in fixed_block(its, moment)
-    (active,) = day_state(conn, moment, its).intentions
-    assert active.window is None
-    assert '"window"' in fixed_block(intentions(PLAN), moment)
+    for hour in ("06:00", "09:00", "23:00"):
+        moment = madrid(f"2030-01-07T{hour}")
+        assert '"window"' not in fixed_block(its, moment)
+        (active,) = day_state(conn, moment, its).intentions
+        assert (active.due_now, active.why) == (True, "in_window")
+    moment = madrid("2030-01-07T09:00")
+    assert '"window"' not in fixed_block(intentions(PLAN), moment)
     (normal,) = day_state(conn, moment, intentions(PLAN)).intentions
-    assert normal.window == {"from": "07:30", "to": "09:30"}
+    assert (normal.due_now, normal.why) == (True, "in_window")

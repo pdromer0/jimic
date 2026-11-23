@@ -124,8 +124,9 @@ def test_las_intenciones_activas_son_las_de_hoy_con_lo_que_les_queda(conn):
     assert list(by_id) == ["plan_del_dia", "cierre_del_dia", "insistir_gimnasio", "regar", "basura"]
     assert by_id["insistir_gimnasio"]["left_today"] == 2
     assert by_id["insistir_gimnasio"]["habit"] == "gimnasio"
-    assert by_id["plan_del_dia"]["window"] == {"from": "07:30", "to": "09:30"}
-    assert by_id["plan_del_dia"]["default_time"] == "08:00"
+    # Sin horas que comparar (1.15-b): lo que toca lo dice el código.
+    assert "window" not in by_id["plan_del_dia"] and "default_time" not in by_id["plan_del_dia"]
+    assert (by_id["plan_del_dia"]["due_now"], by_id["plan_del_dia"]["why"]) == (True, "late")
     tuesday = json.loads(state(conn, now="2030-01-08T10:00").to_json())["intentions"]
     assert "regar" not in {i["id"] for i in tuesday}
     its = intentions(PLAN, {**CLOSE, "enabled": False}, PLANTS)

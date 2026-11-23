@@ -158,7 +158,7 @@ def test_si_el_margen_cae_manana_hoy_no_se_insiste():
     """23:30 + 45 min = 00:15 del día siguiente (valor a mano)."""
     late = status(at(23, 50), open_tasks=tasks(gym_task(at(23, 30))))
     assert late.refusal(at(23, 50)) == "key_too_early"
-    assert late.to_json(at(23, 50))["insist_from"] == "mañana"
+    assert late.insist_from == datetime(2030, 1, 11, 0, 15, tzinfo=MADRID)
 
 
 def test_si_la_tarea_se_mueve_cuenta_la_hora_nueva():
@@ -299,7 +299,6 @@ def test_el_json_lleva_lo_de_cada_tarea_clave_dentro_de_su_intencion(conn):
     entries = {entry["id"]: entry for entry in document["intentions"]}
     assert entries["insistir_gimnasio"]["key_task"] == {
         "task": "12:00",
-        "insist_from": "12:45",
         "tone_level": 1,
         "sent_today": 0,
     }

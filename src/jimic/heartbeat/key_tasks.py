@@ -102,7 +102,8 @@ class KeyTaskStatus(BaseModel):
         return None
 
     def to_json(self, now: datetime) -> dict[str, Any]:
-        """For the model: only what is set; hours `HH:MM`, local."""
+        """For the model: only what is set; hours `HH:MM`, local. Not `insist_from`: whether it
+        may insist now is the intention's `due_now` (task 1.15-b), so the model compares no hour."""
         document: dict[str, Any] = {}
         if self.task is not None:
             due = self.task.due
@@ -115,8 +116,6 @@ class KeyTaskStatus(BaseModel):
             document["not_today"] = True
         if self.paused_until is not None and now < self.paused_until:
             document["paused_until"] = self.paused_until.strftime("%H:%M")
-        same_day = self.insist_from.date() == now.date()
-        document["insist_from"] = self.insist_from.strftime("%H:%M") if same_day else "mañana"
         document["tone_level"] = self.tone_level
         document["sent_today"] = self.sent_today
         return document

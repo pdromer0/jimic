@@ -10,6 +10,10 @@ Each active key task carries what the code knows of it (`key_task`, task 1.15): 
 source, no longer today's, «hoy no», the pause of [Voy ahora], from when it may insist, the level
 of the tone and its notices of today (`jimic.heartbeat.key_tasks`).
 
+Each active intention says whether it is due now and why (`due_now` and `why`, decision 1.15b-a):
+the code compares the hours, so the model gets no window, default time nor `insist_from` to
+compare (`jimic.heartbeat.due`).
+
 The titles of tasks and events and the texts of the intentions go to the model; the `repr`
 hides them, so a log or a traceback never shows them.
 """
@@ -21,11 +25,12 @@ from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from jimic.heartbeat.due import DueWhy, due_now
 from jimic.heartbeat.key_tasks import KeyTaskStatus, key_task_status
 from jimic.heartbeat.limits import Quota, WaitingNotices, applies_on, cap_per_day
 from jimic.memory.key_marks import DayMarks
 from jimic.memory.notices import SentToday
-from jimic.memory.schemas import DailyPlan, DayClose, Intentions, KeyTask, Limits
+from jimic.memory.schemas import Intentions, KeyTask, Limits
 from jimic.tools.apex_schema import ApexSnapshot
 from jimic.tools.calendar import CalendarDay
 from jimic.tools.todoist import TaskList
@@ -42,7 +47,8 @@ class SentEntry(BaseModel):
 
 
 class ActiveIntention(BaseModel):
-    """An intention that applies today, with how many times it may still go out."""
+    """An intention that applies today, with how many times it may still go out and whether it
+    is due now (task 1.15-b)."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -50,10 +56,10 @@ class ActiveIntention(BaseModel):
     type: str
     purpose: str = Field(repr=False)
     priority: str
-    default_time: str
-    window: dict[str, str] | None = None
     habit: str | None = None
     left_today: int
+    due_now: bool
+    why: DueWhy
 
 
 class DayState(BaseModel):
@@ -74,6 +80,12 @@ class DayState(BaseModel):
     """The ids of the notices waiting in the group window (their text stays in the queue)."""
     key_tasks: dict[str, KeyTaskStatus] = Field(default_factory=dict, repr=False)
     """What the code knows of each active key task, by intention (task 1.15)."""
+
+    @property
+    def due(self) -> frozenset[str]:
+        """The ids of the intentions due now: the only ones the second pass lets the model pick
+        (task 1.15-b)."""
+        return frozenset(intention.id for intention in self.intentions if intention.due_now)
 
     def sources(self) -> dict[str, dict[str, Any]]:
         return {
@@ -149,6 +161,9 @@ def build_day_state(
     key_tasks: dict[str, KeyTaskStatus] = {}
     quota = Quota.of(limits, intentions, sent)
     waiting = [item.intent for item in queue.items]
+    # What waits goes out as one message, so it already holds one of them.
+    messages_left = max(0, quota.left_for_others - (1 if waiting else 0))
+    close_fits = quota.refusal(is_close=True) is None
     active = []
     for intention in intentions.intentions:
         if not applies_on(intention, now.date()):
@@ -166,26 +181,29 @@ def build_day_state(
                 moved=marks.moved,
                 sent_today=sent.sent_count(intention.id),
             )
-        window = intention.window if isinstance(intention, DailyPlan | DayClose) else None
-        if window is not None and window.start == window.end:
-            window = None  # the whole day (decision 80, pending of task 1.7): no hint
+        left_today = max(
+            0,
+            cap_per_day(intention, limits) - sent.count(intention.id) - waiting.count(intention.id),
+        )
+        due = due_now(
+            intention,
+            now,
+            left_today=left_today,
+            waiting=intention.id in waiting,
+            key=key_tasks.get(intention.id),
+            messages_left=messages_left,
+            close_fits=close_fits,
+        )
         active.append(
             ActiveIntention(
                 id=intention.id,
                 type=intention.type,
                 purpose=intention.purpose,
                 priority=intention.priority,
-                default_time=_hour(intention.default_time),
-                window=None
-                if window is None
-                else {"from": _hour(window.start), "to": _hour(window.end)},
                 habit=intention.habit if isinstance(intention, KeyTask) else None,
-                left_today=max(
-                    0,
-                    cap_per_day(intention, limits)
-                    - sent.count(intention.id)
-                    - waiting.count(intention.id),
-                ),
+                left_today=left_today,
+                due_now=due.due,
+                why=due.why,
             )
         )
     return DayState(
@@ -197,8 +215,7 @@ def build_day_state(
             SentEntry(intent=notice.intent, at=_hour(notice.sent_at.astimezone(timezone)))
             for notice in sent.notices
         ],
-        # What waits goes out as one message, so it already holds one of them.
-        messages_left=max(0, quota.left_for_others - (1 if waiting else 0)),
+        messages_left=messages_left,
         close_slot_kept=quota.close_slot_kept,
         intentions=active,
         waiting=waiting,

@@ -26,7 +26,7 @@ import json
 import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime
 from functools import cache
 from importlib.resources import files
 from typing import Any
@@ -38,10 +38,11 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 from jimic.channel.message import telegram_length
 from jimic.config import Settings
 from jimic.heartbeat.cycle import Decision
+from jimic.heartbeat.due import SLOT
 from jimic.heartbeat.limits import HANDOVER_TYPES, PENDING_TASK, Outgoing, applies_on
 from jimic.heartbeat.state import DayState
 from jimic.memory.live import LiveConfig
-from jimic.memory.schemas import DailyPlan, DayClose, Intention, Intentions, KeyTask, Notice
+from jimic.memory.schemas import DailyPlan, Intention, Intentions, KeyTask, Notice
 from jimic.memory.usage import TokenUsage
 
 logger = logging.getLogger(__name__)
@@ -61,8 +62,6 @@ MAX_MESSAGE = 400
 """Telegram length (UTF-16) of one block: ten, joined by a blank line, fit in 4096."""
 MAX_PICKS = 3
 """Intentions the model may pick in one heartbeat (decision 1.8-d)."""
-SLOT = timedelta(minutes=15)
-"""A heartbeat's slot for the default times: `default_time <= now < default_time + SLOT`."""
 INTENTIONS_MARK = "<<INTENCIONES>>"
 
 type CreateMessage = Callable[..., Awaitable[Message]]
@@ -100,20 +99,13 @@ def prompt_template() -> str:
 
 
 def _describe(intention: Intention, habits: dict[str, str]) -> dict[str, Any]:
+    """Without hours (task 1.15-b): whether it is due is the state's `due_now`."""
     entry: dict[str, Any] = {
         "id": intention.id,
         "type": intention.type,
         "purpose": intention.purpose,
-        "default_time": intention.default_time.strftime("%H:%M"),
         "priority": intention.priority,
     }
-    window = intention.window if isinstance(intention, DailyPlan | DayClose) else None
-    # `from == to` is the whole day (decision 80, pending of task 1.7): the same as no hint.
-    if window is not None and window.start != window.end:
-        entry["window"] = {
-            "from": window.start.strftime("%H:%M"),
-            "to": window.end.strftime("%H:%M"),
-        }
     if isinstance(intention, KeyTask):
         entry["habit"] = habits.get(intention.habit, intention.habit)
     if isinstance(intention, Notice):
