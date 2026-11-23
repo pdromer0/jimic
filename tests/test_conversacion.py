@@ -33,7 +33,7 @@ from jimic.agent.tools import RunMode
 from jimic.config import Settings
 from jimic.memory import conversations
 from jimic.memory.database import open_database
-from jimic.memory.usage import TokenUsage, record_cost
+from jimic.memory.usage import TokenUsage, record_cost, spent_on
 from jimic.paths import Paths
 
 
@@ -42,6 +42,10 @@ def conn(tmp_path):
     connection = open_database(tmp_path / "jimic.db")
     yield connection
     connection.close()
+
+
+AGENT_MODEL = "claude-sonnet-5-5"
+"""A model with a price (the cost of a run comes from its tokens)."""
 
 
 class World:
@@ -55,7 +59,7 @@ class World:
         self.paths.config_dir.mkdir()
         self.paths.data_dir.mkdir()
         self.conversation = Conversation(
-            settings=Settings.model_validate(VALID_ENV),
+            settings=Settings.model_validate({**VALID_ENV, "MODELO_AGENTE": AGENT_MODEL}),
             paths=self.paths,
             limits=limits(**limit_changes),
             clock=self.clock,
@@ -178,28 +182,106 @@ def test_un_turno_a_la_vez_y_en_orden_y_la_hora_se_anota_al_llegar(conn, tmp_pat
 # --- El gasto -----------------------------------------------------------------------------------
 
 
-def test_cada_ejecucion_suma_el_coste_del_sdk_con_el_modelo_del_agente(conn, tmp_path):
+def tokens(input_tokens, output_tokens, cache_read, cache_write) -> dict:
+    """The `usage` of a result, as the SDK gives it (cache writes of 5 minutes)."""
+    return {
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+        "cache_read_input_tokens": cache_read,
+        "cache_creation_input_tokens": cache_write,
+        "cache_creation": {
+            "ephemeral_5m_input_tokens": cache_write,
+            "ephemeral_1h_input_tokens": 0,
+        },
+    }
+
+
+def test_cada_ejecucion_suma_el_coste_de_sus_tokens_con_el_modelo_del_agente(conn, tmp_path):
+    """4 de entrada, 39 de salida, 3.588 de lectura y 3.812 de escritura de caché con los precios
+    de Sonnet (2, 10, 0,10 y 2,50 $ por millón): 0,0102868 $, calculado a mano. Pilla contar el
+    `total_cost_usd` del SDK (0,0123 en el doble)."""
     world = World(conn, tmp_path)
     world.say()
-    assert world.usage_rows() == [
-        ("2030-01-07", VALID_ENV["MODELO_AGENTE"], 4, 39, 3588, 3812, 0.0123)
-    ]
+    (row,) = world.usage_rows()
+    assert row[:6] == ("2030-01-07", AGENT_MODEL, 4, 39, 3588, 3812)
+    assert row[-1] == pytest.approx(0.0102868)
 
 
-def test_sin_coste_del_sdk_cuenta_el_tope_de_la_sesion(conn, tmp_path):
-    world = World(conn, tmp_path, FakeAgent([result_message(cost=None)]))
+def test_dos_ejecuciones_de_la_misma_sesion_cuentan_cada_una_lo_suyo_y_no_el_acumulado(
+    conn, tmp_path
+):
+    """El SDK da `total_cost_usd` acumulado (0,00602 y luego 0,00748); los tokens de cada
+    ejecución valen 0,00602 y 0,00146 (a mano). El gasto del día es 0,00748, no 0,0135."""
+    agent = FakeAgent(
+        [result_message(cost=0.00602, usage=tokens(10, 100, 0, 2000))],
+        [result_message(cost=0.00748, usage=tokens(5, 50, 2000, 300))],
+    )
+    world = World(conn, tmp_path, agent)
+    world.say()
+    world.say()
+    assert [row[-1] for row in world.usage_rows()] == pytest.approx([0.00602, 0.00146])
+    assert spent_on(conn, date(2030, 1, 7)) == pytest.approx(0.00748)
+
+
+def test_un_resultado_con_tokens_solo_de_cache_cuenta_por_tokens(conn, tmp_path):
+    world = World(
+        conn, tmp_path, FakeAgent([result_message(cost=9.0, usage=tokens(0, 0, 1000, 0))])
+    )
+    world.say()
+    assert world.usage_rows()[0][-1] == pytest.approx(0.0001)
+
+
+@pytest.mark.parametrize("usage", [None, {}, tokens(0, 0, 0, 0)])
+def test_sin_tokens_en_el_resultado_cuenta_el_tope_de_la_sesion(conn, tmp_path, usage):
+    """Aunque el SDK dé un coste (9 $), sin tokens no hay con qué calcularlo: el tope."""
+    message = result_message(cost=9.0, usage=usage if usage is not None else {})
+    world = World(conn, tmp_path, FakeAgent([message]))
     world.say()
     assert world.usage_rows()[0][-1] == 0.5
 
 
-def test_una_ejecucion_cortada_por_su_tope_tambien_cuenta(conn, tmp_path):
+def test_una_ejecucion_cortada_por_su_tope_tambien_cuenta_sus_tokens(conn, tmp_path):
     world = World(
         conn,
         tmp_path,
-        FakeAgent([result_message(None, subtype="error_max_turns", is_error=True, cost=0.2)]),
+        FakeAgent(
+            [
+                result_message(
+                    None,
+                    subtype="error_max_turns",
+                    is_error=True,
+                    cost=0.2,
+                    usage=tokens(10, 100, 0, 2000),
+                )
+            ]
+        ),
     )
     assert world.say() == CAPPED_TEXT
-    assert world.usage_rows()[0][-1] == 0.2
+    assert world.usage_rows()[0][-1] == pytest.approx(0.00602)
+
+
+def test_con_el_gasto_real_bajo_el_tope_diario_el_agente_contesta_aunque_los_acumulados_lo_pasen(
+    conn, tmp_path
+):
+    """14 mensajes de 0,04 $ de tokens (0,56 $ reales); los acumulados del SDK (0,04 · n) suman
+    3,12 $ al llegar al 12.º. Con el fallo, los últimos mensajes ya no llegarían al agente."""
+    each = tokens(0, 4000, 0, 0)  # 4.000 de salida a 10 $/M = 0,04 $
+    scripts = [[result_message(cost=0.04 * n, usage=each)] for n in range(1, 15)]
+    world = World(conn, tmp_path, FakeAgent(*scripts))
+    replies = [world.say() for _ in range(14)]
+    assert DAILY_CAP_TEXT not in replies
+    assert len(world.agent.runs) == 14
+    assert spent_on(conn, date(2030, 1, 7)) == pytest.approx(0.56)
+
+
+def test_un_modelo_sin_precio_cuenta_el_tope_y_no_pierde_la_respuesta(conn, tmp_path):
+    """Sin precio no se puede calcular: se cuenta lo máximo que pudo gastar, y la respuesta y la
+    sesión del día se guardan igual."""
+    world = World(conn, tmp_path)
+    world.conversation._settings = Settings.model_validate(VALID_ENV)
+    assert world.say() == AGENT_ANSWER
+    assert world.usage_rows()[0][-1] == 0.5
+    assert conversations.session_of(conn, date(2030, 1, 7)) is not None
 
 
 def spend(conn, day: str, usd: str) -> None:
@@ -328,7 +410,7 @@ def test_el_resultado_que_llega_antes_del_error_manda(conn, tmp_path):
         ),
     )
     assert world.say() == CAPPED_TEXT
-    assert world.usage_rows()[0][-1] == 0.3
+    assert world.usage_rows()[0][-1] == pytest.approx(0.0102868)  # sus tokens, no el tope
 
 
 # --- Los logs -----------------------------------------------------------------------------------

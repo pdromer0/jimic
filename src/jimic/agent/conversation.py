@@ -87,6 +87,8 @@ class Outcome:
     text: str | None = None
     session_id: str | None = None
     usd: Decimal | None = None
+    """The SDK's `total_cost_usd`: the total of the whole session, so it is never counted (the
+    cost of a run comes from its `usage`). Kept for the logs and the contract."""
     usage: TokenUsage | None = None
     api_status: int | None = None
     ran: bool = False
@@ -331,18 +333,19 @@ class Conversation:
     def _bookkeeping(self, day: date, outcome: Outcome, resumed: bool) -> None:
         now = self._now()
         if outcome.usage is not None or outcome.usd is not None or outcome.ran:
-            # Without the SDK's estimate (or without a result at all, once the engine answered),
-            # the most a run may spend: the discreet count.
-            usd = outcome.usd
-            if usd is None:
-                usd = Decimal(str(self._active_limits.budget.max_session_usd))
-            usage.record_cost(
-                self._conn,
-                day,
-                self._settings.agent_model,
-                outcome.usage or TokenUsage(0, 0),
-                usd,
-            )
+            # The dollars of the run come from its tokens, as for Haiku: the SDK's
+            # `total_cost_usd` is the total of the whole (resumed) session, not of this run.
+            # Without tokens (or without a result at all, once the engine answered), the most a
+            # run may spend: the discreet count.
+            tokens = outcome.usage or TokenUsage(0, 0)
+            usd = Decimal(str(self._active_limits.budget.max_session_usd))
+            if tokens != TokenUsage(0, 0):
+                try:
+                    usd = usage.cost(self._settings.agent_model, tokens)
+                except usage.UnpricedError:
+                    # Never lose the count (nor the answer) over a missing price.
+                    logger.warning("agent: unpriced model, counting the cap of the run")
+            usage.record_cost(self._conn, day, self._settings.agent_model, tokens, usd)
             system_notices.check_budget(self._conn, self._active_limits.budget, now)
         if resumed and outcome.code.startswith(STUCK):
             # A session that fails when resumed (not the API, not a cap) must not block the rest
