@@ -3,7 +3,7 @@
 What a change may touch:
 
 - the five personal files (`rutina.md`, `objetivos.md`, `preferencias.md`, `intenciones.yaml`,
-  `limites.yaml`), which must exist (the onboarding of task 1.13 creates the Markdown ones);
+  `limites.yaml`), which must exist (`/puesta_en_marcha` creates the Markdown ones, task 1.13);
 - `ideas.md`, only with `add` (an idea), created 0600 if it is missing.
 
 A symbolic link is refused: writing through it would write outside the config root.
@@ -87,10 +87,12 @@ class Proposed:
 class ChangeRefused(Exception):
     """The change cannot be written; `code` for the log, `for_agent` and `result` for people."""
 
-    def __init__(self, code: str, for_agent: str) -> None:
+    def __init__(self, code: str, for_agent: str, relaxed: tuple[str, ...] = ()) -> None:
         super().__init__(code)
         self.code = code
         self.for_agent = for_agent
+        self.relaxed = relaxed
+        """With `relaxes`: the keys of `limites.yaml` that the change would relax."""
 
     @property
     def result(self) -> str:
@@ -184,6 +186,7 @@ def validate(name: str, old_text: str, new_text: str) -> None:
             f"Eso relaja {', '.join(verdict.relaxed)} en limites.yaml, la zona protegida:"
             " conversando solo puedo hacer a JimiC más discreto. Si Pedro lo quiere, lo edita él"
             " a mano en limites.yaml.",
+            verdict.relaxed,
         )
     if not verdict.changed:
         raise ChangeRefused(
@@ -203,7 +206,11 @@ def check(config_dir: Path, proposed: Proposed) -> Checked:
     text = read_text(config_dir, name)
     if text is None:
         if name != IDEAS_FILE:
-            raise ChangeRefused("missing", f"{name} aún no existe: lo crea la puesta en marcha.")
+            raise ChangeRefused(
+                "missing",
+                f"{name} aún no existe: lo crea la puesta en marcha, que Pedro lanza con"
+                " /puesta_en_marcha.",
+            )
         text = ""
     try:
         patch = patch_for(text, proposed.operation, proposed.before, proposed.after)

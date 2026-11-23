@@ -279,3 +279,15 @@ def progress(config_dir: Path) -> Progress:
         tone=tone,
         icons=icons,
     )
+
+
+def _normalized(text: str) -> str:
+    return " ".join(text.casefold().split())
+
+
+def copied_goal(text: str, goals: list[str]) -> bool:
+    """Whether `text` contains one of `goals` (the descriptions of the goals of APEX in
+    progress), ignoring case and spaces. Only the description: a target like «100 kg» is too
+    short to tell a copy from a coincidence."""
+    haystack = _normalized(text)
+    return any(goal and goal in haystack for goal in map(_normalized, goals))

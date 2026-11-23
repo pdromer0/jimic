@@ -4,7 +4,8 @@
 and whether it read external content (`Turn`); `reply` returns only the text. Each run carries
 Pedro's text as the origin of what it proposes for the memory (decision 1.12-a) and gets the
 current text of his five files in its system prompt (1.12-c): a file cut there registers the
-system notice `memory_clipped`. It notes the
+system notice `memory_clipped`. While the onboarding is in progress, its script and where it
+stands go after them (task 1.13). It notes the
 moment at once
 (decision 1.10-c, also while the message waits for its turn), then runs **one turn at a time**:
 a lock keeps the order in which the messages arrived. Each run resumes today's session, or
@@ -25,6 +26,7 @@ from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal
+from pathlib import Path
 from typing import Any
 
 from claude_agent_sdk import ClaudeAgentOptions, ClaudeSDKError, ResultError, ResultMessage, query
@@ -32,6 +34,7 @@ from claude_agent_sdk.types import Message
 
 from jimic.agent.guard import guard_hooks
 from jimic.agent.memory_context import memory_block, stem
+from jimic.agent.onboarding_context import onboarding_block
 from jimic.agent.options import build_options
 from jimic.agent.tools import RunState, ToolContext, build_server
 from jimic.clock import Clock
@@ -40,6 +43,7 @@ from jimic.heartbeat.decide import status_kind
 from jimic.heartbeat.sources import Sources
 from jimic.memory import conversations, system_notices, usage
 from jimic.memory.live import LiveConfig
+from jimic.memory.onboarding import progress
 from jimic.memory.schemas import Limits
 from jimic.memory.usage import TokenUsage
 from jimic.paths import Paths
@@ -163,6 +167,12 @@ async def run_once(run_agent: RunAgent, prompt: str, options: ClaudeAgentOptions
     return outcome_of_result(result)
 
 
+def with_onboarding(memory: str, config_dir: Path) -> str:
+    """The memory block and, while the onboarding is in progress, its block (task 1.13)."""
+    block = onboarding_block(progress(config_dir))
+    return f"{memory}\n\n{block}" if block else memory
+
+
 @dataclass(frozen=True)
 class Turn:
     """What a turn gives: the text for Pedro and, if the run ended well, its state (what it
@@ -259,7 +269,7 @@ class Conversation:
             build_server(context),
             session,
             guard_hooks(limits, self._conn, day, run),
-            memory.text,
+            with_onboarding(memory.text, self._paths.config_dir),
         )
         outcome = await run_once(self._run_agent, f"{stamp(received)} {text}", options)
         self._bookkeeping(day, outcome, resumed=session is not None)

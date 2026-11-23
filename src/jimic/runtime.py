@@ -1,14 +1,15 @@
 """What the service runs between opening and closing the database (task 1.8).
 
 `Runtime.start` opens the sources, the client of the model, the conversation with the agent, the
-executor of what Pedro approves, the memory (its buttons, `/memoria` and `/deshacer`, task 1.12)
-and the Telegram channel (Pedro's text goes to the assistant, the taps to their handlers), all
-on one live configuration of the YAML files. Then it sweeps what expired while the service was
-down and schedules the heartbeat every 15 minutes (from the next quarter of an hour), the sweep
-of expired approvals every day at 00:01 (1.11-c) and the purge once a day: the database and the
-files of the agent older than 7 days. `Runtime.stop` undoes it in reverse order, every step even
-if one fails: the channel stops first, so no heartbeat runs while the rest closes. The queue of
-the group window lives in the `Heartbeat`, as long as the service.
+executor of what Pedro approves, the memory (its buttons, `/memoria` and `/deshacer`, task 1.12),
+the onboarding (`/puesta_en_marcha`, task 1.13) and the Telegram channel (Pedro's text goes to the
+assistant, the taps to their handlers), all on one live configuration of the YAML files. Then it
+sweeps what expired while the service was down and schedules the heartbeat every 15 minutes (from
+the next quarter of an hour), the sweep of expired approvals every day at 00:01 (1.11-c) and the
+purge once a day: the database and the files of the agent older than 7 days. `Runtime.stop` undoes
+it in reverse order, every step even if one fails: the channel stops first, so no heartbeat runs
+while the rest closes. The queue of the group window lives in the `Heartbeat`, as long as the
+service.
 """
 
 import asyncio
@@ -147,6 +148,7 @@ class Runtime:
                 clock=self._clock,
                 timezone=self._settings.timezone,
                 commands=commands,
+                config_dir=self._paths.config_dir,
             )
             handlers = executor.handlers | {MEMORY_KIND: memory.memory} | commands.handlers
             channel = self._channel_factory(
