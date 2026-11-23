@@ -338,7 +338,8 @@ Oye, que la pesa te echa de menos 😄 ¿Te da tiempo antes de comer?
   del tono y sus avisos de hoy. La segunda pasada lo garantiza con su código.
 - **[Más tarde]** pregunta «¿A qué hora?» y la respuesta de Pedro va al agente, con la tarea y su
   id: el `move` sale al momento con [Deshacer] si se cumplen las condiciones de la 97 (cambia el
-  criterio del issue, que decía «sin llamar al modelo»).
+  criterio del issue, que decía «sin llamar al modelo»). Si la saca de hoy, cuenta como «hoy no»
+  hasta que se deshaga (decisión 145).
 - **[Ya entrené]/[Hecho]** completa la tarea de hoy y **[Hoy no]** lo anota, los dos con
   [Deshacer]; **[Voy ahora]** pausa la insistencia lo que dura el hábito. Tras [Voy ahora] o [Más
   tarde] quedan [Ya entrené] y [Hoy no]. Ningún toque llama al modelo.
@@ -3009,18 +3010,17 @@ Siguiendo las notas, el prompt no se tocó para recuperar nada: es de la 1.15-b.
 | 7 | La marca con el día UTC | Rojo «[Hoy no] a las 00:30»; verde el de mediodía | Como se predijo (el primer mutante no era válido: faltaba un import) |
 | 8 | El plan B a su `default_time` | Rojo «sale a su margen»; verdes los avisos | Rojos los tres de la tarea clave; verdes los avisos |
 | 9 | (Pedro) Un movimiento de JimiC cuenta como salto | Rojo su test | Rojo `un_movimiento_de_jimic_no_es_un_salto`; verdes los demás del salto |
+| 10 | (Ajuste) Deshacer el movimiento quita cualquier `not_today` | Rojo «un [Hoy no] tocado antes sigue» | Como se predijo; verdes los otros del movimiento |
 
-**Revisión propia** (`/code-review medium`, 10 hallazgos): ocho corregidos (la relectura que fallaba
+**Revisión propia** (`/code-review medium`, 10 hallazgos): nueve corregidos, el último en la
+ronda de ajustes; ocho en la propia revisión (la relectura que fallaba
 tras completar, el [Deshacer] que dejaba la marca, las lecturas repetidas del salto, `due_day`
 copiado, un mensaje con botones que no se podía montar, `seen` tras el resto de la contabilidad, la
 plantilla tapada por una pausa y `Answer.then` sobre la copia vieja); uno explicado (`Followup`
-repite `bot.Outgoing`, pero `taps` no puede importar `bot`); uno a «Pendiente».
+repite `bot.Outgoing`, pero `taps` no puede importar `bot`); el de la tarea que JimiC pasa a mañana
+quedó como pregunta y lo resolvió Pedro en la revisión del PR (abajo).
 
 **Pendiente:**
-- **Una tarea que JimiC pasa a mañana con [Más tarde]** deja de ser «la de hoy», no es un salto
-  (decisión de Pedro: un movimiento de JimiC no cuenta) y la insistencia vuelve a `default_time` +
-  `grace` ese mismo día. Pregunta para Pedro: ¿un movimiento de JimiC fuera de hoy corta la
-  insistencia de hoy, con un campo propio que el cierre no cuente como hecho?
 - **Para la 1.15-b:** l03 y l35, l18 (el «hecho» por ausencia de la tarea en el escenario) y lo que
   ya fallaba; activar el e02.
 - **Para la 1.16:** `rescheduled` no es «hecho» (decisión 142); el cierre distingue las dos cosas.
@@ -3029,3 +3029,16 @@ repite `bot.Outgoing`, pero `taps` no puede importar `bot`); uno a «Pendiente»
   entreno; `training` se pone a mano.
 - **`jimic evaluar plan`** no se lanzó: el cambio del prompt del agente es una línea de la
   conversación, no del plan.
+
+**Ajustes de la revisión** (Pedro, PR #53): **un movimiento de JimiC fuera de hoy es «hoy no»**
+(decisión 145, que Pedro llamó 1.15-j en su ajuste; aquí es la 1.15-m porque la j es el salto).
+Cuando JimiC saca de hoy la tarea de una tarea clave (con [Más tarde] → «mañana» o con cualquier
+`move` del agente), el código anota `not_today` con el id de la tarea y la insistencia de hoy se
+corta con el tope de siempre; el cierre no lo cuenta como hecho. Deshacer ese movimiento quita solo
+esa marca. La tarea clave se reconoce porque el latido la vio como la de hoy (`seen`); mover dentro
+de hoy no anota nada. Commit `feat(tareas-clave)` (9dbe6d0) y esta entrada.
+- **CodeQL `neutral` en a41988b:** con `scripts/gh.sh checks`, hoy las cuatro ejecuciones de ese
+  commit (`CodeQL`, `Analyze (python)`, `Analyze (actions)` y `tests`) salen `success`. El resumen
+  de la ejecución, que diría el motivo del `neutral`, no lo da `gh.sh`, y la lectura directa de la
+  API se denegó: queda para que Pedro lo mire en la pestaña de checks del PR.
+- **N3 de la ronda:** N3_RONDA.

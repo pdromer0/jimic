@@ -446,7 +446,8 @@ prioridad diaria (por ejemplo, «revisar ofertas») entra también desde el H1: 
      [Deshacer] si se cumplen las condiciones de la 97 (136). [Ya entrené]/[Hecho]: completa la
      tarea de hoy, «¡Hecho! 💪 Una menos» con [Deshacer] (137, 144). [Hoy no]: lo anota sin motivo,
      «Vale, hoy nada de …» con [Deshacer] (138). Ninguno llama al modelo; tras [Voy ahora] o [Más
-     tarde] quedan [Ya entrené] y [Hoy no].
+     tarde] quedan [Ya entrené] y [Hoy no]. Si [Más tarde] (o cualquier `move` de JimiC) la saca
+     de hoy, cuenta como «hoy no» hasta que se deshaga (145).
   5. En cuanto la tarea está hecha (por cualquier fuente) o ya no es de hoy, deja de insistir; la
      felicitación, solo con el botón (140).
 - **Datos:** Todoist, APEX y SQLite (`key_task_marks`, `task_moves`).
@@ -1606,6 +1607,7 @@ cuando haya casos reales de sobra y si Pedro lo considera necesario; exige evalu
 | 142 | **El salto: una tarea clave cuya tarea de hoy pasó a otro día «ya no es de hoy»** (1.15-j): el latido anota la tarea de hoy que ve abierta (`seen`); si después esa misma tarea está abierta otro día y no la movió JimiC (`task_moves`), el estado lo dice (`rescheduled`) y la segunda pasada la frena igual que una hecha (`key_rescheduled`), pero el cierre (1.16) no debe contarla como hecha. Límite: una completada antes del primer latido que la vio no se nota | El contrato del 23-nov-2026 mostró que una recurrente completada no sale en las completadas (pasa a mañana). Decisión de Pedro en la sesión de la 1.15 | — |
 | 143 | **El hábito del entreno lleva `training: true`** (1.15-k): opcional, como mucho uno (`second_training`); el entreno de APEX lo da por hecho y su tarea clave ofrece [Ya entrené]. La base de `evals/latido.yaml` lo marca, así que la medida de la 1.15 se compara con la de la 1.9 por las cifras globales | Un dato explícito, validado por `jimic config check`, en lugar de una convención por id. Decisión de Pedro en la sesión de la 1.15 | — |
 | 144 | **[Deshacer] de [Ya entrené] con una recurrente la devuelve a su fecha moviéndola** (1.15-l): reabrir no la devuelve a hoy (contrato del 23-nov-2026); el `move` de siempre conserva la recurrencia. Antes comprueba que sigue donde la dejó completarla; si no, no la toca. Una normal se reabre | Deshacer de verdad lo que hizo el botón. Decisión de Pedro en la sesión de la 1.15 | — |
+| 145 | **Un movimiento de JimiC que saca de hoy la tarea de una tarea clave es «hoy no»** (1.15-m): con [⏰ Más tarde] → «mañana» o cualquier `move` del agente fuera de hoy, el código anota `not_today` para esa intención, con el id de la tarea, y la insistencia de hoy se corta con el tope que ya existía (`key_not_today`), sin campo nuevo; el cierre no lo cuenta como hecho. Deshacer ese movimiento quita solo esa marca: un [Hoy no] de Pedro no lleva id y se queda. La tarea clave se reconoce porque el latido la vio como la de hoy (`seen`) | Un movimiento de JimiC no es un salto (142), y sin esto la insistencia volvía a `default_time` + `grace` el mismo día que Pedro la pasó a mañana. Pedro, en la revisión del PR de la 1.15 | — |
 
 ### Correspondencia con las decisiones candidatas de la referencia
 
