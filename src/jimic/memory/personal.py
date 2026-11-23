@@ -189,7 +189,7 @@ def render_check(config_dir: Path, reports: Sequence[FileReport]) -> str:
     return "\n".join(lines)
 
 
-def _create_private(path: Path, text: str) -> bool:
+def create_private(path: Path, text: str) -> bool:
     """Create `path` (0600) with `text`; return `False`, untouched, if it already exists."""
     try:
         fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
@@ -216,7 +216,7 @@ def init(config_dir: Path) -> list[tuple[str, bool]]:
     does not exist.
     """
     config_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
-    return [(name, _create_private(config_dir / name, template(name))) for name in YAML_SCHEMAS]
+    return [(name, create_private(config_dir / name, template(name))) for name in YAML_SCHEMAS]
 
 
 def render_init(config_dir: Path, results: Sequence[tuple[str, bool]]) -> str:
