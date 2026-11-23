@@ -34,7 +34,7 @@ JIMIC_ENTORNO=dev uv run jimic evaluar latido --comparar-con latido-20261123-194
 - **Qué hace:** monta el estado de cada escenario con el código del latido, llama a la API real
   (4 llamadas a la vez) y corrige lo que decide Haiku. No toca Todoist, Calendar ni Telegram, ni
   escribe en la base de datos.
-- **Cuánto cuesta:** unos 0,04 $ la evaluación completa (120 llamadas a Haiku), según el
+- **Cuánto cuesta:** unos 0,03 $ la evaluación completa (120 llamadas a Haiku), según el
   informe.
 - **El informe:** el resumen sale por pantalla y el completo queda en
   `~/.local/share/jimic-dev/evals/latido-AAAAMMDD-HHMM.json` y `.md`, con cada pasada, su motivo

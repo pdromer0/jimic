@@ -3043,3 +3043,101 @@ de hoy no anota nada. Commit `feat(tareas-clave)` (9dbe6d0) y esta entrada.
   de la ejecución, que diría el motivo del `neutral`, no lo da `gh.sh`, y la lectura directa de la
   API se denegó: queda para que Pedro lo mire en la pestaña de checks del PR.
 - **N3 de la ronda:** en verde en 1:41, 1712 tests y 13 de contrato saltados (pre-commit 0:11, pytest 1:30 y gitleaks de la historia 0:00).
+
+### Tarea 1.15-b: el latido al umbral
+
+**Qué se hizo.** Issue #54, rama `feat/h1-latido-umbral`, aprobada a las 20:39 del 23-nov-2026 con
+dos ajustes de Pedro: la regla del último mensaje libre en positivo («lo de prioridad alta que
+toca sale; lo de media o baja, a tu criterio») y que la segunda pasada descarte lo que Haiku elija
+sin que toque (`not_due`). Paso 1 de 2: el paso 2 (el conjunto de reserva) espera a que el chat
+lo escriba. Commits:
+- `refactor(plan)`: `late_after` pasa a `plan/day` (010211d) y sin su alias (db8d024);
+- `feat(latido)`: lo que toca ahora (28bc9d2), la segunda pasada con `not_due` (96f35fd) y el
+  prompt (56ac78e);
+- `feat(evals)`: los escenarios con `completed_today` y el e02 (a24b0e7); el último informe
+  completo, `--comparar-con` y la reserva aparte (680b06b);
+- `docs(diseno)`: las decisiones 146 a 148 y 13.2 (21664dd);
+- las correcciones: `fix(latido)` de la N2 (1896f90) y de la revisión propia (330ab7b), y
+  `fix(evals)` (797dbe6).
+
+Este anexo es `docs(hito-1)`.
+
+**Decisiones de la tarea:** 1.15b-a, 1.15b-b y 1.15b-c son las decisiones 146, 147 y 148 del
+diseño (la 148 recoge lo que ya estaba decidido en la 1.9 y matiza la 111). Sin ADR.
+
+**Decisiones del diff** (lo que el plan interpretaba, y lo que salió al implementar):
+- **`heartbeat/due.py`**: una función pura, `due_now`, con un `why` cerrado. Sin tocar: `done`,
+  `rescheduled`, `not_today`, `paused`, `too_early` (el `refusal` de la 1.15), `waiting`,
+  `insist_cap` o `sent_today`, `before_window` o `before_time` y `no_room`. Toca: `in_window`,
+  `late`, `on_time` y `can_insist`. Lo primero que aplica decide.
+- **Lo que ve Haiku:** sin `window`, `default_time` ni `insist_from` (en el estado y en el bloque
+  fijo); con `due_now` y `why` en cada intención. Se quedan `task` y las horas de `sent_today`.
+- **Plan y cierre:** el tardío es el de `late_after` (el mismo del runner del plan). Sin ventana,
+  la hora por defecto hace de ventana de un minuto, y una que cruza la medianoche nunca es tardía
+  (los dos, de la revisión propia; el plan decía «sin ventana, todo el día»).
+- **Un aviso** toca desde su hora hasta que sale, sin límite.
+- **`not_due`** solo para lo que elige Haiku, tras `refusal_of`, `already_waiting` y `duplicate`.
+  Lo que solo no cabe (`no_room`) pasa (`DayState.may_pick`) para que el cupo lo pare con su código
+  (`close_slot`): lo pilló la N2. El plan B y lo que suelta la cola no se miran.
+- **Escenarios:** `completed_today` en l12 y l16; en l22 y l27, que reabren una tarea, solo la
+  otra. El e02, con `not_today` a las 08:30. Ningún `expected` cambia
+  (`git diff main -- evals/latido.yaml | grep '^[-+].*expected'`, vacío).
+- **Informe completo:** `complete` en el JSON (versión 2), si se lanzaron todos los escenarios del
+  fichero. Uno de la versión 1 no cuenta. Los ilegibles se saltan al buscar y se nombran en el
+  resumen. `--comparar-con` acepta un nombre de la carpeta de informes o una ruta (`./` incluido) y
+  falla antes de gastar. `jimic evaluar plan` no cambia.
+- **Reserva:** `origin: reserva` (no se hereda ni entra en la huella) y una línea aparte en el
+  resumen y en el JSON (`summary.reserve`), listas para el paso 2.
+
+**Valores a mano** (código independiente, antes de implementar): plan 07:29 `before_window`;
+07:30, 07:45, 08:00 y 09:30 `in_window`; 09:31 y 11:15 `late`. Aviso de las 19:00: 18:59
+`before_time`, 19:00 y 19:14 `on_time`, 19:15 y 21:00 `late`. Gimnasio a las 12:00 + 45: 12:44
+`too_early` y 12:45 `can_insist`. Tope 8 con el cierre pendiente: 6 enviados, 1 libre; 7, ninguno y
+el cierre cabe; 8, nada. Con un script propio sobre `latido.yaml`: los 40 esperados caben en lo que
+toca; cambian 21 huellas y quedan 18 escenarios comunes con la 1.15.
+
+**Medida** (23-nov-2026, 21:07, `jimic-dev`, `claude-haiku-5-5`, 3 pasadas, `--comparar-con
+latido-20261123-1948.json`):
+
+| Cifra | 1.15-b | 1.15 | Umbral |
+| --- | --- | --- | --- |
+| Acierto | **95,0 % (114/120)** ✅ | 77,8 % (91/117) | ≥ 90 % |
+| Habla cuando no debía | **3,3 % (2/60)** ✅ | 0,0 % (0/57) | ≤ 5 % |
+| Coste | 0,0306 $ en 120 llamadas | 0,0333 $ | — |
+
+- **Sobre los 18 comunes:** acierto 72,2 % → 94,4 %; habla cuando no debía 0,0 % → 7,4 % (2/27),
+  **marcado como regresión** (más de 5 puntos). Nuevo, el e02; cambiados, los 21 previstos.
+- **Arreglados:** l03 y l35 (el plan a las 7:45), l05 y l06, l18, l22 y l23 (la tarde), l25 (el
+  aviso que no salió) y l29 (el cierre con su hueco); el e02 acierta.
+- **Fallan:** **l09 (0/3)**, nuevo: el gimnasio toca (`can_insist`) 15 minutos después de su aviso
+  y Haiku insiste dos veces (la tercera, una decisión inválida). El espacio entre avisos es de
+  Haiku por las notas; es el hallazgo 4 de la revisión propia. **l27 (0/3)**: con el último
+  mensaje libre, Haiku manda el gimnasio con uno o los dos avisos, y el esperado es solo el
+  gimnasio. La regla en positivo de Pedro lo deja a su criterio.
+- Siguiendo las notas, no se ajustó el prompt para recuperar ninguno: es decisión de Pedro.
+
+**Versiones incorrectas** (aplicadas y deshechas con un script; el árbol quedó limpio):
+
+| # | Versión incorrecta | Predicción | Observado |
+| --- | --- | --- | --- |
+| 1 | El plan con la hora por defecto | Rojo «7:45 dentro de la ventana»; verde «antes de la ventana, no» | Como se predijo, y más: el mutante también movía el cierre (22:00), así que cayeron sus tests y los dos del fichero real |
+| 2 | Un aviso deja de tocar al pasar su tramo | Rojo «el que no salió sigue tocando»; verde «a su hora, toca» | Como se predijo, más «los demás no caben» (el riego de las 21:00 pasaba a `sent_today`) y los del fichero real |
+| 3 | Sin mensajes libres, el cierre tampoco | Rojo «el cierre usa su hueco»; verde «los demás no caben» | Como se predijo, más el del estado y los dos del fichero real (l29) |
+| 4 | La comparación toma el más reciente aunque sea parcial | Rojo «un parcial no rompe…»; verde `--comparar-con` | Como se predijo, más «la versión 1 no cuenta» |
+| 5 | `due_now` ignora el `refusal` de la tarea clave | Rojo «hecha, no toca»; verde «con margen pasado, toca» | Rojos los cuatro de hecha/parada/pausa y «gana hecha»; el del margen también, porque comprueba las 12:44 (`too_early` viene del `refusal`) |
+| 6 | l16 sin `completed_today` | Rojo «dadas por hechas»; verdes los de carga | Rojos l16 y l18 con las ofertas; verdes los demás |
+| 7 | (Pedro) La segunda pasada no mira `due_now` | Rojo «un aviso antes de su hora no sale»; verde «uno que toca, sí» | Como se predijo |
+
+**Revisión propia** (`/code-review medium`, 10 hallazgos): siete corregidos (la ventana que cruza
+la medianoche, el plan o cierre sin ventana, los informes ilegibles que se saltaban sin decirlo y
+se leían dos veces, `./x.json` como nombre, la reserva contada dos veces y el alias de
+`late_after`); dos explicados (el `no_room` con algo en la cola ya no lo bloquea `not_due`, y el
+espacio entre insistencias es de Haiku por las notas, aunque la medida le da la razón: l09); uno
+pendiente (`jimic evaluar plan` también debería comparar con el último completo).
+
+**Pendiente:**
+- **Para Pedro:** l09 (¿el espacio entre avisos de una tarea clave pasa al código como un motivo
+  de `due_now`?) y l27 (la regla del último mensaje libre frente a su esperado), y la regresión
+  marcada sobre los comunes.
+- **Paso 2 de esta tarea:** el conjunto de reserva, sin tocar el prompt.
+- **Para la 1.16:** `jimic evaluar plan` con el último informe completo, como el latido.
