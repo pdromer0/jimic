@@ -2596,6 +2596,8 @@ Commits:
 - `feat(demo)`: el plan en `jimic telegram demo` (db1c7d6);
 - `refactor(evals)` y `feat(evals)`: `jimic evaluar plan` (d514dc3, fcda6c3);
 - `docs(diseno)`: las decisiones 118 a 128 (6795f3f); 129 y 130, en los ajustes de la revisión;
+- en los ajustes: `feat(conversación)` (95d25d3), `feat(agente)` (cba69b3 y 30bd361) y
+  `test(evals)` (c93e547);
 - las correcciones de la revisión propia: `fix(latido)` (03eea0d), `fix(plan)` (498ea2e, cba0080,
   15e005b, 5e668e7), `fix(canal)` (a327780), `fix(ejecución)` (6ec47ef) y `refactor(plan)`
   (b02196d).
@@ -2664,6 +2666,17 @@ una), 3 minutos. Frente a la primera, sobre los 10 comunes, 90 % → 90 %, pero 
   no crea «Revisar ofertas» de 14:30 a 15:00 (comprobación de después).
 Informe: `plan-20261123-1709.md` en la copia `dev`.
 
+**Tercera medida** (23-nov-2026, 17:22, tras la línea de Pedro sobre el momento del día y con el
+conjunto de reserva; 13 escenarios, 3 pasadas): **97,4 % (38/39)** ❌, en 1,08 $ (48 ejecuciones,
+0,023 $ cada una), 3 minutos.
+- **`p01` a `p10`: 96,7 % (29/30)**, frente al 90 % de la segunda. p04 sube a 2/3 (el hábito
+  «ofertas» ya entra) y en una pasada falta la **cena** (`includes_habit(cena)`): es de prioridad
+  media, de noche, y el proyecto acaba a las 21:00, así que tenía hueco de 21:00 a 21:45. p05 pasa
+  3/3.
+- **Reserva (`r01` a `r03`): 100 % (9/9).** Escrita por el chat después del ajuste del prompt; el
+  prompt no se ajusta mirándola.
+Informe: `plan-20261123-1722.md` en la copia `dev`. Siguiendo las notas, no se tocó el prompt.
+
 **Versiones incorrectas** (aplicadas y deshechas; el árbol quedó limpio). Predicción frente a lo
 observado:
 
@@ -2721,20 +2734,25 @@ minutos del disparador del módulo `xdist`.
   atrasadas (solo se borra la que duplica; la que no, se mueve), huecos (de inicio a fin, contra
   eventos y tareas con hora; la alta que no cabe, a `left_out`) y prioridad media (hueco libre
   para su duración en su `moment`). La segunda medida, arriba.
-- Paso 2, pendiente: un conjunto de reserva de 3 escenarios que pasa Pedro.
+- **Paso 2** (Pedro, en el PR #50), en este orden:
+  1. La línea de Pedro en `agent/plan.md`, tal cual, junto a la de prioridad media (30bd361): «el
+     momento del día solo limita a los de prioridad media…». El prompt no cambió en nada más.
+  2. El conjunto de reserva en `evals/plan.yaml` (c93e547), `r01` a `r03`, con `origin: reserva` y
+     el comentario de Pedro, con el catálogo tal como está. El id de la atrasada de `r01` es
+     `t-estiramientos-ayer`, como en p03. El test del fichero real carga ahora 13 escenarios.
+  3. La tercera medida, arriba.
 - N3 de la ronda: en verde en 2:20, 1566 tests (pre-commit 0:14, pytest 2:05 y gitleaks de la
   historia 0:01). pytest pasa de los 2 minutos: se cumple el disparador del módulo `xdist`.
 
 **Pendiente.**
-- **El prompt del plan** (p04 y p05 de la segunda medida): lo decide Pedro, con reglas generales y
-  no por escenario. La hipótesis de p04 apunta a dejar claro que «su momento del día» es solo de
-  la prioridad media; la alta cabe en cualquier hueco libre de hoy.
+- **El prompt del plan** (p04 de la tercera medida, la cena de prioridad media en 1 de 3
+  pasadas): lo decide Pedro, con reglas generales y no por escenario.
 - **El plan confirmado** (`day_plans` y `plan_items`, CU-01 paso 6): con el cierre, en la 1.16.
 - **Un hábito ya marcado hoy** no está entre las tareas abiertas y el plan mínimo lo volvería a
   proponer (raro: el plan sale a primera hora).
 - **El modelo juez** con rúbrica (13.3 y decisión 35): idea de Pedro; se revisa en el cierre del
   hito (1.17).
-- **Los mensajes pintados** de las dos medidas y la captura del móvil: los añade Pedro.
+- **Los mensajes pintados** de las tres medidas y la captura del móvil: los añade Pedro.
 
 **Pruebas contra servicios reales:** solo la API de Anthropic con la clave de `jimic-dev` (la medida
 de arriba). Todo inventado; no toca Todoist, Calendar ni Telegram: no hay restos que comprobar.

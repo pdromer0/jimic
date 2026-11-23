@@ -41,8 +41,9 @@ Cuándo lanzarla: al cambiar el prompt del latido, el modelo o el SDK, y al cerr
 
 `plan.yaml` (tarea 1.14) tiene un día base entero de una persona inventada (jueves 10-ene-2030 a
 las 7:45: sus ficheros personales, sus eventos, sus tareas, APEX y los cambios de memoria ya
-guardados) y 10 escenarios: seis casos del piloto con datos nuevos, el plan del e02 y tres nuevos.
-Algunos llevan mensajes de Pedro antes o después del plan, en la misma conversación. Cada
+guardados) y 13 escenarios: seis casos del piloto con datos nuevos, el plan del e02 y tres nuevos
+(`p01` a `p10`), y un conjunto de reserva (`r01` a `r03`) que el chat escribió después de ajustar
+el prompt: el prompt no se ajusta mirándolo, para que mida lo que no se vio al ajustar. Algunos llevan mensajes de Pedro antes o después del plan, en la misma conversación. Cada
 escenario declara sus comprobaciones de un catálogo fijo (`src/jimic/evals/plan_checks.py`), que
 son funciones de los datos de la propuesta, nunca del texto.
 
