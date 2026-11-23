@@ -145,6 +145,19 @@ def test_la_demo_ensena_un_cambio_con_guardar_y_un_deshacer():
     ]
 
 
+def test_la_demo_ensena_un_paso_de_la_puesta_en_marcha_con_guardar():
+    """La captura de la 1.13: las comidas de la rutina, con el antes y el después y [Guardar]."""
+    _, _, (kind, onboarding), *_ = demo.demo_messages(demo_settings())
+    assert kind == "memory"
+    view = render(onboarding, 3)
+    assert view.text.startswith(demo.ONBOARDING_ANSWER)
+    assert "📝 rutina.md · cambiar" in view.text
+    assert "Antes: ## Comidas" in view.text
+    assert [[b.label for b in row] for row in view.keyboard] == [
+        ["1 💾 Guardar", "1 ✏️ Cambiar", "1 ✖️ No"]
+    ]
+
+
 @pytest.mark.parametrize(
     ("option", "result"),
     [("save", "💾 guardado"), ("edit", "✏️ dime cómo lo quieres"), ("no", "✖️ descartado")],
@@ -181,7 +194,7 @@ def test_con_dev_la_demo_arranca_el_canal_manda_el_plan_y_para_con_sigterm(
         signal.signal(signal.SIGTERM, previous)
     (channel,) = built
     (kind, message, expires_at), *rest = channel.sent
-    assert [kind, *(sent[0] for sent in rest)] == ["plan", "undo", "memory", "undo_list"]
+    assert [kind, *(sent[0] for sent in rest)] == ["plan", "undo", "memory", "memory", "undo_list"]
     assert message == demo.demo_messages(demo_settings())[0][1]
     assert channel.stopped
     assert list(channel.handlers) == ["plan", "undo", "memory", "undo_list"]
