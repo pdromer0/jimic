@@ -30,10 +30,14 @@ After a tap that closes a proposal, `follow_up` may run the agent once more, wit
 of Pedro, so that the conversation goes on (decisions 1.13-c and 1.13-d, `follow_up.py`). Its
 answer goes like any other, without the suggestion of the onboarding; if it does not run or
 fails, nothing is sent: Pedro did not write.
+
+After [✏️ Cámbialo] or [✏️ Cambiar], Pedro's next message of that day carries a line of the code
+with the item he tapped (decision 1.14-h, `edit_context.py`); `track` watches the handlers.
 """
 
 import logging
 import sqlite3
+from collections.abc import Mapping
 from datetime import date, datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -44,10 +48,11 @@ from jimic.agent.tools import ManualChange, RunState
 from jimic.channel import store
 from jimic.channel.bot import Incoming, Outgoing, Reply
 from jimic.channel.message import Tap
-from jimic.channel.taps import Failed, failure_note, process_tap
+from jimic.channel.taps import Failed, TapHandler, failure_note, process_tap
 from jimic.clock import Clock
 from jimic.execution import confirm
 from jimic.execution.commands import Commands, command_of
+from jimic.execution.edit_context import EditContext
 from jimic.execution.execute import Executor
 from jimic.execution.follow_up import follow_up_note
 from jimic.execution.immediate import runs_now
@@ -121,6 +126,11 @@ class Assistant:
         self._conn = conn
         self._clock = clock
         self._timezone = timezone
+        self._edits = EditContext(clock, timezone)
+
+    def track(self, handlers: Mapping[str, TapHandler]) -> dict[str, TapHandler]:
+        """`handlers`, with [✏️] of the proposals remembered for Pedro's next message."""
+        return self._edits.track(handlers)
 
     async def reply(self, incoming: Incoming) -> str | Reply:
         command = command_of(incoming.text)
@@ -167,7 +177,7 @@ class Assistant:
 
     async def _converse(self, message: str, suggest: bool) -> str | Reply:
         day = self._today()  # the day Pedro wrote, not the one the agent finished
-        turn = await self._conversation.respond(message)
+        turn = await self._conversation.respond(message, self._edits.take(day))
         return await self._reply(turn, suggest, day)
 
     async def _reply(self, turn: Turn, suggest: bool, day: date) -> str | Reply:
@@ -221,6 +231,7 @@ class Assistant:
     async def follow_up(self, approval_id: int) -> str | Reply | None:
         """What follows a tap that closed approval `approval_id` (1.13-c), or `None`. Never
         raises: what goes wrong only reaches the log."""
+        self._edits.closed(approval_id)
         try:
             return await self._follow_up(approval_id)
         except Exception as error:

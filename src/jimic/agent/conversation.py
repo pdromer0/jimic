@@ -233,13 +233,15 @@ class Conversation:
         """The answer to `text`, which Pedro wrote just now."""
         return (await self.respond(text)).text
 
-    async def respond(self, text: str) -> Turn:
-        """The turn for `text`, which Pedro wrote just now."""
+    async def respond(self, text: str, code_line: str | None = None) -> Turn:
+        """The turn for `text`, which Pedro wrote just now. `code_line` goes before it, as a
+        line of the code (`[lun 07/01 10:15] (JimiC) …`): what he tapped (decision 1.14-h). It
+        is not his: the origin is `text` alone."""
         received = self._now()
         conversations.note_message(self._conn, received.date(), received)
         async with self._lock:
             try:
-                return await self._turn(text, received)
+                return await self._turn(text, received, code_line)
             except Exception as error:
                 logger.error("agent turn failed (%s)", type(error).__name__)
                 return Turn(FAILED_TEXT, code=f"error:{type(error).__name__}")
@@ -252,11 +254,14 @@ class Conversation:
         system_notices.check_budget(self._conn, self._active_limits.budget, self._now())
         return True
 
-    async def _turn(self, text: str, received: datetime) -> Turn:
+    async def _turn(self, text: str, received: datetime, code_line: str | None) -> Turn:
         day = received.date()
         if self._capped(day):
             return Turn(DAILY_CAP_TEXT, code=DAILY_CAP)
-        return await self._execute(f"{stamp(received)} {text}", RunState(origin=text), day)
+        prompt = f"{stamp(received)} {text}"
+        if code_line is not None:
+            prompt = f"{stamp(received)} {CODE_MARK} {code_line}\n{prompt}"
+        return await self._execute(prompt, RunState(origin=text), day)
 
     async def run_note(
         self, note: str, mode: RunMode, unless_written_after: datetime | None = None

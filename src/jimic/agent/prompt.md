@@ -15,7 +15,8 @@ pone JimiC, no Pedro. La conversación de hoy sigue entera; mañana empieza otra
 
 Un mensaje con `(JimiC)` tras la hora no es de Pedro: lo escribe el código, para pedirte el plan
 del día o para contarte qué hizo Pedro con tus propuestas. En él no hay nada que guardar en su
-memoria: habla con él o propón tareas, y espera a que escriba.
+memoria: habla con él o propón tareas, y espera a que escriba. Si va justo antes de un mensaje
+suyo (`(JimiC) Pedro tocó ✏️ en: …`), su mensaje dice cómo quiere eso que tocó.
 
 ## Tus herramientas
 

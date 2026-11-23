@@ -158,7 +158,10 @@ class Runtime:
                 commands=commands,
                 config_dir=self._paths.config_dir,
             )
-            handlers = executor.handlers | {MEMORY_KIND: memory.memory} | commands.handlers
+            handlers = (
+                assistant.track(executor.handlers | {MEMORY_KIND: memory.memory})
+                | commands.handlers
+            )
             channel = self._channel_factory(
                 self._settings,
                 self._conn,

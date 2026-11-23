@@ -1,5 +1,7 @@
 """La conversación sigue tras los toques (decisiones 1.13-c y 1.13-d): cuando un toque cierra una
-propuesta que pidió `follow_up`, el código reanuda una vez la sesión del día con una nota suya.
+propuesta que pidió `follow_up`, el código reanuda una vez la sesión del día con una nota suya. Y
+tras [✏️], el siguiente mensaje de Pedro lleva delante una línea del código con lo que tocó
+(decisión 1.14-h).
 
 El agente es un doble que pasa por los *hooks* y el servidor de las opciones; Todoist, el doble
 detrás del lector y el escritor de verdad; los ficheros personales, inventados. Todo es inventado.
@@ -66,7 +68,8 @@ class FollowWorld(AssistantWorld):
         return approval, out.kind
 
     def press(self, approval_id: int, item: int | None, option: str) -> TapResult:
-        handlers = self.executor.handlers | {MEMORY_KIND: self.memory.memory}
+        # Como `runtime`: los manejadores de las propuestas, vigilados para [✏️] (1.14-h).
+        handlers = self.assistant.track(self.executor.handlers | {MEMORY_KIND: self.memory.memory})
         return asyncio.run(
             process_tap(self.conn, self.clock, handlers, Tap(approval_id, item, option))
         )
@@ -275,3 +278,107 @@ def test_la_regla_no_da_nota_sin_follow_up_tras_editar_o_en_otra_clase():
     assert note_for((CREATE, "✓ creada", "ok")) is None
     assert note_for((CREATE | {"follow_up": True}, "✏️ ¿cómo la quieres?", "edit")) is None
     assert note_for((CREATE | {"follow_up": True}, "✓ creada", "ok"), kind="undo") is None
+
+
+# --- El contexto de [✏️] (decisión 1.14-h) -------------------------------------------------------
+
+EDIT_LINE = "[lun 07/01 10:15] (JimiC) Pedro tocó ✏️ en: crear «Tarea nueva» (2030-01-07T18:00)"
+
+
+def edited(w: FollowWorld) -> int:
+    """Pedro recibe la propuesta y toca [✏️] en su primer elemento; el canal avisa del cierre."""
+    approval, _ = w.propose()
+    result = w.press(approval, 1, "edit")
+    if result.closed:
+        assert w.follow_up(approval) is None  # con [✏️] no hay reanudación
+    return approval
+
+
+def test_tras_cambialo_la_linea_llega_con_el_siguiente_mensaje_y_no_con_el_de_despues(
+    conn, tmp_path
+):
+    w = FollowWorld(
+        conn,
+        tmp_path,
+        proposing(
+            "propose_plan",
+            {"items": [CREATE]},
+            [result_message("¿A qué hora te va?")],
+            [result_message("Vale")],
+        ),
+    )
+    edited(w)
+    w.say("mejor a las 19")
+    assert w.agent.runs[1][0] == f"{EDIT_LINE}\n[lun 07/01 10:15] mejor a las 19"
+    w.say("gracias")
+    assert w.agent.runs[2][0] == "[lun 07/01 10:15] gracias"
+
+
+def test_otro_dia_la_linea_no_llega(conn, tmp_path):
+    w = FollowWorld(
+        conn,
+        tmp_path,
+        proposing("propose_plan", {"items": [CREATE]}, [result_message("Buenos días")]),
+    )
+    edited(w)
+    w.clock.moment = madrid("2030-01-08T09:00")
+    w.say("buenos días")
+    assert w.agent.runs[1][0] == "[mar 08/01 09:00] buenos días"
+
+
+def test_la_linea_no_entra_en_el_origen(conn, tmp_path):
+    """Versión incorrecta: si la línea del código entrara en el origen, un cambio de memoria
+    nacería de algo que Pedro no escribió."""
+    text = "y no me escribas antes de las 8"
+    w = FollowWorld(
+        conn,
+        tmp_path,
+        proposing(
+            "propose_plan",
+            {"items": [CREATE]},
+            [ToolCall("propose_change", QUIETER), result_message("¿Lo guardo?")],
+        ),
+    )
+    edited(w)
+    reply = w.say(text)
+    assert EDIT_LINE in w.agent.runs[1][0]  # la línea llegó al agente...
+    assert isinstance(reply, Reply) and reply.outgoing is not None
+    assert reply.outgoing.kind == MEMORY_KIND
+    assert isinstance(reply.outgoing.message, InteractiveMessage)
+    (item,) = reply.outgoing.message.items
+    assert (item.data or {})["origin"] == text  # ...pero el origen es solo su texto
+
+
+def test_con_cambiar_de_la_memoria_la_linea_llega_igual(conn, tmp_path):
+    w = FollowWorld(
+        conn,
+        tmp_path,
+        proposing("propose_change", QUIETER, [result_message("¿Cómo lo quieres?")]),
+    )
+    edited(w)
+    w.say("mejor a las 9")
+    assert w.agent.runs[1][0] == (
+        "[lun 07/01 10:15] (JimiC) Pedro tocó ✏️ en: limites.yaml · cambiar\n"
+        "[lun 07/01 10:15] mejor a las 9"
+    )
+
+
+def test_si_otro_toque_cierra_el_mensaje_la_linea_se_olvida(conn, tmp_path):
+    two = {"items": [CREATE, CREATE | {"title": "Otra"}]}
+    w = FollowWorld(conn, tmp_path, proposing("propose_plan", two, [result_message("Vale")]))
+    approval = edited(w)
+    result = w.press(approval, 2, "ok")
+    assert result.closed
+    w.follow_up(approval)  # el canal avisa del cierre
+    w.say("hecho")
+    assert w.agent.runs[1][0] == "[lun 07/01 10:15] hecho"
+
+
+def test_con_otro_toque_que_no_cierra_la_linea_sigue(conn, tmp_path):
+    """Lo que olvida la línea es que el mensaje se cierre, no cualquier toque."""
+    three = {"items": [CREATE, CREATE | {"title": "Otra"}, CREATE | {"title": "Tercera"}]}
+    w = FollowWorld(conn, tmp_path, proposing("propose_plan", three, [result_message("Vale")]))
+    approval = edited(w)
+    assert not w.press(approval, 2, "ok").closed
+    w.say("la primera, a las 19")
+    assert w.agent.runs[1][0].startswith(EDIT_LINE + "\n")
