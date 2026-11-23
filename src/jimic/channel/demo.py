@@ -18,12 +18,12 @@ import asyncio
 import logging
 import sqlite3
 from collections.abc import Mapping
-from datetime import UTC, date, datetime, time, timedelta
+from datetime import date, datetime, time, timedelta
 from typing import Any
 
 from jimic.channel.bot import TelegramChannel, build_channel
 from jimic.channel.message import InteractiveMessage, Item
-from jimic.channel.taps import Answer, Followup, HandlerOutcome, Show
+from jimic.channel.taps import Answer, Followup, HandlerOutcome, Show, TapHandler
 from jimic.clock import Clock, SystemClock
 from jimic.config import Settings, load_settings
 from jimic.execution.commands import UNDO, UNDO_HEADER, UNDO_LIST_KIND
@@ -291,27 +291,30 @@ async def demo_undo_list(item: Item, option: str, approval_id: int) -> HandlerOu
     return "↩️ deshecho"
 
 
-async def demo_key(item: Item, option: str, approval_id: int) -> HandlerOutcome:
-    """The answers of the real buttons (task 1.15), without marks or Todoist."""
-    habit = str((item.data or {}).get("habit", "")).lower()
-    expires = datetime.now(UTC) + TTL
-    if option == "go":
-        return Answer(GOING, GO_TEXT, then=still_open(item))
-    if option == "later":
-        return Answer(LATER, LATER_TEXT, then=still_open(item))
-    body, result = (
-        (DONE_TEXT, DONE) if option == "done" else (SKIP_TEXT.format(habit=habit), SKIPPED)
-    )
-    undo = key_undo_message(body, item, {"action": option})
-    return Answer(result, Followup(UNDO_KIND, undo, expires, body))
+def key_handler(clock: Clock) -> TapHandler:
+    """The answers of the real buttons (task 1.15), without marks or Todoist; the [Deshacer]
+    lasts as long as the demo's other buttons."""
+
+    async def demo_key(item: Item, option: str, approval_id: int) -> HandlerOutcome:
+        habit = str((item.data or {}).get("habit", "")).lower()
+        if option == "go":
+            return Answer(GOING, GO_TEXT, then=still_open(item))
+        if option == "later":
+            return Answer(LATER, LATER_TEXT, then=still_open(item))
+        body, result = (
+            (DONE_TEXT, DONE) if option == "done" else (SKIP_TEXT.format(habit=habit), SKIPPED)
+        )
+        undo = key_undo_message(body, item, {"action": option})
+        return Answer(result, Followup(UNDO_KIND, undo, clock.now() + TTL, body))
+
+    return demo_key
 
 
-HANDLERS = {
+HANDLERS: dict[str, TapHandler] = {
     PLAN_KIND: demo_plan,
     UNDO_KIND: demo_undo,
     MEMORY_KIND: demo_memory,
     UNDO_LIST_KIND: demo_undo_list,
-    KEY_KIND: demo_key,
 }
 
 
@@ -333,7 +336,13 @@ def demo_factory(settings: Settings, clock: Clock) -> ChannelFactory:
         logger.info("demo sent; press Ctrl+C to stop")
 
     def factory(conn: sqlite3.Connection) -> TelegramChannel:
-        return build_channel(settings, conn, clock, handlers=HANDLERS, on_started=send_demo)
+        return build_channel(
+            settings,
+            conn,
+            clock,
+            handlers=HANDLERS | {KEY_KIND: key_handler(clock)},
+            on_started=send_demo,
+        )
 
     return factory
 

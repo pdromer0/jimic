@@ -259,9 +259,9 @@ def test_los_avisos_de_tareas_clave_de_la_demo_llevan_sus_botones():
 
 def test_los_toques_de_la_demo_contestan_como_los_de_verdad():
     item = demo.GYM_ITEM
-    going = asyncio.run(demo.demo_key(item, "go", 1))
+    going = asyncio.run(demo.key_handler(FixedClock(NOW))(item, "go", 1))
     assert isinstance(going, Answer) and going.reply == "¡Vamos! 💪"
     assert going.then is not None and [o.key for o in going.then.options] == ["done", "skip"]
-    skipped = asyncio.run(demo.demo_key(item, "skip", 1))
+    skipped = asyncio.run(demo.key_handler(FixedClock(NOW))(item, "skip", 1))
     assert isinstance(skipped, Answer) and isinstance(skipped.reply, Followup)
     assert skipped.reply.message.body == "Vale, hoy nada de gimnasio. 🛋️"
