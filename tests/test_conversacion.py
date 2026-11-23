@@ -433,3 +433,18 @@ def test_la_guardia_de_la_ejecucion_para_lo_bloqueado_antes_de_la_herramienta(co
     assert [outcome.denied for outcome in agent.tool_outcomes] == [True]
     assert turn.run is not None and not turn.run.contaminated
     assert not conversations.read_external(conn, date(2030, 1, 7))
+
+
+# --- La fila del día sin mensaje de Pedro (tarea 1.14) -----------------------------------------
+
+
+def test_la_fila_del_dia_sin_mensaje_no_cuenta_como_que_pedro_escribio(conn):
+    """Pilla un `ensure_day` que inventa `last_message_at` (el latido creería que Pedro conversa)
+    o que pisa la hora de un mensaje que ya estaba."""
+    conversations.ensure_day(conn, date(2030, 1, 7))
+    assert conversations.last_message_at(conn) is None
+    conversations.mark_external(conn, date(2030, 1, 7))  # la guardia ya puede marcarla
+    conversations.note_message(conn, date(2030, 1, 7), madrid("2030-01-07T09:00"))
+    conversations.ensure_day(conn, date(2030, 1, 7))
+    assert conversations.last_message_at(conn) == madrid("2030-01-07T09:00")
+    assert conversations.read_external(conn, date(2030, 1, 7))
