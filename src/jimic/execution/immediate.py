@@ -2,6 +2,8 @@
 
 Only if every condition holds:
 
+0. the run carries a message of Pedro (`origin`): a run without one (the plan, the follow-up
+   after a tap, task 1.14) never runs anything at once, whatever the agent marked;
 1. the agent marked `requested_by_pedro` (Pedro asked for it in this message);
 2. this run called no tool that contaminates (`read_calendar`, `read_tasks`);
 3. the proposal has **one** item, and it is a `create` or a `move`;
@@ -17,7 +19,7 @@ from jimic.agent.tools import RunState
 
 
 def runs_now(run: RunState) -> bool:
-    if not run.items or not run.requested_by_pedro or run.contaminated:
+    if run.origin is None or not run.items or not run.requested_by_pedro or run.contaminated:
         return False
     if len(run.items) != 1:
         return False

@@ -40,7 +40,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 from zoneinfo import ZoneInfo
 
 from claude_agent_sdk import McpSdkServerConfig, SdkMcpTool, create_sdk_mcp_server, tool
@@ -102,9 +102,14 @@ class ManualChange:
     after: str | None
 
 
+type RunMode = Literal["message", "plan", "follow_up"]
+"""What started a run: a message of Pedro, the plan the heartbeat hands over (task 1.14), or the
+follow-up after Pedro's taps (decision 1.13-c). Only `message` has an origin."""
+
+
 @dataclass
 class RunState:
-    """One run of the agent (one message of Pedro): what it read and what it proposed."""
+    """One run of the agent: what it read and what it proposed."""
 
     contaminated: bool = False
     """It called `read_calendar` or `read_tasks` (condition 2 of decision 1.11-b, and 1.12-a)."""
@@ -113,8 +118,9 @@ class RunState:
     requested_by_pedro: bool = True
     """Every `propose_plan` of the run said Pedro asked for it; meaningless without items."""
     origin: str | None = None
-    """What Pedro wrote in this message, without the time; `None` outside a conversation (a
-    plan or a close the heartbeat hands over), where the memory never changes."""
+    """What Pedro wrote in this message, without the time; `None` in a run without his message
+    (the plan, a follow-up), where the memory never changes and nothing runs at once."""
+    mode: RunMode = "message"
     memory: list[dict[str, Any]] = field(default_factory=list)
     """The changes and ideas proposed, as data, checked against the files."""
     memory_dropped: bool = False
