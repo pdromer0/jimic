@@ -2356,6 +2356,10 @@ inventado de la 1.6):
   la guarda no saltó (0,0338 $).
 - No tocan Todoist, Calendar ni Telegram.
 
+**Medidas.** La N3, tras la revisión, en verde en 1:02: 1367 tests y 11 de contrato saltados
+(eran 1291 tras la 1.12); pre-commit 0:09, pytest 0:51 y gitleaks de la historia 0:02.
+Estas medidas se añadieron después y solo son documentación.
+
 **Versiones incorrectas** (aplicadas y deshechas con un script; el árbol quedó limpio). Predicción
 antes, observado después:
 
