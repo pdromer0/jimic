@@ -13,21 +13,25 @@ from dataclasses import dataclass, field
 from zoneinfo import ZoneInfo
 
 from jimic.clock import Clock, local_day_bounds
+from jimic.heartbeat.key_tasks import read_jumped
 from jimic.heartbeat.limits import (
     Outgoing,
     Quota,
     StopReason,
     Verdict,
     WaitingNotices,
+    applies_on,
     first_pass,
     second_pass,
 )
 from jimic.heartbeat.sources import Sources
 from jimic.heartbeat.state import DayState, build_day_state
+from jimic.memory import key_marks
 from jimic.memory.conversations import last_message_at
 from jimic.memory.notices import sent_between
-from jimic.memory.schemas import Intentions, Limits
+from jimic.memory.schemas import Intentions, KeyTask, Limits
 from jimic.memory.usage import TokenUsage
+from jimic.tools.todoist import TaskList
 
 logger = logging.getLogger(__name__)
 
@@ -71,6 +75,10 @@ class CycleResult:
     verdicts: tuple[Verdict, ...] = ()
 
 
+async def _not_read() -> TaskList:
+    return TaskList.unavailable("not_read")
+
+
 async def run_cycle(
     *,
     clock: Clock,
@@ -99,11 +107,23 @@ async def run_cycle(
         logger.info("first pass: stop (%s)", first.stop)
         return CycleResult(first.stop, dropped)
     assert first.calendar is not None  # the first pass reads it whenever it goes on
-    # APEX reads a file and may parse it: in a thread, so the loop keeps serving, and at the
-    # same time as Todoist.
-    tasks, apex = await asyncio.gather(
-        sources.todoist.reader.read_today(), asyncio.to_thread(sources.apex.read_today)
+    reader = sources.todoist.reader
+    has_key_tasks = any(
+        isinstance(intention, KeyTask) and applies_on(intention, day)
+        for intention in intentions.intentions
     )
+    # APEX reads a file and may parse it: in a thread, so the loop keeps serving, and at the
+    # same time as Todoist. The completed tasks only matter to a key task (task 1.15).
+    tasks, apex, completed = await asyncio.gather(
+        reader.read_today(),
+        asyncio.to_thread(sources.apex.read_today),
+        reader.read_completed_today() if has_key_tasks else _not_read(),
+    )
+    marks = key_marks.of_day(conn, day)
+    open_ids = {task.id for task in tasks.tasks} if tasks.available else set()
+    seen = {task_id for item in marks.by_intent.values() for task_id in item.seen}
+    missing = seen - open_ids if tasks.available else set()
+    jumped = await read_jumped(reader, missing, day) if missing else frozenset()
     state = build_day_state(
         now,
         timezone,
@@ -114,9 +134,19 @@ async def run_cycle(
         intentions,
         limits,
         queue,
+        completed=completed,
+        marks=marks,
+        jumped=jumped,
     )
     decision = await decide(state)
     verdicts = second_pass(
-        now, decision.proposals, intentions, limits, sent, queue, last_message_at(conn)
+        now,
+        decision.proposals,
+        intentions,
+        limits,
+        sent,
+        queue,
+        last_message_at(conn),
+        state.key_tasks,
     )
     return CycleResult(None, dropped, state, decision, tuple(verdicts))

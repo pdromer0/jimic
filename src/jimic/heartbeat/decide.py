@@ -13,8 +13,9 @@ something invalid still has its usage counted (`messages.parse` would raise and 
   `invalid_decision:<why>`: nobody speaks and it is not retried.
 - The plan and the close (decision 1.8-b) are decided and recorded, and the second pass hands
   them over to the agent: the plan goes out from there (task 1.14); the close, with task 1.16.
-- If the API fails (RF-04), each `notice` and `key_task` whose default time falls in this
-  heartbeat's slot and has not gone out today goes out with a fixed template of the code, and a
+- If the API fails (RF-04), each `notice` whose default time falls in this heartbeat's slot and
+  has not gone out today goes out with a fixed template of the code; a `key_task`, in the slot of
+  its `insist_from` (task 1.15) and only if its state lets it insist; and a
   `daily_plan` in its slot is handed over to the agent as if Haiku had picked it (task 1.14,
   pending of decision 85): the plan still goes out at its default time. The close has none.
 
@@ -254,9 +255,10 @@ def template_text(intention: Intention, habits: dict[str, str]) -> str:
 
 
 def templates(intentions: Intentions, state: DayState) -> tuple[Outgoing, ...]:
-    """Plan B (RF-04): the `notice`, `key_task` and `daily_plan` of today whose default time
-    falls in this heartbeat's slot and that have not been attended today (the plan goes to the
-    agent through the second pass). The close has none."""
+    """Plan B (RF-04): the `notice` and `daily_plan` of today whose default time falls in this
+    heartbeat's slot and that have not been attended today (the plan goes to the agent through
+    the second pass), and each `key_task` whose `insist_from` falls in it, if nothing stops it
+    (done, «hoy no», paused: task 1.15). The close has none."""
     now = state.now
     sent = {entry.intent for entry in state.sent_today}
     left = {active.id: active.left_today for active in state.intentions}
@@ -270,6 +272,11 @@ def templates(intentions: Intentions, state: DayState) -> tuple[Outgoing, ...]:
         if isinstance(intention, DailyPlan) and left.get(intention.id, 0) < 1:
             continue  # already handed over today: `sent_today` only has what went out
         start = datetime.combine(now.date(), intention.default_time, tzinfo=now.tzinfo)
+        if isinstance(intention, KeyTask):
+            status = state.key_tasks.get(intention.id)
+            if status is None or status.refusal(now) is not None:
+                continue
+            start = status.insist_from
         if start <= now < start + SLOT and intention.id not in sent:
             chosen.append(Outgoing(intent=intention.id, text=template_text(intention, habits)))
     return tuple(chosen)

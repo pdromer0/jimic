@@ -28,7 +28,7 @@ from jimic.heartbeat.cycle import CycleResult, Decision, run_cycle
 from jimic.heartbeat.limits import PENDING_TASK, SEPARATOR, Verdict, WaitingNotices, in_window
 from jimic.heartbeat.sources import Sources
 from jimic.heartbeat.state import DayState
-from jimic.memory import system_notices, usage
+from jimic.memory import key_marks, system_notices, usage
 from jimic.memory.changes import FILE_OF_STEM, stem
 from jimic.memory.live import LiveConfig
 from jimic.memory.notices import record_handover
@@ -224,6 +224,10 @@ class Heartbeat:
         if decision.api_error is not None:
             system_notices.detect(self._conn, "api_down", day, now, decision.api_error)
         if result.state is not None:
+            # Today's task of each key task, seen open: what tells a jump later (decision 1.15-j).
+            for status in result.state.key_tasks.values():
+                if status.task is not None:
+                    key_marks.note_seen(self._conn, day, status.intent, status.task.id, now)
             down = [
                 f"{name}:{source['unavailable_reason']}"
                 for name, source in result.state.sources().items()

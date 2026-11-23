@@ -28,6 +28,7 @@ from jimic.heartbeat.cycle import Decision
 from jimic.heartbeat.limits import Outgoing, WaitingNotices
 from jimic.heartbeat.sources import Sources
 from jimic.heartbeat.state import DayState, build_day_state
+from jimic.memory import key_marks
 from jimic.memory.notices import sent_between
 from jimic.memory.schemas import Intentions, Limits
 from jimic.tools.apex_schema import ApexSnapshot
@@ -152,7 +153,8 @@ def day_state(
     its: Intentions | None = None,
     calendar: CalendarDay | None = None,
 ) -> DayState:
-    """The state at `now`, with what `notices` says and fixed, invented sources."""
+    """The state at `now`, with what `notices` and `key_task_marks` say and fixed, invented
+    sources."""
     return build_day_state(
         now,
         MADRID,
@@ -163,6 +165,8 @@ def day_state(
         its if its is not None else intentions(),
         limits(),
         WaitingNotices(),
+        completed=TaskList(available=True),
+        marks=key_marks.of_day(conn, now.astimezone(MADRID).date()),
     )
 
 

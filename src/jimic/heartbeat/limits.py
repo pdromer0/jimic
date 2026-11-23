@@ -3,14 +3,15 @@
 The **first pass** runs before the model and ends the cycle without calling it: quiet hours, an
 event in progress, or no room left even for the day close. The **second pass** runs on what the
 decision proposes and guarantees the limits whatever the model says: the cap per intention, no
-repeating, the slot kept for the day close (decision 1.7-a) and grouping (decision 1.7-b).
+repeating, the slot kept for the day close (decision 1.7-a), grouping (decision 1.7-b) and, for a
+key task (task 1.15), done, no longer today's, «hoy no», paused or before it may insist.
 
 Every verdict carries a reason that is a code. Logs say codes and intention ids, never the text
 of a message.
 """
 
 import logging
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import date, datetime, time
 from typing import Literal
@@ -18,6 +19,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from jimic.channel.message import TELEGRAM_TEXT_LIMIT, telegram_length
+from jimic.heartbeat.key_tasks import KeyTaskStatus
 from jimic.memory.notices import SentToday
 from jimic.memory.schemas import Intention, Intentions, Limits, Notice, Window
 from jimic.tools.calendar import CalendarDay
@@ -240,8 +242,10 @@ class _Pass:
         sent: SentToday,
         queue: WaitingNotices,
         last_chat: datetime | None,
+        key_tasks: Mapping[str, KeyTaskStatus],
     ) -> None:
         self.now = now
+        self.key_tasks = key_tasks
         self.last_chat = last_chat
         self.day = now.date()
         self.limits = limits
@@ -261,6 +265,11 @@ class _Pass:
             return "disabled"
         if not applies_on(intention, self.day):
             return "not_today"
+        status = self.key_tasks.get(intention.id)
+        if status is not None:
+            refusal = status.refusal(self.now)
+            if refusal is not None:
+                return refusal
         if self.sent.count(intention.id) >= cap_per_day(intention, self.limits):
             return "insist_cap" if intention.type == "key_task" else "repeated"
         return None
@@ -370,14 +379,16 @@ def second_pass(
     sent: SentToday,
     queue: WaitingNotices,
     last_chat: datetime | None = None,
+    key_tasks: Mapping[str, KeyTaskStatus] | None = None,
 ) -> list[Verdict]:
     """The verdicts of this heartbeat for the proposals and for what waits. `queue` changes.
-    `last_chat` is the last moment Pedro wrote, if any.
+    `last_chat` is the last moment Pedro wrote, if any; `key_tasks`, what the state of the day
+    knows of each key task (task 1.15).
 
     The proposals (the model's picks, or the templates of a heartbeat with the API down) are
     one batch: whatever goes out goes out as one message, so a heartbeat never sends two.
     """
-    state = _Pass(now, intentions, limits, sent, queue, last_chat)
+    state = _Pass(now, intentions, limits, sent, queue, last_chat, key_tasks or {})
     state.batch(proposals)
     for verdict in state.verdicts:
         logger.info(
