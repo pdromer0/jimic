@@ -32,6 +32,7 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
+from jimic.memory.changes import BOM, ChangeRefused, read_text
 from jimic.memory.markdown_checks import (
     HEADING,
     ICONS_SECTION,
@@ -186,15 +187,15 @@ class Progress:
         return "\n".join(lines)
 
 
-def _read(path: Path) -> str:
-    """The text of a file, or `""` if it is missing or cannot be read: its parts count as
-    missing, and `jimic config check` says what is wrong."""
-    if path.is_symlink():
-        return ""
+def _read(config_dir: Path, name: str) -> str:
+    """The text of a file as the memory reads it (`changes.read_text`), without its BOM; `""`
+    if it is missing or cannot be read: its parts count as missing, and `jimic config check`
+    says what is wrong."""
     try:
-        return path.read_text(encoding="utf-8-sig")
-    except OSError, UnicodeDecodeError:
+        text = read_text(config_dir, name)
+    except ChangeRefused:
         return ""
+    return (text or "").removeprefix(BOM)
 
 
 def _first(sections: list[Section], title: str) -> Section | None:
@@ -243,7 +244,7 @@ def _area(sections: list[Section], name: str) -> Area:
 
 def _habits(config_dir: Path) -> int:
     try:
-        doc = parse_yaml(_read(config_dir / INTENTIONS_FILE))
+        doc = parse_yaml(_read(config_dir, INTENTIONS_FILE))
         return len(Intentions.model_validate(doc).habits)
     except YamlSyntaxError, ValidationError:
         return 0
@@ -273,9 +274,9 @@ def _preferences(text: str) -> tuple[bool, int]:
 def progress(config_dir: Path) -> Progress:
     """The onboarding as the files say it is now; nothing is created or changed."""
     invalid = tuple(report.name for report in check(config_dir) if report.status != "ok")
-    routine = outline(_read(config_dir / ROUTINE_FILE))
-    objectives = outline(_read(config_dir / OBJECTIVES_FILE))
-    tone, icons = _preferences(_read(config_dir / PREFERENCES_FILE))
+    routine = outline(_read(config_dir, ROUTINE_FILE))
+    objectives = outline(_read(config_dir, OBJECTIVES_FILE))
+    tone, icons = _preferences(_read(config_dir, PREFERENCES_FILE))
     return Progress(
         started=(config_dir / OBJECTIVES_FILE).exists(),
         invalid=invalid,
