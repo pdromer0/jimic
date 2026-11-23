@@ -454,3 +454,49 @@ def test_un_payload_guardado_antes_de_then_sigue_cargando():
         option.pop("then", None)
     loaded = InteractiveMessage.model_validate(saved)
     assert loaded.global_options[1].then is None
+
+
+# --- El estilo de las tareas clave (tarea 1.15) -------------------------------------------------
+
+KEY_OPTIONS = (
+    Option(key="go", label="🏃 Voy ahora", approves=False),
+    Option(key="later", label="⏰ Más tarde", approves=False),
+    Option(key="done", label="✅ Ya entrené"),
+    Option(key="skip", label="⏭ Hoy no", approves=False),
+)
+
+
+def key_message(*icons: str | None) -> InteractiveMessage:
+    items = tuple(
+        Item(title=f"Tarea {number}", options=KEY_OPTIONS, icon=icon)
+        for number, icon in enumerate(icons, start=1)
+    )
+    return InteractiveMessage(body="Oye, que la pesa te echa de menos 😄", items=items, style="key")
+
+
+def test_con_una_tarea_clave_dos_filas_de_dos_sin_numero_ni_icono():
+    """1.15-c: [🏃 Voy ahora] [⏰ Más tarde] / [✅ Ya entrené] [⏭ Hoy no]."""
+    view = render(key_message("🏋️"), 7)
+    assert labels(view) == [["🏃 Voy ahora", "⏰ Más tarde"], ["✅ Ya entrené", "⏭ Hoy no"]]
+    assert [button.data for button in view.keyboard[1]] == ["7:1:done", "7:1:skip"]
+
+
+def test_con_dos_tareas_clave_cada_boton_lleva_el_icono_de_la_suya():
+    """Versión incorrecta 4 en el canal: cada botón apunta a su elemento, con su icono."""
+    view = render(key_message("🏋️", None), 7)
+    assert labels(view)[0] == ["🏋️ 🏃 Voy ahora", "🏋️ ⏰ Más tarde"]
+    assert labels(view)[2] == ["2️⃣ 🏃 Voy ahora", "2️⃣ ⏰ Más tarde"]  # sin icono, su número
+    assert {button.data.split(":")[1] for button in view.keyboard[3]} == {"2"}
+
+
+def test_el_texto_es_solo_el_cuerpo_hasta_que_un_toque_lo_resuelve():
+    message = key_message("🏋️", "🛒")
+    assert render(message, 7).text == "Oye, que la pesa te echa de menos 😄"
+    tapped = resolve(message, {0: Outcome("go", "🏃 a por ello")})
+    view = render(tapped, 7)
+    assert view.text == "Oye, que la pesa te echa de menos 😄\n\nTarea 1 — 🏃 a por ello"
+    assert len(view.keyboard) == 2  # solo quedan las filas de la otra
+
+
+def test_un_mensaje_de_tareas_clave_cabe_en_todos_sus_estados():
+    ensure_fits(key_message("🏋️", "🛒", "📚"))

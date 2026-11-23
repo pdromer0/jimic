@@ -51,6 +51,7 @@ from telegram.request import BaseRequest
 from jimic.channel import store
 from jimic.channel.message import (
     InteractiveMessage,
+    MessageError,
     MessageTooLong,
     View,
     ensure_fits,
@@ -58,7 +59,7 @@ from jimic.channel.message import (
     render,
     reply_chunks,
 )
-from jimic.channel.taps import TapHandler, process_tap, sweep
+from jimic.channel.taps import Followup, TapHandler, process_tap, sweep
 from jimic.clock import Clock
 from jimic.config import Settings
 
@@ -402,8 +403,18 @@ class TelegramChannel:
         await self._answer(query.id, self._toast(result.code))
         for text in result.send:
             await self._send_chunks(text)
+        for followup in result.messages:
+            await self._send_followup(followup)
         if result.closed and self._on_closed is not None and not self._stopping:
             self._start_turn(self._on_closed(tap.approval_id))
+
+    async def _send_followup(self, followup: Followup) -> None:
+        """A message with buttons after a tap (task 1.15); as plain text if it cannot go."""
+        try:
+            await self.send(followup.kind, followup.message, followup.expires_at)
+        except (SendError, MessageError) as error:
+            logger.warning("follow-up message not sent (%s)", type(error).__name__)
+            await self._send_chunks(followup.if_unsent)
 
     @staticmethod
     def _toast(code: str) -> str | None:

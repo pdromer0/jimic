@@ -16,7 +16,7 @@ from jimic.channel.message import (
     Option,
     Tap,
 )
-from jimic.channel.taps import Declined, Failed, Renew, process_tap, sweep
+from jimic.channel.taps import Answer, Declined, Failed, Followup, Renew, process_tap, sweep
 from jimic.memory.database import open_database
 
 NOW = datetime(2026, 11, 21, 19, 0, tzinfo=ZoneInfo("Europe/Madrid"))
@@ -412,3 +412,27 @@ def test_un_declined_sin_opcion_de_no_queda_pendiente_con_su_nota(conn, clock):
     item = stored(conn, approval).message.items[0]
     assert item.pending and item.note == "no se pudo"
     assert stored(conn, approval).status == "pending"
+
+
+# --- Answer: resuelto y una respuesta tras el toque (tarea 1.15) ------------------------------
+
+
+def test_answer_con_texto_resuelve_y_envia_el_texto(conn, clock, approval_id):
+    async def answers(item, option, approval_id):
+        return Answer("🏃 a por ello", "¡Vamos! 💪")
+
+    result = run(conn, clock, answers, Tap(approval_id, 1, "y"))
+    assert result.code == "resolved" and result.send == ("¡Vamos! 💪",)
+    assert result.messages == ()
+    stored = store.load(conn, approval_id)
+    assert stored is not None and stored.message.items[0].result == "🏃 a por ello"
+
+
+def test_answer_con_mensaje_lo_deja_para_el_canal(conn, clock, approval_id):
+    followup = Followup("key_undo", make_message(), EXPIRES, "¡Hecho! 💪")
+
+    async def answers(item, option, approval_id):
+        return Answer("✅ hecho", followup)
+
+    result = run(conn, clock, answers, Tap(approval_id, 1, "y"))
+    assert result.send == () and result.messages == (followup,)

@@ -11,8 +11,9 @@ retried on its own (it expires as unconfirmed).
 A handler returns what happened as a short text (`✓ creada`), or `Failed` with a code (the item
 stays pending with its note, and Pedro can try again), or `Renew` with the item as it is now (the
 task changed: ask again), or `Declined` with a short text (looked at and not done, for good: the
-item is resolved as a no). If it raises, it counts as `Failed`. Nothing in the log is content:
-only codes, ids and counts.
+item is resolved as a no), or `Answer` (resolved, and the code answers after the tap with a fixed
+text or a message with buttons: the key tasks, task 1.15). If it raises, it counts as `Failed`.
+Nothing in the log is content: only codes, ids and counts.
 """
 
 import logging
@@ -77,7 +78,28 @@ class Show:
     result: str | None = None
 
 
-type HandlerOutcome = str | Failed | Renew | Declined | Show
+@dataclass(frozen=True)
+class Followup:
+    """A message with buttons to send after a tap, saved as an approval of `kind` (task 1.15:
+    the [Deshacer] of [Ya entrené] or [Hoy no]). If Telegram refuses it, `if_unsent` goes as
+    plain text instead: what it offers is undone only with its button."""
+
+    kind: str
+    message: InteractiveMessage
+    expires_at: datetime
+    if_unsent: str
+
+
+@dataclass(frozen=True)
+class Answer:
+    """The item is resolved with `result`, and after the tap the code answers with `reply`: a
+    fixed text, or a message with buttons (task 1.15, the key tasks)."""
+
+    result: str
+    reply: str | Followup
+
+
+type HandlerOutcome = str | Failed | Renew | Declined | Show | Answer
 type TapHandler = Callable[[Item, str, int], Awaitable[HandlerOutcome]]
 """Called with the item, the key of the option chosen and the id of its approval."""
 
@@ -89,7 +111,9 @@ class TapResult:
     code: str
     view: View | None = None
     send: tuple[str, ...] = ()
-    """Texts to send after editing the message (`Show`), in the order of the items."""
+    """Texts to send after editing the message (`Show`, `Answer`), in the order of the items."""
+    messages: tuple[Followup, ...] = ()
+    """Messages with buttons to send after the texts (`Answer`), in the order of the items."""
     closed: bool = False
     """This tap resolved the last pending item: the approval left `pending` now (approved or
     rejected, not expired). Only one tap can (the save is a compare and swap), so whatever
@@ -121,6 +145,8 @@ def _apply(message: InteractiveMessage, outcomes: dict[int, tuple[str, HandlerOu
         if isinstance(outcome, str):
             done[index] = Outcome(option, outcome)
         elif isinstance(outcome, Show) and outcome.result is not None:
+            done[index] = Outcome(option, outcome.result)
+        elif isinstance(outcome, Answer):
             done[index] = Outcome(option, outcome.result)
         elif isinstance(outcome, Declined):
             declined = _declined_option(message.items[index], outcome.option)
@@ -190,9 +216,17 @@ async def process_tap(
     if not store.save(conn, approval.id, updated, status, now):
         return TapResult("not_pending")
     logger.info("approval %d: %d of %d item(s) done", approval.id, done, len(chosen))
-    texts = tuple(
-        outcome.text for _, (_, outcome) in sorted(outcomes.items()) if isinstance(outcome, Show)
-    )
+    texts: list[str] = []
+    messages: list[Followup] = []
+    for _, (_, outcome) in sorted(outcomes.items()):
+        if isinstance(outcome, Show):
+            texts.append(outcome.text)
+        elif isinstance(outcome, Answer):
+            reply = outcome.reply
+            if isinstance(reply, str):
+                texts.append(reply)
+            else:
+                messages.append(reply)
     if any(
         isinstance(outcome, Show) and outcome.result is None for _, outcome in outcomes.values()
     ):
@@ -204,7 +238,13 @@ async def process_tap(
     else:
         code = "renewed"
     closed = status in ("approved", "rejected")
-    return TapResult(code, render(updated, approval.id), texts, closed)
+    return TapResult(
+        code,
+        render(updated, approval.id),
+        send=tuple(texts),
+        messages=tuple(messages),
+        closed=closed,
+    )
 
 
 def _expire(
