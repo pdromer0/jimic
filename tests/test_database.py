@@ -27,8 +27,8 @@ TABLES = {
     "handovers",
     "conversations",
 }
-LATEST = 5
-"""La última migración del paquete (0005, la de la memoria)."""
+LATEST = 6
+"""La última migración del paquete (0006, la de la puesta en marcha)."""
 
 
 def table_names(conn: sqlite3.Connection) -> set[str]:
@@ -231,5 +231,26 @@ def test_la_0005_rehace_los_avisos_del_sistema_sin_perder_filas_y_admite_los_nue
         ]
         columns = {row[1] for row in conn.execute("PRAGMA table_info(deleted_tasks)")}
         assert {"restored_at", "restored_task_id"} <= columns
+    finally:
+        conn.close()
+
+
+def test_la_0006_anade_el_bit_de_la_sugerencia_sin_perder_las_conversaciones(tmp_path):
+    """Pilla una 0006 que pierde las filas de `conversations` o admite otro valor que 0 y 1."""
+    from jimic.memory.database import load_migrations, migrate
+
+    conn = sqlite3.connect(tmp_path / "jimic.db", autocommit=True)
+    try:
+        migrate(conn, load_migrations()[:5])
+        conn.execute(
+            "INSERT INTO conversations (day, last_message_at)"
+            " VALUES ('2030-01-07', '2030-01-07T09:00:00+00:00')"
+        )
+        migrate(conn, load_migrations())
+        assert conn.execute("SELECT day, onboarding_suggested FROM conversations").fetchall() == [
+            ("2030-01-07", 0)
+        ]
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute("UPDATE conversations SET onboarding_suggested = 2")
     finally:
         conn.close()

@@ -325,3 +325,30 @@ def test_con_los_ficheros_de_la_1_12_el_progreso_no_falla(tmp_path):
 
     assert state.in_progress
     assert state.missing_areas[0] == "Gestión del tiempo"
+
+
+# --- El bit de la sugerencia (1.13-b) ---------------------------------------------------------
+
+
+def test_la_sugerencia_se_reclama_una_vez_por_dia_y_sobrevive_a_un_reinicio(tmp_path, clock):
+    from datetime import date
+
+    from jimic.memory import conversations
+
+    path = tmp_path / "jimic.db"
+    first_conn = open_database(path)
+    day = date(2030, 1, 7)
+    conversations.note_message(first_conn, day, clock.now())
+    assert conversations.claim_suggestion(first_conn, day) is True
+    assert conversations.claim_suggestion(first_conn, day) is False
+    first_conn.close()
+
+    restarted = open_database(path)
+    try:
+        assert conversations.claim_suggestion(restarted, day) is False
+        tomorrow = date(2030, 1, 8)
+        assert conversations.claim_suggestion(restarted, tomorrow) is False  # sin fila aún
+        conversations.note_message(restarted, tomorrow, clock.now())
+        assert conversations.claim_suggestion(restarted, tomorrow) is True
+    finally:
+        restarted.close()
