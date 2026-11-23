@@ -238,17 +238,27 @@ class Conversation:
                 logger.error("agent turn failed (%s)", type(error).__name__)
                 return Turn(FAILED_TEXT)
 
+    def _capped(self, day: date) -> bool:
+        """Today's spend has reached `daily_cap_usd`: the SDK is not called."""
+        if usage.spent_on(self._conn, day) < self._active_limits.budget.daily_cap_usd:
+            return False
+        logger.info("agent: daily_cap")
+        system_notices.check_budget(self._conn, self._active_limits.budget, self._now())
+        return True
+
     async def _turn(self, text: str, received: datetime) -> Turn:
         day = received.date()
-        if usage.spent_on(self._conn, day) >= self._active_limits.budget.daily_cap_usd:
-            logger.info("agent: daily_cap")
-            system_notices.check_budget(self._conn, self._active_limits.budget, self._now())
+        if self._capped(day):
             return Turn(DAILY_CAP_TEXT)
+        return await self._execute(f"{stamp(received)} {text}", RunState(origin=text), day)
+
+    async def _execute(self, prompt: str, run: RunState, day: date) -> Turn:
+        """One run of the agent in the session of `day` (its row exists), with `run` as its
+        state; the caller holds the lock."""
         agent_dir = self._paths.agent_dir
         agent_dir.mkdir(mode=0o700, exist_ok=True)
         session = conversations.session_of(self._conn, day)
         limits = self._active_limits
-        run = RunState(origin=text)
         memory = memory_block(self._paths.config_dir)
         if memory.clipped:
             detail = ",".join(stem(name) for name in memory.clipped)
@@ -271,7 +281,7 @@ class Conversation:
             guard_hooks(limits, self._conn, day, run),
             with_onboarding(memory.text, self._paths.config_dir),
         )
-        outcome = await run_once(self._run_agent, f"{stamp(received)} {text}", options)
+        outcome = await run_once(self._run_agent, prompt, options)
         self._bookkeeping(day, outcome, resumed=session is not None)
         if outcome.code != "ok":
             return Turn(self._answer(outcome))
