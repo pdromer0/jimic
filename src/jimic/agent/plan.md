@@ -19,6 +19,9 @@ plan del día…`. Cuando propongas el plan del día:
   media, solo si hay un hueco libre para su duración en su momento del día (`moment`); los de
   baja, nunca solos. Si uno de prioridad alta no cabe en ningún hueco, o Pedro dijo hoy que no,
   va a `left_out` con una línea con humor, sin culpa ni sermón.
+- El momento del día solo limita a los de prioridad media: uno de prioridad alta va en
+  cualquier hueco libre de hoy y solo va a `left_out` si no cabe en ninguno o Pedro dijo que
+  hoy no.
 - En un plan tardío, solo lo que queda del día: lo de antes sin marcar no lo toques, lo ve el
   cierre.
 - Si una tarea y un evento que aún no ha pasado dicen horas distintas, manda el calendario:
