@@ -231,6 +231,9 @@ def test_el_estado_calcula_el_cupo_con_el_hueco_del_cierre(conn):
     whys = {item.id: (item.due_now, item.why) for item in state.intentions}
     assert whys == {"cierre_del_dia": (True, "in_window"), "regar": (False, "no_room")}
     assert state.due == frozenset({"cierre_del_dia"})
+    # Lo que no cabe lo para el cupo de la segunda pasada con su código (`close_slot`), no
+    # `not_due`: la N2 lo pilló en `test_con_7_enviados_solo_cabe_el_cierre`.
+    assert state.may_pick == frozenset({"cierre_del_dia", "regar"})
 
 
 def test_el_estado_marca_lo_que_espera(conn):

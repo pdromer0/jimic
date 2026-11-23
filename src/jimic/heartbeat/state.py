@@ -83,9 +83,19 @@ class DayState(BaseModel):
 
     @property
     def due(self) -> frozenset[str]:
-        """The ids of the intentions due now: the only ones the second pass lets the model pick
-        (task 1.15-b)."""
+        """The ids of the intentions due now (task 1.15-b)."""
         return frozenset(intention.id for intention in self.intentions if intention.due_now)
+
+    @property
+    def may_pick(self) -> frozenset[str]:
+        """What the second pass lets the model pick (task 1.15-b): what is due, and what is due
+        but for the room, which the quota of the second pass blocks with its own code
+        (`close_slot`, `daily_cap`)."""
+        return frozenset(
+            intention.id
+            for intention in self.intentions
+            if intention.due_now or intention.why == "no_room"
+        )
 
     def sources(self) -> dict[str, dict[str, Any]]:
         return {

@@ -274,10 +274,11 @@ def test_lo_de_ayer_se_registra_como_de_otro_dia_aunque_el_ciclo_pare_por_otra_c
 
 
 def test_sin_propuesta_la_segunda_pasada_suelta_la_cola(conn):
-    add_notice(conn, "plan_del_dia", madrid("2030-01-07T10:00"), 1)
+    """A las 21:00, cuando la basura ya toca (1.15-b: lo que no toca no se elige)."""
+    add_notice(conn, "plan_del_dia", madrid("2030-01-07T20:45"), 1)
     queue = WaitingNotices()
-    cycle(conn, "2030-01-07T10:15", spy=SpyDecide(outgoing("basura")), queue=queue)
-    result = cycle(conn, "2030-01-07T10:30", spy=SpyDecide(None), queue=queue)
+    cycle(conn, "2030-01-07T21:00", spy=SpyDecide(outgoing("basura")), queue=queue)
+    result = cycle(conn, "2030-01-07T21:15", spy=SpyDecide(None), queue=queue)
     assert [(v.action, v.reason, v.intents) for v in result.verdicts] == [
         ("send", "released", ("basura",))
     ]
@@ -317,6 +318,6 @@ def test_ni_los_logs_ni_el_repr_llevan_titulos_textos_ni_nombres_de_calendarios(
 
 def test_el_ciclo_lee_la_ultima_hora_de_pedro_de_la_base(conn):
     """1.10-c de punta a punta: la hora que anota la conversación llega a la segunda pasada."""
-    note_message(conn, date(2030, 1, 7), madrid("2030-01-07T16:25"))
-    result = cycle(conn, "2030-01-07T16:30", spy=SpyDecide(outgoing("basura")))
+    note_message(conn, date(2030, 1, 7), madrid("2030-01-07T20:55"))
+    result = cycle(conn, "2030-01-07T21:00", spy=SpyDecide(outgoing("basura")))
     assert [(v.action, v.reason) for v in result.verdicts] == [("wait", "chatting")]
