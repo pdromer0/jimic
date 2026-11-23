@@ -3116,6 +3116,8 @@ latido-20261123-1948.json`):
   gimnasio. La regla en positivo de Pedro lo deja a su criterio.
 - Siguiendo las notas, no se ajustó el prompt para recuperar ninguno: es decisión de Pedro.
 
+**Medidas.** La N3, tras la revisión propia: en verde en 1:58, 1772 tests y 13 de contrato saltados (eran 1712); pre-commit 0:11, pytest 1:46 y gitleaks de la historia 0:01.
+
 **Versiones incorrectas** (aplicadas y deshechas con un script; el árbol quedó limpio):
 
 | # | Versión incorrecta | Predicción | Observado |
