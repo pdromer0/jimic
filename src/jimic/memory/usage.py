@@ -128,7 +128,8 @@ def record(conn: sqlite3.Connection, day: date, model: str, usage: TokenUsage) -
 def record_cost(
     conn: sqlite3.Connection, day: date, model: str, usage: TokenUsage, usd: Decimal
 ) -> None:
-    """Add the row of one run whose dollars someone else counted: the Agent SDK's estimate."""
+    """Add the row of one run with its dollars already worked out (its tokens priced, or the cap
+    of the run when it gave none)."""
     conn.execute(
         "INSERT INTO model_usage (day, model, input_tokens, output_tokens, cache_read_tokens,"
         " cache_write_tokens, usd) VALUES (?, ?, ?, ?, ?, ?, ?)",

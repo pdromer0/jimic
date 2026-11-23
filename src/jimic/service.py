@@ -20,7 +20,7 @@ from jimic.config import load_settings
 from jimic.logs import logging_to
 from jimic.memory.database import open_database
 from jimic.memory.personal import load_personal
-from jimic.memory.usage import require_cache_prices
+from jimic.memory.usage import price_of, require_cache_prices
 from jimic.paths import Paths, resolve_paths
 from jimic.runtime import Runtime
 
@@ -110,6 +110,7 @@ def run(environ: Mapping[str, str]) -> None:
     settings = load_settings(paths)
     intentions, limits = load_personal(paths.config_dir)
     require_cache_prices(settings.heartbeat_model)  # nothing is spent without counting it
+    price_of(settings.agent_model)  # the agent's cost comes from its tokens too
     clock = SystemClock(settings.timezone)
 
     def channel_factory(conn: sqlite3.Connection) -> Channel:

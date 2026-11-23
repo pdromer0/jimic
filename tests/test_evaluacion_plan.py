@@ -369,6 +369,35 @@ def test_si_sale_el_plan_minimo_la_pasada_falla_aunque_cumpla():
     assert result.failed[0] == "minimal:agent:api:529"
 
 
+def test_el_gasto_de_una_pasada_de_dos_turnos_es_el_de_sus_tokens_y_no_el_acumulado():
+    """p05 corre el plan y luego el mensaje de Pedro, en la misma sesión: el doble da el
+    `total_cost_usd` acumulado (0,00602 y 0,00748). Gasto real: 0,00602 + 0,00146 = 0,00748 (a
+    mano); sumando los acumulados saldría 0,0135."""
+
+    def tokens(input_tokens, output_tokens, cache_read, cache_write):
+        return {
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "cache_read_input_tokens": cache_read,
+            "cache_creation_input_tokens": cache_write,
+            "cache_creation": {"ephemeral_5m_input_tokens": cache_write},
+        }
+
+    fake = FakeAgent(
+        [
+            ToolCall("propose_plan", GOOD_PLAN),
+            result_message("Listo", cost=0.00602, usage=tokens(10, 100, 0, 2000)),
+        ],
+        [result_message("Hecho", cost=0.00748, usage=tokens(5, 50, 2000, 300))],
+    )
+    suite = load_plan_suite(REAL_FILE)
+    (scenario,) = suite.select(["p05"])
+    settings = Settings.model_validate(VALID_ENV)
+    result = asyncio.run(run_pass(settings, suite, scenario, fake))
+    assert result.runs == 2
+    assert float(result.usd) == pytest.approx(0.00748)  # no 0,0135
+
+
 def test_la_pasada_escribe_los_cambios_de_ayer_y_sale_la_linea_aprendida():
     plan = {**GOOD_PLAN, "items": [GOOD_PLAN["items"][0]]}
     result, _ = one_pass(plan, "p06")
