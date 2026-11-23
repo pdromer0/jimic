@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 import jimic.cli
+from jimic import config_session
 from jimic.memory.personal import template
 from jimic.paths import resolve_paths
 
@@ -196,3 +197,25 @@ def test_check_dice_un_spacing_que_no_es_mayor_que_0(config_dir, capsys):
     code, out, _ = run(["config", "check"], capsys)
     assert code == jimic.cli.CHECK_FAILED
     assert "intentions[2].spacing: la duración debe ser mayor que 0" in out
+
+
+def test_config_sesion_abre_claude_code(monkeypatch, fake_home, capsys):
+    """La CLI solo delega: la apertura (con un doble) recibe la carpeta y `--settings`."""
+    calls = []
+    monkeypatch.setattr(config_session, "find_command", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr(config_session, "exec_claude", lambda cwd, argv: calls.append((cwd, argv)))
+    code, out, err = run(["config", "sesion"], capsys)
+    assert (code, out, err) == (0, "", "")
+    config = fake_home / ".config" / "jimic"
+    assert calls == [(config, ["claude", "--settings", str(config / ".claude" / "settings.json")])]
+
+
+def test_config_sesion_sin_bwrap_sale_con_el_error_de_arranque(monkeypatch, capsys):
+    calls = []
+    monkeypatch.setattr(
+        config_session, "find_command", lambda name: None if name == "bwrap" else name
+    )
+    monkeypatch.setattr(config_session, "exec_claude", lambda cwd, argv: calls.append((cwd, argv)))
+    code, out, err = run(["config", "sesion"], capsys)
+    assert (code, out, calls) == (jimic.cli.SETUP_ERROR, "", [])
+    assert err.startswith("jimic: no se abre la sesión de configuración: instala bubblewrap")
