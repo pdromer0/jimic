@@ -2806,7 +2806,8 @@ hace antes de la 1.15 porque el tope diario falso bloqueaba el uso real. Commits
 - `test(agente)`: el contrato y la evaluación de dos turnos (1ed2b2b);
 - `docs(diseno)`: §10.3 y la decisión 132 (933b8df);
 - las correcciones de la revisión propia: `fix(agente)` (cf4bcab), `fix(servicio)` (d58f9ad) y
-  `test(memoria)` (7462961).
+  `test(memoria)` (7462961);
+- el ajuste de la revisión (decisión 133): `fix(agente)` (bcebe70).
 
 Este anexo es `docs(hito-1)`.
 
@@ -2848,18 +2849,27 @@ ejecución son la suma de todas sus llamadas internas.
    observado, solo ese (5 verdes; con un único test para las dos, lo pillaba el mismo, y se separó).
 3. La migración toca las de Haiku: rojo «las de Haiku no cambian»; observado, solo ese (5 verdes).
 
+**Ajustes de la revisión** (decisión F-c de Pedro, la 133): una ejecución que la API rechaza
+(`agent:api:…`) y no trae tokens deja su fila con 0 $; cualquier otro fallo sin tokens sigue
+contando `max_session_usd`. Tests: seis rechazos `agent:api:503` seguidos no llegan al tope diario y
+el agente contesta en la séptima; un fallo de proceso sin tokens cuenta el tope. Versión incorrecta
+(contar 0 en cualquier fallo sin tokens): predicho rojo el del fallo de proceso y verde el de la API;
+observado igual (6 rojos: ese, los de «sin tokens» con `ok` y los de «se cae sin resultado»).
+N3 de la ronda: en verde en 2:17, 1584 tests (pre-commit 0:12, pytest 2:05 y gitleaks de la
+historia 0:00).
+
 **Pruebas contra servicios reales:** solo la API de Anthropic con la clave de `jimic-dev`, dos
 turnos y un tercero de céntimos. No toca Todoist, Calendar ni Telegram: no hay restos que
 comprobar.
 
-**Revisión** (`/code-review medium main...fix/h1-gasto-agente`): 7 hallazgos, 4 corregidos y 3
+**Revisión** (`/code-review medium main...fix/h1-gasto-agente`): 7 hallazgos, 5 corregidos y 2
 explicados.
 - *`result.usage` podría ser también acumulado:* explicado; el contrato lo comprueba (tokens de cada
   turno = diferencia de acumulados, al dígito).
 - *La migración usa los 5 minutos y recalcula filas con tope que tienen tokens:* explicado; es la
   decisión F-b de las notas (la fila no guarda el TTL; con tokens, el cálculo es mejor que el tope).
-- *Una ejecución con cero tokens cuenta el tope entero:* explicado, es lo que dicen las notas, y a
-  «Pendiente».
+- *Una ejecución con cero tokens cuenta el tope entero:* corregido en la ronda de ajustes (decisión
+  133, abajo).
 - *Un modelo del agente sin precio solo avisaba en el log:* corregido, `jimic run` no arranca (como
   con el del latido) y el aviso dice el modelo; `VALID_ENV` usa Sonnet.
 - *Docstring del módulo y condición `outcome.usd` sobrante:* corregidos.
@@ -2867,10 +2877,6 @@ explicados.
   millón de tokens de cada clase y compara con `cost` y con `PRICES`.
 
 **Pendiente.**
-- **Cero tokens y el tope entero:** una ejecución que falla sin tokens (la API caída, con
-  `total_cost_usd` a 0) cuenta `max_session_usd` (0,50 $); seis seguidas llegarían al tope diario de
-  3 $ sin haber gastado nada. Es la regla de las notas («sin tokens, el tope»). Se decide con Pedro si
-  basta o si una ejecución fallida sin tokens cuenta 0.
 - **Filas con caché de 1 h** (no hay en el agente: el SDK usa 5 minutos con clave de API): se
   recalcularían a 2,50 $ en vez de 4 $ por millón.
 
