@@ -10,7 +10,7 @@ What «finished» means (`Progress.finished`, every piece):
 
 1. `jimic config check` is `ok` for the five personal files.
 2. Each of the four fixed sections of `rutina.md` has a line with content (not blank, not a
-   comment) before the next heading of level 1 or 2.
+   comment, not a heading nor a thematic break) before the next heading of level 1 or 2.
 3. Each of the nine areas of `objetivos.md` (`## <area>`, exact title) has a line `Prioridad:`
    with `alta`, `media`, `baja` or `ahora no`; unless it is «ahora no», a line `Meta:` that is
    not empty; and «Gestión del tiempo», unless it is «ahora no», a top-level `[medible]` item.
@@ -33,10 +33,12 @@ from pathlib import Path
 from pydantic import ValidationError
 
 from jimic.memory.markdown_checks import (
+    HEADING,
     ICONS_SECTION,
     ROUTINE_SECTIONS,
     SEPARATOR_ROW,
     TABLE_ROW,
+    THEMATIC_BREAK,
     TOP_LEVEL_ITEM,
     Section,
     outline,
@@ -200,7 +202,11 @@ def _first(sections: list[Section], title: str) -> Section | None:
 
 
 def _has_content(section: Section | None) -> bool:
-    return section is not None and any(line.strip() for _, line in section.body)
+    """A line that is not blank, a heading (`### Detalle`) or a thematic break (`---`)."""
+    return section is not None and any(
+        line.strip() and not HEADING.fullmatch(line) and not THEMATIC_BREAK.fullmatch(line)
+        for _, line in section.body
+    )
 
 
 def _value(pattern: re.Pattern[str], section: Section) -> str | None:

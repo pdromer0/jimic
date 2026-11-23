@@ -404,3 +404,12 @@ def test_la_meta_y_la_prioridad_con_enfasis_cuentan(tmp_path, text):
     area = next(area for area in state.areas if area.name == "Gestión del tiempo")
     assert (area.priority, area.goal) == ("alta", "llegar a todo")
     assert state.finished
+
+
+@pytest.mark.parametrize("filler", ["### Detalle\n", "---\n", "### Detalle\n\n***\n"])
+def test_una_seccion_de_la_rutina_solo_con_un_subtitulo_o_una_raya_no_cuenta(tmp_path, filler):
+    config_dir = write_finished(tmp_path / "config")
+    text = ROUTINE.replace("- Como a las 14:00\n", filler)
+    (config_dir / "rutina.md").write_text(text, encoding="utf-8")
+
+    assert progress(config_dir).routine_missing == ("Comidas",)
