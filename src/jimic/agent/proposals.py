@@ -23,6 +23,14 @@ from jimic.tools.todoist import TodoistTask
 
 MAX_PLAN_ITEMS = 8
 """Items of one plan proposal: one row of buttons each in task 1.11 (decision 1.4)."""
+MAX_NEW_TASKS = 4
+"""New tasks in the plan of the day (format of the plan, decision 1.14-b)."""
+MAX_REASON_WORDS = 8
+"""Words of the reason of an item in the plan of the day: it goes in brackets on one line."""
+MAX_LEFT_OUT = 2
+MAX_DAY_ICONS = 20
+MAX_LINE = 120
+"""Characters of a line of the plan the agent writes (greeting, left out, training)."""
 MAX_TASK_MINUTES = 24 * 60
 MAX_TEXT = 500
 """Characters of a title or a reason; a memory change may be longer (`MAX_CHANGE_TEXT`)."""
@@ -37,6 +45,20 @@ DUE = re.compile(r"([0-9]{4})-([0-9]{2})-([0-9]{2})(?:T([0-9]{2}):([0-9]{2}))?")
 
 Text = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=MAX_TEXT)]
 TaskId = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=64)]
+Icon = Annotated[
+    str,
+    StringConstraints(
+        strip_whitespace=True, min_length=1, max_length=12, pattern=r"^[^\sA-Za-z0-9]+$"
+    ),
+    Field(description="Un emoji"),
+]
+Line = Annotated[
+    str,
+    StringConstraints(
+        strip_whitespace=True, min_length=1, max_length=MAX_LINE, pattern=r"^[^\r\n]+$"
+    ),
+]
+HabitId = Annotated[str, StringConstraints(pattern=r"^[a-z0-9_]{1,40}$")]
 
 
 def parse_due(text: str) -> date | datetime:
@@ -55,6 +77,9 @@ class _Item(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     reason: Text
+    icon: Annotated[
+        Icon | None, Field(description="Solo en el plan del día: el icono de su línea")
+    ] = None
 
 
 class _WithDue(_Item):
@@ -85,13 +110,38 @@ class DeleteItem(_Item):
 PlanItem = Annotated[CreateItem | MoveItem | DeleteItem, Field(discriminator="action")]
 
 
+class LeftOut(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    habit: Annotated[HabitId, Field(description="El id del hábito en intenciones.yaml")]
+    line: Annotated[Line, Field(description="Una línea con humor: por qué hoy no entra")]
+
+
+class DayIcon(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    title: Text
+    icon: Icon
+
+
+FOLLOW_UP = Field(
+    description=(
+        "true si quieres seguir hablando con Pedro cuando resuelva esta propuesta con sus botones"
+    )
+)
+
+
 class PlanProposal(BaseModel):
     """The arguments of `propose_plan`. A created task goes to the inbox (in `dev`, the guard
-    sends it to the test project)."""
+    sends it to the test project).
+
+    The fields after `requested_by_pedro` other than `follow_up` are those of the plan of the
+    day (decision 1.14-b): the code paints the plan with them and ignores them in a conversation.
+    In the plan, `items` may be empty (nothing to add today)."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    items: Annotated[list[PlanItem], Field(min_length=1, max_length=MAX_PLAN_ITEMS)]
+    items: Annotated[list[PlanItem], Field(max_length=MAX_PLAN_ITEMS)] = []
     requested_by_pedro: Annotated[
         bool,
         Field(
@@ -101,6 +151,33 @@ class PlanProposal(BaseModel):
             )
         ),
     ] = False
+    follow_up: Annotated[bool, FOLLOW_UP] = False
+    greeting: Annotated[
+        Line | None, Field(description="Plan del día: el saludo, corto y con gracia")
+    ] = None
+    left_out: Annotated[
+        list[LeftOut],
+        Field(
+            max_length=MAX_LEFT_OUT,
+            description="Plan del día: hábitos de prioridad alta que hoy no entran",
+        ),
+    ] = []
+    training_line: Annotated[
+        Line | None, Field(description="Plan del día: una línea sobre el entreno")
+    ] = None
+    day_icons: Annotated[
+        list[DayIcon],
+        Field(
+            max_length=MAX_DAY_ICONS,
+            description="Plan del día: iconos de lo que ya hay hoy y no está en la tabla",
+        ),
+    ] = []
+
+    @property
+    def plan_fields(self) -> dict[str, object]:
+        """What this call says of the plan of the day, without what it leaves out."""
+        fields = self.model_dump(include={"greeting", "left_out", "training_line", "day_icons"})
+        return {key: value for key, value in fields.items() if value not in (None, [])}
 
     @model_validator(mode="after")
     def _one_action_per_task(self) -> Self:
@@ -174,6 +251,7 @@ class MemoryChange(BaseModel):
         Fragment | None, Field(description="El texto nuevo, exacto (add y replace)")
     ] = None
     reason: Text
+    follow_up: Annotated[bool, FOLLOW_UP] = False
 
     @model_validator(mode="after")
     def _fits_operation(self) -> Self:

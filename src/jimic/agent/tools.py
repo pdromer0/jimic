@@ -26,7 +26,11 @@ of `objetivos.md` that repeats the description of a goal of APEX in progress is 
 
 `propose_plan` does not save anything either: it adds its items to the run, and the code shows
 them under the agent's answer when the run ends (decision 1.11-a). Several calls in one run add
-up, eight items at most and each task once.
+up, eight items at most and each task once. In the plan of the day (task 1.14) it also takes
+what the code paints the plan with (`greeting`, `left_out`, `training_line`, `day_icons`, the
+`icon` of each item: decision 1.14-b), may come with no items, takes four new tasks at most and
+reasons of eight words at most; in a conversation those fields are ignored. Any of the three
+proposals may ask, with `follow_up`, to go on once Pedro resolves it with his buttons (1.13-d).
 
 What the tools get and return (titles, ideas, proposals) never reaches a log: only the name of
 the tool and a code.
@@ -47,7 +51,9 @@ from claude_agent_sdk import McpSdkServerConfig, SdkMcpTool, create_sdk_mcp_serv
 from pydantic import BaseModel, ValidationError
 
 from jimic.agent.proposals import (
+    MAX_NEW_TASKS,
     MAX_PLAN_ITEMS,
+    MAX_REASON_WORDS,
     DeleteItem,
     MemoryChange,
     MoveItem,
@@ -121,6 +127,11 @@ class RunState:
     """What Pedro wrote in this message, without the time; `None` in a run without his message
     (the plan, a follow-up), where the memory never changes and nothing runs at once."""
     mode: RunMode = "message"
+    plan: dict[str, Any] = field(default_factory=dict)
+    """What `propose_plan` said of the plan of the day (only in the `plan` mode); a later call
+    replaces each field it gives."""
+    proposed_plan: bool = False
+    """`propose_plan` was accepted at least once in this run."""
     memory: list[dict[str, Any]] = field(default_factory=list)
     """The changes and ideas proposed, as data, checked against the files."""
     memory_dropped: bool = False
@@ -266,9 +277,28 @@ def build_tools(ctx: ToolContext) -> list[SdkMcpTool[Any]]:
         # A local file that may be parsed: in a thread, so the loop keeps serving.
         return source_result(await asyncio.to_thread(ctx.apex.read_today))
 
+    def plan_rules(proposal: PlanProposal) -> None:
+        """The limits of the plan of the day (decision 1.14-b), counted over the whole run."""
+        creates = sum(entry["action"] == "create" for entry in ctx.run.items)
+        creates += sum(item.action == "create" for item in proposal.items)
+        if creates > MAX_NEW_TASKS:
+            raise AgentInputError(
+                f"En el plan van {MAX_NEW_TASKS} tareas nuevas como mucho: no se ha añadido nada"
+            )
+        for number, item in enumerate(proposal.items, start=1):
+            if len(item.reason.split()) > MAX_REASON_WORDS:
+                raise AgentInputError(
+                    f"El elemento {number}: en el plan el motivo va en {MAX_REASON_WORDS}"
+                    " palabras como mucho"
+                )
+
     async def propose_plan(args: dict[str, Any]) -> Result:
         proposal = _validated(PlanProposal, args)
         run = ctx.run
+        if run.mode == "plan":
+            plan_rules(proposal)
+        elif not proposal.items:
+            raise AgentInputError("items está vacío: propón al menos un elemento")
         if len(run.items) + len(proposal.items) > MAX_PLAN_ITEMS:
             raise AgentInputError(
                 f"En esta respuesta ya hay {len(run.items)} elementos propuestos y el tope es"
@@ -278,7 +308,7 @@ def build_tools(ctx: ToolContext) -> list[SdkMcpTool[Any]]:
         entries = []
         counts = {"create": 0, "move": 0, "delete": 0}
         for number, item in enumerate(proposal.items, start=1):
-            entry = item.model_dump()
+            entry = item.model_dump() | {"follow_up": proposal.follow_up}
             if isinstance(item, MoveItem | DeleteItem):
                 if item.task_id in already:
                     raise AgentInputError(
@@ -298,6 +328,9 @@ def build_tools(ctx: ToolContext) -> list[SdkMcpTool[Any]]:
             counts[item.action] += 1
         run.items.extend(entries)
         run.requested_by_pedro = run.requested_by_pedro and proposal.requested_by_pedro
+        run.proposed_plan = True
+        if run.mode == "plan":
+            run.plan |= proposal.plan_fields
         logger.info(
             "proposal noted: create %d, move %d, delete %d",
             counts["create"],
@@ -384,6 +417,9 @@ def build_tools(ctx: ToolContext) -> list[SdkMcpTool[Any]]:
             raise AgentInputError("text está vacío")
         if len(text) > MAX_IDEA:
             raise AgentInputError(f"text pasa de {MAX_IDEA} caracteres")
+        follow_up = args.get("follow_up", False)
+        if not isinstance(follow_up, bool):
+            raise AgentInputError("follow_up debe ser true o false")
         origin = memory_allowed()
         line = f"- {today().isoformat()} · {text}"
         entry = {
@@ -392,6 +428,7 @@ def build_tools(ctx: ToolContext) -> list[SdkMcpTool[Any]]:
             "line": line,
             "origin": origin,
             "after_external_content": conversations.read_external(ctx.conn, ctx.day),
+            "follow_up": follow_up,
         }
         add_memory(entry, Proposed(IDEAS_FILE, "add", None, line))
         logger.info("idea noted")
@@ -414,7 +451,10 @@ def build_tools(ctx: ToolContext) -> list[SdkMcpTool[Any]]:
     }
     idea_schema = {
         "type": "object",
-        "properties": {"text": {"type": "string", "maxLength": MAX_IDEA}},
+        "properties": {
+            "text": {"type": "string", "maxLength": MAX_IDEA},
+            "follow_up": PlanProposal.model_json_schema()["properties"]["follow_up"],
+        },
         "required": ["text"],
         "additionalProperties": False,
     }
@@ -442,7 +482,8 @@ def build_tools(ctx: ToolContext) -> list[SdkMcpTool[Any]]:
         (
             "propose_plan",
             "Propone crear, mover o borrar tareas, cada una con su motivo. Solo propone: no"
-            " ejecuta nada; el código lo hará cuando Pedro lo apruebe.",
+            " ejecuta nada; el código lo hará cuando Pedro lo apruebe. Los campos marcados"
+            " «Plan del día» solo valen cuando el código te pide el plan del día.",
             PlanProposal.model_json_schema(),
             propose_plan,
         ),
