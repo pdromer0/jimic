@@ -41,7 +41,6 @@ from jimic.execution.plan_message import DAY_GLOBAL, plan_item, proposed_due, wh
 from jimic.memory.changes import IDEAS_FILE
 from jimic.memory.notices import last_sent_of
 from jimic.plan.day import DayView, clip, entry_line, hour, icon_of, normalized
-from jimic.plan.day import late_after as late_after  # moved; its tests import it from here
 
 MAX_LINES = 25
 GREETING_START = "¡Pedro!"
