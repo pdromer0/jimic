@@ -41,12 +41,11 @@ from jimic.memory.notices import record_sent
 from jimic.memory.onboarding import PREFERENCES_FILE
 from jimic.memory.schemas import DailyPlan
 from jimic.plan import minimal
-from jimic.plan.day import day_view, hour, normalized
+from jimic.plan.day import day_view, hour, late_after, normalized
 from jimic.plan.message import (
     DEFAULT_GREETING,
     PlanContent,
     icon_table,
-    late_after,
     learned_line,
     paint,
 )
