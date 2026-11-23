@@ -385,8 +385,14 @@ la estructura de 7.2 del diseño; `jimic config init` solo genera los dos YAML (
 
 Claude Code abierto en `~/.config/jimic/` con su propio `.claude/settings.json`: puede leer y
 editar los ficheros personales y ejecutar `jimic config check`; tiene prohibidos `git push`, `gh`,
-la web y leer `.env`. Se lanza con la skill `/configurar-jimic`. `jimic config check` valida los
-ficheros personales y dice dónde falla (fichero, línea y motivo) sin enseñar su contenido.
+la web y leer los secretos (el `.env` y las credenciales de Google, de las dos copias). La abre
+`jimic config sesion` (con `JIMIC_ENTORNO=dev`, en `~/.config/jimic-dev/`), que escribe en
+`.claude/` el `settings.json`, un `CLAUDE.md` y la skill `/configurar-jimic` desde las plantillas
+del paquete y abre `claude --settings …`; dentro, `/configurar-jimic` explica los límites y guía
+los cambios. Los secretos tienen dos capas: las reglas `deny` y el sandbox de Claude Code,
+obligatorio y con la red cerrada (decisiones 151 y 152; necesita `bubblewrap` y `socat`).
+`jimic config check` valida los ficheros personales y dice dónde falla (fichero, línea y motivo)
+sin enseñar su contenido.
 
 ## Valores a mano
 
@@ -476,7 +482,7 @@ GitHub; la primera tarea es la P1.
 | 1.2 | **Esqueleto del servicio**: proceso `asyncio`, `.env` validado, carpetas de H1-15, reloj inyectable, logs, arranque y parada limpios; SQLite con sus ocho tablas y su versionado; `deny` de las cuatro rutas en `.claude/settings.json` | `feat/h1-esqueleto` | P2 |
 | P3 | **Módulo `revisor-plan`**: el subagente revisor y su prueba de humo | `chore/p3-revisor-plan` | P2 |
 | 1.3 ★ | **Ficheros personales y esquemas**: los cinco ficheros con Pydantic, `habits`, la tabla de iconos, `max_deletions_per_day`; `ruamel.yaml` de ida y vuelta; generación inicial comentada; `jimic config check` | `feat/h1-ficheros` | 1.2, P3 |
-| 1.18 | **Sesión de configuración**: `.claude/settings.json` de `~/.config/jimic/` (generado por `jimic`) y la skill `/configurar-jimic`, sin `git push`, `gh`, web ni `.env` | `chore/h1-sesion-configuracion` | 1.3 |
+| 1.18 | **Sesión de configuración**: `.claude/settings.json` de `~/.config/jimic/` (generado por `jimic config sesion`, que abre Claude Code) y la skill `/configurar-jimic`, sin `git push`, `gh`, web ni secretos; sandbox obligatorio | `chore/h1-sesion-configuracion` | 1.3 |
 | 1.4 | **Telegram**: solo el chat de Pedro; mensajes, filas de botones numeradas y fila global, edición del mensaje con los toques; *polling* y *JobQueue* | `feat/h1-telegram` | 1.1, 1.2 |
 | 1.5 | **Todoist y Calendar**: lectura con sus dobles; las funciones de escritura del código (crear, mover, cerrar, borrar) con sus dobles; del calendario, solo título, horas y quién organiza; test de contrato lento | `feat/h1-todoist-calendar` | 1.1, 1.2 |
 | 1.6 | **Lector de APEX**: la interfaz, el fichero local y los datos fijos; sin escritura; si falla, avisa y sigue | `feat/h1-apex` | 1.2 |
