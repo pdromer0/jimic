@@ -1,9 +1,7 @@
 """La migración 0008: el gasto de las filas de Sonnet ya guardadas pasa a contarse por tokens."""
 
-import re
 import sqlite3
 from decimal import Decimal
-from importlib.resources import files
 
 import pytest
 
@@ -56,29 +54,21 @@ def test_las_de_haiku_y_otros_modelos_no_cambian(conn):
     assert usd_of(conn) == [7.77, 8.88]
 
 
-def test_una_fila_de_sonnet_con_solo_cache_tambien_se_recalcula(conn):
-    insert(conn, SONNET, (0, 0, 1_000_000, 0), 3.0)
-    insert(conn, SONNET, (0, 0, 0, 1_000_000), 3.0)
+@pytest.mark.parametrize("kind", range(4), ids=["entrada", "salida", "lectura", "escritura"])
+def test_cada_clase_de_token_vale_lo_que_dice_la_tabla_de_precios(conn, kind):
+    """Un millón de tokens de una sola clase, con el SQL de la migración, frente a `cost` y a la
+    tabla (la escritura, a 5 minutos). Si los precios de uno cambian y los del otro no, falla."""
+    tokens = [0, 0, 0, 0]
+    tokens[kind] = 1_000_000
+    insert(conn, SONNET, tuple(tokens), 99.0)
     migrate(conn, load_migrations())
-    assert usd_of(conn) == pytest.approx([0.10, 2.50])
+    (usd,) = usd_of(conn)
+    assert Decimal(str(usd)) == cost(SONNET, TokenUsage(*tokens))
+    price = PRICES[SONNET]
+    assert usd == pytest.approx(
+        float([price.input, price.output, price.cache_read, price.cache_write_5m][kind])
+    )
 
 
 def test_una_base_sin_filas_migra(conn):
     assert migrate(conn, load_migrations()) == 1
-
-
-def test_los_precios_de_la_migracion_son_los_de_la_tabla():
-    """Un millón de tokens de cada clase, con los números que lleva el SQL, frente a `cost`."""
-    sql = files("jimic.memory").joinpath("migrations/0008_gasto_agente.sql").read_text("utf-8")
-    prices = [
-        Decimal(m)
-        for m in re.findall(
-            r"(\d+(?:\.\d+)?) \* (?:input|output|cache_read|cache_write)_tokens", sql
-        )
-    ]
-    assert len(prices) == 4
-    for index, price in enumerate(prices):
-        usage = [0, 0, 0, 0]
-        usage[index] = 1_000_000
-        assert price == cost(SONNET, TokenUsage(*usage)), index
-    assert prices[3] == PRICES[SONNET].cache_write_5m
