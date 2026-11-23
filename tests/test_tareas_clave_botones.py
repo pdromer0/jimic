@@ -391,3 +391,67 @@ def test_tras_voy_ahora_o_mas_tarde_quedan_ya_entrene_y_hoy_no(conn, tmp_path, o
     ]
     assert result.view.text.endswith(f"🏋️ Gimnasio — {note}")
     assert not result.closed
+
+
+# --- Un movimiento de JimiC fuera de hoy es «hoy no» (decisión 145) ---------------------------
+
+TOMORROW = {"action": "move", "task_id": "t-gym", "due": "2030-01-08T18:00", "reason": "mañana"}
+
+
+def later_to_tomorrow(conn, tmp_path) -> tuple[KeyWorld, int]:
+    """[⏰ Más tarde] y Pedro contesta «mañana a las 18»: el agente la mueve al momento. El
+    latido había visto la tarea de hoy al mandar el aviso. Devuelve el mundo y el [Deshacer]."""
+    agent = FakeAgent(
+        [
+            ToolCall("propose_plan", {"items": [TOMORROW], "requested_by_pedro": True}),
+            result_message("Te la paso a mañana"),
+        ]
+    )
+    w = KeyWorld(conn, tmp_path, agent=agent)
+    approval = w.send("insistir_gimnasio")
+    key_marks.note_seen(conn, TODAY, "insistir_gimnasio", "t-gym", madrid("2030-01-07T10:00"))
+    w.press(approval, 1, "later")
+    reply = w.say("mañana a las 18")
+    assert isinstance(reply, Reply) and reply.outgoing is not None
+    assert reply.outgoing.kind == UNDO_KIND
+    undo = store.create(conn, w.clock, UNDO_KIND, reply.outgoing.message, reply.outgoing.expires_at)
+    return w, undo
+
+
+def test_mas_tarde_a_manana_corta_la_insistencia_de_hoy(conn, tmp_path):
+    w, _ = later_to_tomorrow(conn, tmp_path)
+    marks = w.marks().of("insistir_gimnasio")
+    assert marks.not_today and not marks.done  # el cierre no lo cuenta como hecho
+    assert not w.marks().of("insistir_ofertas").not_today
+
+
+def test_mover_dentro_de_hoy_no_corta_nada(conn, tmp_path):
+    """Mover a las 18:00 de hoy solo cambia desde cuándo se puede insistir."""
+    agent = FakeAgent(
+        [
+            ToolCall("propose_plan", {"items": [MOVE], "requested_by_pedro": True}),
+            result_message("Te la paso a las 18"),
+        ]
+    )
+    w = KeyWorld(conn, tmp_path, agent=agent)
+    key_marks.note_seen(conn, TODAY, "insistir_gimnasio", "t-gym", madrid("2030-01-07T10:00"))
+    w.press(w.send("insistir_gimnasio"), 1, "later")
+    w.say("a las 18")
+    assert not w.marks().of("insistir_gimnasio").not_today
+
+
+def test_deshacer_el_movimiento_devuelve_la_insistencia(conn, tmp_path):
+    w, undo = later_to_tomorrow(conn, tmp_path)
+    assert w.press(undo, 1, "undo").code == "resolved"
+    assert not w.marks().of("insistir_gimnasio").not_today
+    task = asyncio.run(w.todoist.reader.get_task("t-gym"))
+    assert task is not None and task.due == datetime(2030, 1, 7, 12, tzinfo=MADRID)
+
+
+def test_un_hoy_no_tocado_antes_sigue_tras_deshacer_el_movimiento(conn, tmp_path):
+    """Versión incorrecta: si deshacer el movimiento quitara cualquier «hoy no», se llevaría
+    también el que tocó Pedro."""
+    w, undo = later_to_tomorrow(conn, tmp_path)
+    w.press(w.send("insistir_gimnasio"), 1, "skip")  # Pedro, con el botón de otro aviso
+    w.press(undo, 1, "undo")
+    assert w.marks().of("insistir_gimnasio").not_today

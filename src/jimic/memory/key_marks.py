@@ -8,6 +8,11 @@
   completed a recurring one (which never shows among the completed) or put it off in the app
   (decision 1.15-j). One row per task and day.
 
+When JimiC moves today's task of a key task to another day (a [Más tarde] answered «mañana», or
+any `move` of the agent), the code writes `not_today` for that intention, with the task's id, so
+the insistence of today stops (decision 145). Undoing that move takes away only that mark: a
+[Hoy no] Pedro tapped has no task id and stays.
+
 The days are local (`YYYY-MM-DD`), the moments UTC (`to_db`). No text of Pedro: ids and moments.
 """
 
@@ -119,3 +124,25 @@ def of_day(conn: sqlite3.Connection, day: date) -> DayMarks:
         "SELECT DISTINCT todoist_task_id FROM task_moves WHERE day = ?", (day.isoformat(),)
     ).fetchall()
     return DayMarks(by_intent, frozenset(task_id for (task_id,) in moved))
+
+
+def moved_off_today(conn: sqlite3.Connection, day: date, task_id: str, moment: datetime) -> int:
+    """JimiC moved `task_id` out of the local `day`: «hoy no», with the task's id, for each key
+    task that saw it as today's (decision 145). Returns how many it marked."""
+    intents = conn.execute(
+        "SELECT DISTINCT intent FROM key_task_marks"
+        " WHERE day = ? AND mark = 'seen' AND todoist_task_id = ? ORDER BY intent",
+        (day.isoformat(), task_id),
+    ).fetchall()
+    for (intent,) in intents:
+        record(conn, day, intent, "not_today", moment, task_id)
+    return len(intents)
+
+
+def moved_back(conn: sqlite3.Connection, day: date, task_id: str) -> int:
+    """The move of `task_id` was undone: away go the «hoy no» it wrote, and only those (a [Hoy no]
+    of Pedro has no task id). Returns how many."""
+    return conn.execute(
+        "DELETE FROM key_task_marks WHERE day = ? AND mark = 'not_today' AND todoist_task_id = ?",
+        (day.isoformat(), task_id),
+    ).rowcount
