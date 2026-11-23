@@ -44,7 +44,7 @@ def conn(tmp_path):
     connection.close()
 
 
-AGENT_MODEL = "claude-sonnet-5-5"
+AGENT_MODEL = VALID_ENV["MODELO_AGENTE"]
 """A model with a price (the cost of a run comes from its tokens)."""
 
 
@@ -59,7 +59,7 @@ class World:
         self.paths.config_dir.mkdir()
         self.paths.data_dir.mkdir()
         self.conversation = Conversation(
-            settings=Settings.model_validate({**VALID_ENV, "MODELO_AGENTE": AGENT_MODEL}),
+            settings=Settings.model_validate(VALID_ENV),
             paths=self.paths,
             limits=limits(**limit_changes),
             clock=self.clock,
@@ -278,7 +278,9 @@ def test_un_modelo_sin_precio_cuenta_el_tope_y_no_pierde_la_respuesta(conn, tmp_
     """Sin precio no se puede calcular: se cuenta lo máximo que pudo gastar, y la respuesta y la
     sesión del día se guardan igual."""
     world = World(conn, tmp_path)
-    world.conversation._settings = Settings.model_validate(VALID_ENV)
+    world.conversation._settings = Settings.model_validate(
+        {**VALID_ENV, "MODELO_AGENTE": "modelo-sin-precio"}
+    )
     assert world.say() == AGENT_ANSWER
     assert world.usage_rows()[0][-1] == 0.5
     assert conversations.session_of(conn, date(2030, 1, 7)) is not None

@@ -392,7 +392,7 @@ def test_el_gasto_de_una_pasada_de_dos_turnos_es_el_de_sus_tokens_y_no_el_acumul
     )
     suite = load_plan_suite(REAL_FILE)
     (scenario,) = suite.select(["p05"])
-    settings = Settings.model_validate({**VALID_ENV, "MODELO_AGENTE": "claude-sonnet-5-5"})
+    settings = Settings.model_validate(VALID_ENV)
     result = asyncio.run(run_pass(settings, suite, scenario, fake))
     assert result.runs == 2
     assert float(result.usd) == pytest.approx(0.00748)  # no 0,0135

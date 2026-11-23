@@ -12,7 +12,8 @@ a lock keeps the order in which the messages arrived. Each run resumes today's s
 starts one if there is none; tomorrow is another one.
 
 Before a run, if today's spend has reached `daily_cap_usd`, the SDK is not called and Pedro gets
-a fixed sentence. After a run, its cost (the SDK's estimate) goes to `model_usage` and the
+a fixed sentence. After a run, its cost (its tokens priced; the SDK's `total_cost_usd` is the whole
+session's, so it is not counted) goes to `model_usage` and the
 budget of the month is checked. A run that fails (the API, the subprocess, the caps of turns or
 of spend) gives a fixed sentence and a code in the log, never a trace.
 
@@ -332,7 +333,7 @@ class Conversation:
 
     def _bookkeeping(self, day: date, outcome: Outcome, resumed: bool) -> None:
         now = self._now()
-        if outcome.usage is not None or outcome.usd is not None or outcome.ran:
+        if outcome.usage is not None or outcome.ran:
             # The dollars of the run come from its tokens, as for Haiku: the SDK's
             # `total_cost_usd` is the total of the whole (resumed) session, not of this run.
             # Without tokens (or without a result at all, once the engine answered), the most a
@@ -344,7 +345,10 @@ class Conversation:
                     usd = usage.cost(self._settings.agent_model, tokens)
                 except usage.UnpricedError:
                     # Never lose the count (nor the answer) over a missing price.
-                    logger.warning("agent: unpriced model, counting the cap of the run")
+                    logger.warning(
+                        "agent: model %s has no price, counting the cap of the run",
+                        self._settings.agent_model,
+                    )
             usage.record_cost(self._conn, day, self._settings.agent_model, tokens, usd)
             system_notices.check_budget(self._conn, self._active_limits.budget, now)
         if resumed and outcome.code.startswith(STUCK):
