@@ -3138,8 +3138,48 @@ espacio entre insistencias es de Haiku por las notas, aunque la medida le da la 
 pendiente (`jimic evaluar plan` también debería comparar con el último completo).
 
 **Pendiente:**
-- **Para Pedro:** l09 (¿el espacio entre avisos de una tarea clave pasa al código como un motivo
-  de `due_now`?) y l27 (la regla del último mensaje libre frente a su esperado), y la regresión
-  marcada sobre los comunes.
-- **Paso 2 de esta tarea:** el conjunto de reserva, sin tocar el prompt.
+- ~~Para Pedro: l09, l27 y la regresión marcada~~: resueltos en la ronda de ajustes (abajo).
+- ~~Paso 2: el conjunto de reserva~~: hecho en la ronda de ajustes.
 - **Para la 1.16:** `jimic evaluar plan` con el último informe completo, como el latido.
+- **Al cambiar el prompt del latido:** explicar `too_soon` (decisión 149), que llegó en una ronda
+  en la que el prompt no se tocaba (su test lo deja como única excepción).
+
+**Ajustes de la revisión** (Pedro, PR #55; el prompt del latido no se tocó en toda la ronda:
+`git diff 59c3164 -- src/jimic/heartbeat/prompt.md`, vacío):
+- **`spacing`** (decisión 149; Pedro la llamó 1.15b-c, pero esa letra ya era la 148): el espacio
+  mínimo entre avisos de una tarea clave, opcional, mayor que 0; sin él, su `grace`. `due_now` da
+  `too_soon` hasta `spacing` después del último aviso de hoy, y la segunda pasada lo frena con
+  `not_due`. Regla asimétrica: conversando solo sube; se compara el espacio que aplica el código
+  (`KeyTask.gap`), así que bajar el `grace` de una sin `spacing` también se rechaza
+  (interpretación de la implementación); con un `intenciones.yaml` que hoy no valida no hay con
+  qué comparar. Plantilla, 7.2 y la tabla de la regla asimétrica del diseño; `config check` lo
+  valida. No está en la base de `latido.yaml`: vale el `grace` y las huellas no cambian. Commit
+  `feat(latido)` (689e27f).
+- **l27** (decisión 150; Pedro la llamó 1.15b-d): **el único `expected` que cambia en la tarea**,
+  a `[[insistir_gimnasio], [insistir_gimnasio, reciclar], [insistir_gimnasio, regar, reciclar]]`,
+  con su `why`. Por la 92 un mensaje cuenta 1, así que acompañar al gimnasio en el último mensaje
+  libre no gasta más (como l26, 1.9-k); l27 mide que lo de prioridad alta no se quede fuera. El
+  esperado de antes era incoherente con la 92 y la 1.9-k desde la 1.9: no se ajusta al modelo.
+  Commit `feat(evals)` (7d90322).
+- **Paso 2, la reserva** (`s01` a `s06`, escrita por el chat después del paso 1, con `origin:
+  reserva`). Todo se pudo escribir con el formato de siempre. En s02, «el resto del día enviado»
+  lleva las dos tareas clave hechas (`completed_today`) con un aviso cada una: con tres de cada,
+  el día pasaría del tope de 8. En s01, el calendario solo tiene al médico. Los seis esperados
+  caben en lo que toca. Commit `feat(evals)` (f710b9e).
+- **Versión incorrecta 8** (Pedro): el `spacing` desde la hora de la tarea en vez del último
+  aviso. Predicción: rojo «15 minutos tras un aviso no toca». Observado: rojo, y también «sin
+  `spacing` vale su `grace`», «a su `spacing` vuelve a tocar» y el de la segunda pasada, porque
+  todos parten de un aviso posterior a la hora de la tarea; verdes «el primer aviso» y «el tope
+  antes que el espacio».
+
+**Medida de la ronda** (23-nov-2026, 21:27, `jimic-dev`, `claude-haiku-5-5`, 3 pasadas,
+comparada con el último completo, la del paso 1):
+
+| Cifra | Todo (46) | Reserva (6), aparte | Umbral |
+| --- | --- | --- | --- |
+| Acierto | **100,0 % (138/138)** ✅ | **100,0 % (18/18)** ✅ | ≥ 90 % |
+| Habla cuando no debía | **0,0 % (0/66)** ✅ | **0,0 % (0/6)** ✅ | ≤ 5 % |
+
+Coste 0,0316 $ en 138 llamadas. Sobre los 39 comunes con el paso 1: acierto 97,4 % → 100,0 % y
+habla cuando no debía 3,3 % → 0,0 %; nuevos, s01 a s06; cambiado, l27. l09 acierta ahora por
+`spacing` (Haiku ya no ve que toca), y l27, por su esperado nuevo.
