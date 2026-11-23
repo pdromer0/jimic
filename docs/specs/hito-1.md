@@ -3191,3 +3191,126 @@ Coste 0,0316 $ en 138 llamadas. Sobre los 39 comunes con el paso 1: acierto 97,4
 habla cuando no debía 3,3 % → 0,0 %; nuevos, s01 a s06; cambiado, l27. l09 acierta ahora por
 `spacing` (Haiku ya no ve que toca), y l27, por su esperado nuevo.
 - **N3 de la ronda:** en verde en 2:34, 1789 tests y 13 de contrato saltados (pre-commit 0:11, pytest 2:22 y gitleaks de la historia 0:01).
+
+### Tarea 1.18: sesión de configuración
+
+**Qué se hizo.** Issue #16, rama `chore/h1-sesion-configuracion`, aprobada a las 23:27 del
+23-nov-2026 con dos ajustes de Pedro: los ficheros de Google con las mismas dos capas que el `.env`
+(pregunta del plan) y, en cada sesión, los secretos de **las dos copias**, no solo los de su carpeta
+(lo que Claude lee entra en la conversación y va a la API). Commits:
+- `feat(config)`: el paquete `jimic.config_session`, sus plantillas y sus tests, con el del `deny`
+  de la sesión de desarrollo (e986d0b);
+- `feat(cli)`: `jimic config sesion` (2583e61);
+- `docs(diseno)`: las decisiones 151 y 152 y el anexo B (b4847f3); `docs(hito-1)`: la sección
+  «Sesión de configuración» y la fila 1.18 (a0d61f7); `docs(agents)`: el comando (c7c4766);
+- las correcciones de la revisión propia: `fix(config)` sin MCP, sin las raíces de datos y sin
+  escribir los secretos (4404ae4), la ruta entre comillas y las carpetas en 0700 (f4f33a4), las
+  plantillas (51bcaf1, 92c3a37); `docs(diseno)` (93e73f2) y `docs(hito-1)` (9543925).
+
+Este anexo es `docs(hito-1)`.
+
+**Decisiones de la tarea:** 1.18-a y 1.18-b son las 151 y 152 del diseño (la 151 recoge los dos
+ajustes de Pedro). Sin ADR: se revierte regenerando la carpeta.
+
+**Decisiones del diff** (lo que el plan interpretaba y lo que salió al implementar):
+- **`jimic.config_session`**, la lógica con tests; la CLI solo delega (`SessionError` sale con 2).
+  `run` resuelve las rutas, comprueba `bwrap`, `socat` y `claude` **antes de escribir** (si falta
+  alguno, dice qué instalar y la carpeta queda igual), comprueba el ejecutable de `jimic`, escribe y
+  abre. El `launch` real es `os.chdir` + `os.execvp` (Claude Code sustituye al proceso); en los
+  tests, un doble.
+- **`settings.json`** (tras la revisión propia): 25 reglas `deny` (`Read` y `Edit` de `.env`,
+  `.env.*`, `google_cliente.json` y `google_token.json` de las dos copias y de sus dos raíces de
+  datos, más `WebFetch`, `WebSearch`, `Bash(git push *)`, `Bash(gh *)` y `mcp__*`);
+  `disableClaudeAiConnectors`; `allow` solo de `Bash(<jimic> config check)` (editar pide permiso,
+  y ese permiso es el OK); sandbox con `enabled`, `failIfUnavailable`,
+  `allowUnsandboxedCommands: false`, `denyRead` de los 8 secretos (con `.env.*`) y de las 2 raíces
+  de datos, `denyWrite` de los 6 secretos sin patrón (en Linux, `denyWrite` solo admite un `/**`
+  final) y red con `allowedDomains: []` y `strictAllowlist`; `env` con `JIMIC_ENTORNO` de la copia
+  y `PYTHONDONTWRITEBYTECODE=1`. Rutas absolutas (`//…`), que valen se abra `claude` donde se abra.
+- **Las dos raíces** salen de `resolve_paths` con cada entorno, así que respetan
+  `XDG_CONFIG_HOME`.
+- **`--settings`:** `strictAllowlist` solo se respeta desde ahí (o en los ajustes de usuario o
+  gestionados), no en los del proyecto; con la lista vacía, Claude Code pregunta por cada dominio.
+  Por eso `jimic config sesion` abre `claude --settings <config>/.claude/settings.json
+  --setting-sources project`: sin los ajustes de usuario ni locales, cuyas listas (dominios,
+  `allow`) se sumarían a estas. Abierta a mano, los `deny` y el sandbox siguen y la red pregunta:
+  lo dice el `CLAUDE.md`.
+- **El ejecutable:** `Path(sys.executable).with_name("jimic")`, sin resolver el enlace (el
+  `python` de `.venv` apunta al intérprete base, cuya carpeta no tiene `jimic`), entre comillas
+  de shell (`shlex.quote`) en la regla y en las plantillas.
+- **Plantillas** `claude.md` y `skill.md` en el paquete, en español (las lee Pedro), con `{jimic}`
+  sustituido por la ruta. El `CLAUDE.md` va en `<config>/.claude/`, no en la raíz, para no
+  mezclarse con los ficheros personales. La skill: límites, `config check`, cada cambio como en el
+  chat, y confirmación explícita para lo que hace a JimiC más insistente o más caro, con ejemplos
+  de `limites.yaml` e `intenciones.yaml`.
+- **Escritura:** siempre desde la plantilla, con `write_private` (atómica, 0600); carpetas 0700,
+  también las que ya estaban.
+- **Sin regla `Write`:** las reglas `Edit` cubren todas las herramientas que escriben.
+
+**Valores a mano** (código independiente, antes de implementar; HOME inventado
+`/tmp/casa-falsa`): 20 reglas `deny`, las mismas en prod y en dev, como
+`Read(//tmp/casa-falsa/.config/jimic-dev/.env)`; 6 `denyRead`; con
+`XDG_CONFIG_HOME=/tmp/xdg-falso`, `Read(//tmp/xdg-falso/jimic-dev/.env)`. Recalculados tras la
+revisión propia, con el mismo método: 25 `deny` (como `Read(//tmp/casa-falsa/.local/share/jimic/**)`),
+10 `denyRead` y 6 `denyWrite`; `'/home/x/mis proyectos/jimic/.venv/bin/jimic'` entre comillas. Los
+tests llevan esas cadenas escritas, no recalculadas.
+
+**Medida antes del código** (la primera pregunta de «parar»): con un HOME falso y `jimic-dev`, en
+un encierro de `bwrap` con todo de solo lectura salvo la carpeta de configuración y sin red,
+`.venv/bin/jimic config check` da el informe y sale con 0 (2,4 s de pared); `uv run
+jimic config check`, en el mismo encierro, sale con 2: `Failed to initialize cache at
+…/.cache/uv … Read-only file system`.
+
+**Comprobado en la documentación y en el binario** (anexo B): las claves `failIfUnavailable`,
+`strictAllowlist`, `allowUnsandboxedCommands`, `denyRead` y `allowedDomains` están en Claude Code
+2.1.325; `bwrap` y `socat` ya estaban instalados. `Bash(git push *)` no pilla `git -C x push`: lo
+para la red cerrada.
+
+**Medidas.** La N3, tras la revisión propia: en verde en 2:12, 1820 tests y 13 de contrato saltados
+(pre-commit 0:11, pytest 2:00 y gitleaks de la historia 0:01, 45 commits).
+
+**Versiones incorrectas** (antes de la revisión propia; aplicadas y deshechas con un script; el
+árbol quedó limpio):
+
+| # | Versión incorrecta | Predicción | Observado |
+| --- | --- | --- | --- |
+| 1 | Sin `failIfUnavailable` | Rojo «el sandbox es obligatorio»; verdes los de `deny` | Como se predijo (1 rojo) |
+| 2 | Sin el `denyRead` | Rojo «el sandbox no deja leer el `.env`»; verde «las herramientas no lo leen» | Como se predijo, más los dos cruzados y el de `XDG_CONFIG_HOME`, que también miran el `denyRead` |
+| 3 | Abre sin comprobar dependencias | Rojo «sin `bwrap`, no abre nada»; verdes los de generación | Rojos los cuatro casos y el de la CLI; verdes los demás |
+| 4 | Abre sin `--settings` | Rojo «lo que se pasa a Claude Code»; verdes los del `settings.json` | Como se predijo, más el de la CLI |
+| 5 | Escribe el `settings.json` solo si no existe | Rojo «un cambio en la plantilla llega»; verde «generar dos veces deja lo mismo» | Como se predijo |
+| 6 | (Pedro) Solo los secretos de su carpeta | Rojo «cada copia deniega los de las dos»; verdes los de su carpeta | Como se predijo, más el de Google (cuenta las 20 reglas) y el de `XDG_CONFIG_HOME` |
+
+**Revisión propia** (`/code-review medium`, 10 hallazgos, clasificados antes de tocar nada; lo
+que decidían cuatro de ellos se comprobó antes en la documentación, anexo B del diseño):
+
+| # | Hallazgo | Qué se hizo |
+| --- | --- | --- |
+| 1 | Las herramientas MCP (los conectores de claude.ai) corren fuera del sandbox | Corregido: `mcp__*` en `deny` y `disableClaudeAiConnectors` |
+| 2 | `.env.*` no estaba en el `denyRead` | Corregido (en Linux, `denyRead` admite el comodín en el último nombre) |
+| 3 | Las raíces de datos y otras credenciales del HOME se leen desde Bash | Corregido para las raíces de datos de las dos copias (`deny` y `denyRead`; la decisión 69). Las credenciales que no son de JimiC (`~/.claude`, `~/.config/gh`), a Pendiente |
+| 4 | Bash puede borrar o reescribir los secretos (la carpeta de trabajo se escribe) | Corregido: `denyWrite` de los secretos |
+| 5 | Los ajustes de usuario sumarían dominios o reglas `WebFetch(domain:…)` | Corregido: `--setting-sources project`. Hoy los ajustes de usuario no tienen ninguno |
+| 6 | Un secreto creado con la sesión abierta, ¿lo cubre el sandbox? | Explicado: la documentación no lo dice; a la comprobación a mano |
+| 7 | Una ruta con espacios rompe la regla y el comando | Corregido: `shlex.quote` |
+| 8 | `mkdir` no corrige los permisos de una carpeta existente | Corregido: `chmod 0700` |
+| 9 | Dos puntos de inyección para `which` | Explicado: `find_command` es el valor por defecto que parchea la CLI, y `which=` el de los tests unitarios; un cambio que los saltara no pasaría en silencio (en un CI sin `bwrap`, falla) |
+| 10 | El docstring del doble, en español | Corregido: en inglés |
+
+La N1 paró un commit de la ronda (pyright, un `dict[str, object]` indexado en un test).
+
+**A mano, Pedro** (lo pide el PR; no se abrió Claude Code desde la sesión de desarrollo):
+`uv run jimic config sesion`; dentro, `/configurar-jimic` explica los límites; `config check`
+funciona; `git push` y una búsqueda web se deniegan; `cat .env` y `cat google_token.json` los frena
+el sandbox; `curl https://example.com` se deniega sin preguntar. De la revisión propia: `/mcp` sin
+servidores ni conectores; `rm .env` lo frena el sandbox; `ls ~/.local/share/jimic` se deniega; y un
+secreto creado con la sesión abierta (por ejemplo `touch ~/.config/jimic-dev/.env.prueba` desde otra
+terminal) no se lee con `cat`. Si `--setting-sources project` deja fuera el `--settings` (la red
+preguntaría), parar: no está documentado.
+
+**Pendiente:**
+- **Para la 1.17:** evaluar el sandbox en la sesión de desarrollo (esta tarea lo cubre solo para la
+  de configuración).
+- **Para la 1.17:** las credenciales del HOME que no son de JimiC (`~/.claude/.credentials.json`,
+  `~/.config/gh`) se leen desde la sesión como desde cualquier otra de Claude Code; decidir si el
+  sandbox de las dos sesiones las niega (hallazgo 3).
