@@ -15,8 +15,9 @@ from memory_data import QUIET_LINE, write_personal
 
 from jimic.channel import store
 from jimic.channel.bot import Reply
-from jimic.channel.message import Tap
-from jimic.channel.taps import TapResult, process_tap
+from jimic.channel.message import InteractiveMessage, Item, Option, Tap
+from jimic.channel.taps import TapResult, process_tap, sweep
+from jimic.execution.follow_up import follow_up_note
 from jimic.execution.memory_message import MEMORY_KIND, MemoryHandlers
 from jimic.execution.plan_message import PLAN_KIND
 from jimic.memory.database import open_database
@@ -60,7 +61,9 @@ class FollowWorld(AssistantWorld):
         reply = self.say(text)
         assert isinstance(reply, Reply) and reply.outgoing is not None
         out = reply.outgoing
-        return store.create(self.conn, self.clock, out.kind, out.message, out.expires_at), out.kind
+        approval = store.create(self.conn, self.clock, out.kind, out.message, out.expires_at)
+        store.set_message_id(self.conn, approval, 700 + approval)  # Telegram la aceptó
+        return approval, out.kind
 
     def press(self, approval_id: int, item: int | None, option: str) -> TapResult:
         handlers = self.executor.handlers | {MEMORY_KIND: self.memory.memory}
@@ -195,6 +198,19 @@ def test_si_la_reanudacion_falla_no_se_envia_nada(conn, tmp_path):
     assert len(w.agent.runs) == 2
 
 
+def test_una_propuesta_caducada_no_se_reanuda(conn, tmp_path):
+    """Al caducar, todo queda «caducado» y nada pendiente: solo el estado de la aprobación dice
+    que nadie la cerró con un toque."""
+    w = FollowWorld(
+        conn, tmp_path, proposing("propose_plan", {"items": [CREATE], "follow_up": True})
+    )
+    approval, _ = w.propose()
+    w.clock.moment = madrid("2030-01-08T00:01")
+    sweep(conn, w.clock)
+    assert w.follow_up(approval) is None
+    assert len(w.agent.runs) == 1
+
+
 # --- La reanudación no tiene origen ------------------------------------------------------------
 
 
@@ -226,3 +242,36 @@ def test_en_la_reanudacion_propose_change_se_rechaza_y_nada_se_ejecuta_al_moment
     change, plan = w.agent.tool_outcomes[-2:]
     assert change.is_error and "Fuera de una conversación" in change.text
     assert not plan.is_error
+
+
+# --- La regla, sin agente (`follow_up_note`) ---------------------------------------------------
+
+
+def note_for(*items, kind: str = PLAN_KIND):
+    ok, edit = Option(key="ok", label="✅"), Option(key="edit", label="✏️", approves=False)
+    built = tuple(
+        Item(title="t", options=(ok, edit), data=data, result=result, chosen=chosen)
+        for data, result, chosen in items
+    )
+    return follow_up_note(kind, InteractiveMessage(header="h", items=built))
+
+
+def test_la_nota_dice_lo_que_paso_con_cada_elemento():
+    note = note_for(
+        (CREATE | {"follow_up": True}, "✓ creada", "ok"),
+        ({"action": "idea", "text": "una app de lectura"}, "📝 apuntada", "ok"),
+    )
+    assert note is not None
+    assert "crear «Tarea nueva» (2030-01-07T18:00) — ✓ creada" in note
+    assert "idea «una app de lectura» — 📝 apuntada" in note
+
+
+def test_la_regla_no_da_nota_con_un_elemento_pendiente():
+    """Versión incorrecta 3, en su capa: la regla sola también para con una fila pendiente."""
+    assert note_for((CREATE | {"follow_up": True}, None, None), (CREATE, "✓ creada", "ok")) is None
+
+
+def test_la_regla_no_da_nota_sin_follow_up_tras_editar_o_en_otra_clase():
+    assert note_for((CREATE, "✓ creada", "ok")) is None
+    assert note_for((CREATE | {"follow_up": True}, "✏️ ¿cómo la quieres?", "edit")) is None
+    assert note_for((CREATE | {"follow_up": True}, "✓ creada", "ok"), kind="undo") is None
