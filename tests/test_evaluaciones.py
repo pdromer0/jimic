@@ -42,9 +42,13 @@ def test_el_fichero_real_carga_y_cada_escenario_monta_su_estado_con_lo_esperado_
     """Pilla una errata en `evals/latido.yaml` (un id, una hora, una intención que ese día no
     está activa) antes de gastar un céntimo."""
     ids = [item.id for item in suite.scenarios]
-    assert len(ids) == len(set(ids)) == 40
+    assert len(ids) == len(set(ids)) == 46
     assert [item.id for item in suite.scenarios if item.pending] == []  # e02, activo (1.15-b)
-    assert sum(item.silent_only for item in suite.scenarios) == 20
+    assert sum(item.silent_only for item in suite.scenarios) == 22
+    # La reserva del chat (paso 2 de la 1.15-b): s01 a s06, al final.
+    assert [item.id for item in suite.scenarios if item.origin == "reserva"] == [
+        f"s0{n}" for n in range(1, 7)
+    ]
     for item in suite.scenarios:
         active = {intention.id for intention in build_state(suite, item).intentions}
         for alternative in item.expected:

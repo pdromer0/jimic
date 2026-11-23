@@ -11,8 +11,8 @@ adelante, en una carpeta fuera del repositorio con el mismo formato.
 
 ## El latido
 
-`latido.yaml` tiene un día base (jueves 10-ene-2030) y 40 escenarios, todos evaluables desde la
-1.15-b (el e02 se activó allí). Cada uno dice la hora, lo que cambia sobre el día base y los
+`latido.yaml` tiene un día base (jueves 10-ene-2030) y 46 escenarios, todos evaluables desde la
+1.15-b (el e02 se activó allí): 40 conocidos y un conjunto de reserva (`s01` a `s06`). Cada uno dice la hora, lo que cambia sobre el día base y los
 conjuntos de intenciones aceptables (`[]` es callar). El formato está en la cabecera del fichero;
 desde la 1.15 admite lo que el código sabe de las tareas clave (`completed_today`, `key_marks` y
 `later_tasks`), y el gimnasio de la base es el hábito del entreno (`training: true`). Una tarea
@@ -34,7 +34,7 @@ JIMIC_ENTORNO=dev uv run jimic evaluar latido --comparar-con latido-20261123-194
 - **Qué hace:** monta el estado de cada escenario con el código del latido, llama a la API real
   (4 llamadas a la vez) y corrige lo que decide Haiku. No toca Todoist, Calendar ni Telegram, ni
   escribe en la base de datos.
-- **Cuánto cuesta:** unos 0,03 $ la evaluación completa (120 llamadas a Haiku), según el
+- **Cuánto cuesta:** unos 0,04 $ la evaluación completa (138 llamadas a Haiku), según el
   informe.
 - **El informe:** el resumen sale por pantalla y el completo queda en
   `~/.local/share/jimic-dev/evals/latido-AAAAMMDD-HHMM.json` y `.md`, con cada pasada, su motivo

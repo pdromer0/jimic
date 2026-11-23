@@ -114,23 +114,23 @@ def test_el_informe_tiene_sus_dos_ficheros_y_el_resumen_con_los_saltados(monkeyp
     assert run.md_path.name == "latido-20300120-1030.md"
     document = json.loads(run.json_path.read_text(encoding="utf-8"))
     assert (document["version"], document["complete"]) == (2, True)
-    assert len(document["scenarios"]) == 40
+    assert len(document["scenarios"]) == 46
     assert document["summary"]["skipped"] == [{"id": "zz1", "pending": "1.99"}]
-    # El doble siempre calla: aciertan los 20 de callar (con el e02, 1.15-b), l10 y l26 (callar
-    # es una de sus alternativas, 1.9-k), y nadie habla de más.
-    assert (document["summary"]["correct"], document["summary"]["passes"]) == (66, 120)
+    # El doble siempre calla: aciertan los 22 de callar (con el e02 y s04 y s06 de la reserva,
+    # 1.15-b), l10 y l26 (callar es una de sus alternativas, 1.9-k), y nadie habla de más.
+    assert (document["summary"]["correct"], document["summary"]["passes"]) == (72, 138)
     assert (document["summary"]["spoke_when_silent"], document["summary"]["silent_passes"]) == (
         0,
-        60,
+        66,
     )
-    assert document["summary"]["reserve"] is None
-    assert "Acierto: 55,0 % (66/120) ❌" in run.screen
-    assert "Habla cuando no debía: 0,0 % (0/60) ✅" in run.screen
+    assert document["summary"]["reserve"]["correct"] == 6
+    assert "Acierto: 52,2 % (72/138) ❌" in run.screen
+    assert "Habla cuando no debía: 0,0 % (0/66) ✅" in run.screen
     assert "Saltados: 1: zz1 (pendiente: 1.99)" in run.screen
-    assert "Reserva" not in run.screen
+    assert "Reserva, aparte (6 escenarios):\n  Acierto: 33,3 % (6/18) ❌" in run.screen
     assert "l03 (0/3 bien): callar; callar; callar · esperado: {plan_del_dia}" in run.screen
     assert "Comparación: no hay un informe completo anterior." in run.screen
-    assert "Coste: 0,03840 $ en 120 llamadas (0,00032 $/llamada)" in run.screen
+    assert "Coste: 0,04416 $ en 138 llamadas (0,00032 $/llamada)" in run.screen
     assert run.md_path.read_text(encoding="utf-8").startswith("# Evaluación del latido")
 
 
@@ -189,7 +189,7 @@ def test_un_parcial_no_rompe_la_comparacion_de_la_siguiente_completa(monkeypatch
     evaluate(ApiFactory(), ["l03"], clock=at(10))
     run = evaluate(ApiFactory(), clock=at(11))
     assert "Comparación con latido-20300120-0900.json:" in run.screen
-    assert "sobre 40 escenarios comunes" in run.screen
+    assert "sobre 46 escenarios comunes" in run.screen
 
 
 def test_con_comparar_con_se_compara_con_el_elegido_aunque_sea_parcial(monkeypatch):

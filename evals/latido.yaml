@@ -508,3 +508,87 @@ scenarios:
     like: l12
     now: "15:00"
     expected: [[]]
+
+  # --- Conjunto de reserva ---------------------------------------------------------------------------
+  # Conjunto de reserva escrito por el chat el 23-nov-2026, después del ajuste del prompt; no se
+  # ajusta el prompt mirándolo. Todo inventado, sobre el día base.
+  - id: s01
+    title: Ventana del plan, Todoist sin tareas y el médico a las 8:30
+    origin: reserva
+    now: "07:35"
+    tasks: []
+    events:
+      - {title: Médico, start: "2030-01-10T08:30", end: "2030-01-10T09:30"}
+    expected: [[plan_del_dia]]
+
+  - id: s02
+    title: El cierre sin enviar con su ventana ya pasada; el resto del día enviado
+    origin: reserva
+    now: "22:40"
+    tasks: []
+    completed_today:
+      - {id: t-gimnasio, title: Gimnasio}
+      - {id: t-ofertas, title: Revisar ofertas}
+    sent_today:
+      - {intent: plan_del_dia, at: "07:45"}
+      - {intent: insistir_gimnasio, at: "12:45"}
+      - {intent: insistir_ofertas, at: "17:20"}
+      - {intent: regar, at: "19:00"}
+      - {intent: reciclar, at: "19:00"}
+      - {intent: basura, at: "21:00"}
+    expected: [[cierre_del_dia]]
+
+  - id: s03
+    title: Regar y reciclar sin salir por una clase a las 19:00; lo demás hecho
+    origin: reserva
+    now: "20:30"
+    tasks: []
+    completed_today:
+      - {id: t-gimnasio, title: Gimnasio}
+      - {id: t-ofertas, title: Revisar ofertas}
+    events:
+      - {title: Reunión de equipo, start: "2030-01-10T10:00", end: "2030-01-10T11:00"}
+      - {title: Clase de inglés, start: "2030-01-10T19:00", end: "2030-01-10T20:15"}
+    sent_today:
+      - {intent: plan_del_dia, at: "07:45"}
+    expected: [[regar, reciclar]]
+
+  - id: s04
+    title: Gimnasio hecho por APEX y las ofertas de las 16:30 aún abiertas
+    origin: reserva
+    now: "16:00"
+    apex:
+      meta: {ultima_actualizacion: "2030-01-10 15:30:00", version: 3}
+      entrenamientos:
+        - {id: inventado-1, fecha: "2030-01-09", tipo: fuerza, nombre: Pierna A,
+           duracion_min: 62.0, fuente: inventada, ejercicios: []}
+        - {id: inventado-4, fecha: "2030-01-10", tipo: cardio, nombre: Cardio suave,
+           duracion_min: 70.0, fuente: inventada, ejercicios: []}
+    sent_today:
+      - {intent: plan_del_dia, at: "07:45"}
+    expected: [[]]
+
+  - id: s05
+    title: Siete mensajes, la basura sin salir y el cierre sin enviar
+    origin: reserva
+    now: "21:15"
+    sent_today:
+      - {intent: plan_del_dia, at: "07:45"}
+      - {intent: insistir_gimnasio, at: "12:45"}
+      - {intent: insistir_gimnasio, at: "13:30"}
+      - {intent: insistir_ofertas, at: "17:20"}
+      - {intent: insistir_ofertas, at: "17:50"}
+      - {intent: insistir_ofertas, at: "18:20"}
+      - {intent: regar, at: "19:00"}
+      - {intent: reciclar, at: "19:00"}
+    expected: [[cierre_del_dia]]
+
+  - id: s06
+    title: Gimnasio con «hoy no» por la mañana y su tarea de las 12:00 abierta
+    origin: reserva
+    now: "12:50"
+    key_marks:
+      - {intent: insistir_gimnasio, mark: not_today, at: "09:00"}
+    sent_today:
+      - {intent: plan_del_dia, at: "07:45"}
+    expected: [[]]
