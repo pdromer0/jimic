@@ -29,6 +29,7 @@ from jimic.agent.conversation import (
     FAILED_TEXT,
     Conversation,
 )
+from jimic.agent.tools import RunMode
 from jimic.config import Settings
 from jimic.memory import conversations
 from jimic.memory.database import open_database
@@ -433,3 +434,119 @@ def test_la_guardia_de_la_ejecucion_para_lo_bloqueado_antes_de_la_herramienta(co
     assert [outcome.denied for outcome in agent.tool_outcomes] == [True]
     assert turn.run is not None and not turn.run.contaminated
     assert not conversations.read_external(conn, date(2030, 1, 7))
+
+
+# --- La fila del día sin mensaje de Pedro (tarea 1.14) -----------------------------------------
+
+
+def test_la_fila_del_dia_sin_mensaje_no_cuenta_como_que_pedro_escribio(conn):
+    """Pilla un `ensure_day` que inventa `last_message_at` (el latido creería que Pedro conversa)
+    o que pisa la hora de un mensaje que ya estaba."""
+    conversations.ensure_day(conn, date(2030, 1, 7))
+    assert conversations.last_message_at(conn) is None
+    conversations.mark_external(conn, date(2030, 1, 7))  # la guardia ya puede marcarla
+    conversations.note_message(conn, date(2030, 1, 7), madrid("2030-01-07T09:00"))
+    conversations.ensure_day(conn, date(2030, 1, 7))
+    assert conversations.last_message_at(conn) == madrid("2030-01-07T09:00")
+    assert conversations.read_external(conn, date(2030, 1, 7))
+
+
+# --- Las ejecuciones sin mensaje de Pedro (tarea 1.14) -----------------------------------------
+
+CHANGE = {"file": "preferencias.md", "operation": "add", "after": "- Más corto", "reason": "r"}
+
+
+def run_note(
+    world: World, note: str = "Toca proponer el plan del día.", mode: RunMode = "plan", **kwargs
+):
+    return asyncio.run(world.conversation.run_note(note, mode, **kwargs))
+
+
+def test_el_plan_corre_en_la_sesion_del_dia_con_el_texto_del_codigo(conn, tmp_path):
+    """Pilla una ejecución sin origen que abre otra sesión (perdería la conversación de hoy) o que
+    escribe la nota como si fuera de Pedro."""
+    world = World(conn, tmp_path)
+    world.say("Hola", at="2030-01-07T07:30")
+    world.clock.moment = madrid("2030-01-07T07:45")
+    turn = run_note(world)
+    assert turn is not None and turn.code == "ok" and turn.run is not None
+    assert turn.run.origin is None and turn.run.mode == "plan"
+    prompt, options = world.agent.runs[-1]
+    assert prompt == "[lun 07/01 07:45] (JimiC) Toca proponer el plan del día."
+    assert options.resume == "sesion-1"
+
+
+def test_el_plan_no_cuenta_como_que_pedro_conversa(conn, tmp_path):
+    """Versión incorrecta 7: el plan que llama a `note_message` haría esperar los avisos del
+    latido como si Pedro estuviera escribiendo."""
+    world = World(conn, tmp_path)
+    world.clock.moment = madrid("2030-01-07T07:45")
+    turn = run_note(world)
+    assert turn is not None and turn.code == "ok"
+    assert conversations.last_message_at(conn) is None
+    assert conversations.session_of(conn, date(2030, 1, 7)) == "sesion-1"
+
+
+def test_en_el_plan_propose_change_se_rechaza(conn, tmp_path):
+    """Versión incorrecta 1: un plan con el origen de un mensaje de Pedro podría proponer
+    cambios de memoria nacidos de lo que leyó."""
+    world = World(conn, tmp_path, FakeAgent([ToolCall("propose_change", CHANGE), result_message()]))
+    turn = run_note(world)
+    assert turn is not None and turn.run is not None
+    (outcome,) = world.agent.tool_outcomes
+    assert outcome.is_error and "Fuera de una conversación" in outcome.text
+    assert turn.run.memory == []
+
+
+def test_el_plan_puede_leer_aunque_pedro_no_haya_escrito_hoy(conn, tmp_path):
+    """Pilla una ejecución sin la fila del día: la guardia denegaría la lectura (`unmarked`)."""
+    world = World(conn, tmp_path, FakeAgent([ToolCall("read_tasks", {}), result_message()]))
+    turn = run_note(world)
+    assert turn is not None and turn.run is not None and turn.run.contaminated
+    assert [outcome.denied for outcome in world.agent.tool_outcomes] == [False]
+
+
+def test_el_plan_espera_al_turno_de_pedro_que_esta_en_marcha(conn, tmp_path):
+    world = World(conn, tmp_path)
+    world.agent.gate = asyncio.Event()
+
+    async def scenario():
+        pedro = asyncio.create_task(world.conversation.reply("primero"))
+        while not world.agent.runs:
+            await asyncio.sleep(0)
+        plan = asyncio.create_task(world.conversation.run_note("plan", "plan"))
+        for _ in range(20):
+            await asyncio.sleep(0)
+        assert len(world.agent.runs) == 1
+        assert world.agent.gate is not None
+        world.agent.gate.set()
+        return await pedro, await plan
+
+    _, plan = asyncio.run(scenario())
+    assert plan is not None and plan.code == "ok"
+    assert world.agent.most_active == 1
+
+
+def test_con_el_tope_diario_el_plan_no_llama_al_sdk_y_lo_dice_su_codigo(conn, tmp_path):
+    world = World(conn, tmp_path)
+    record_cost(conn, date(2030, 1, 7), "m", TokenUsage(0, 0), Decimal("9"))
+    turn = run_note(world)
+    assert turn is not None and turn.code == "agent:daily_cap" and turn.run is None
+    assert world.agent.runs == []
+
+
+def test_un_fallo_del_plan_lleva_su_codigo(conn, tmp_path):
+    world = World(conn, tmp_path, FakeAgent([result_message(None, api_status=529, is_error=True)]))
+    turn = run_note(world)
+    assert turn is not None and turn.code == "agent:api:529" and turn.run is None
+
+
+def test_si_pedro_escribio_despues_no_corre(conn, tmp_path):
+    world = World(conn, tmp_path)
+    world.say("ya lo he visto", at="2030-01-07T10:20")
+    assert (
+        run_note(world, mode="follow_up", unless_written_after=madrid("2030-01-07T10:15")) is None
+    )
+    assert len(world.agent.runs) == 1
+    turn = run_note(world, mode="follow_up", unless_written_after=madrid("2030-01-07T10:20"))
+    assert turn is not None and turn.code == "ok"

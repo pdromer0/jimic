@@ -297,13 +297,15 @@ def test_una_inyeccion_da_cero_ejecuciones_y_cero_cambios_de_memoria(conn, tmp_p
     out = outgoing(w.say("¿qué tengo hoy?"))
     assert out.kind == PLAN_KIND
     assert w.writes() == []
-    # La fila global no se ve: solo hay borrados, y no la ofrecen.
+    # De la fila global solo se ve [Nada]: [Créalo todo] no ofrece los borrados.
     approval, _ = w.show([], message=out.message)
-    assert [b.label for b in render(out.message, approval).keyboard[-1]] == [
-        "3 🗑️ Bórrala",
-        "3 🆗 Déjala",
-    ]
+    keyboard = render(out.message, approval).keyboard
+    assert [b.label for b in keyboard[-2]] == ["3 🗑️ Bórrala", "3 🆗 Déjala"]
+    assert [b.label for b in keyboard[-1]] == ["⏭ Nada"]
     assert w.tap(approval, None, "all").code == "nothing_to_do"
+    assert w.writes() == []
+    # [Nada] los deja todos («Déjala»): ninguna fila global borra.
+    assert w.tap(approval, None, "none").code == "resolved"
     assert w.writes() == []
     assert conn.execute("SELECT COUNT(*) FROM changes").fetchone() == (0,)
     assert sorted(path.name for path in w.paths.config_dir.iterdir()) == before
@@ -318,3 +320,21 @@ def test_una_inyeccion_da_cero_ejecuciones_y_cero_cambios_de_memoria(conn, tmp_p
         True,
     ]
     assert [o.is_error for o in agent.tool_outcomes[3:5]] == [True, True]
+
+
+# --- Sin mensaje de Pedro, nada al momento (tarea 1.14) --------------------------------------
+
+
+def test_una_ejecucion_sin_origen_nunca_ejecuta_al_momento():
+    """Versión incorrecta 6: en el plan o en la reanudación no hay mensaje de Pedro; si el agente
+    marcara `requested_by_pedro`, una ejecución limpia crearía algo que nadie pidió."""
+    from jimic.agent.tools import RunMode, RunState
+    from jimic.execution.immediate import runs_now
+
+    entry = {"action": "create", "title": "Tarea nueva", "due": "2030-01-07", "reason": "r"}
+    asked = RunState(origin="crea una tarea", items=[entry], requested_by_pedro=True)
+    assert runs_now(asked)  # la conversación sí ejecuta al momento
+    modes: tuple[RunMode, ...] = ("plan", "follow_up")
+    for mode in modes:
+        run = RunState(origin=None, mode=mode, items=[entry], requested_by_pedro=True)
+        assert not runs_now(run)

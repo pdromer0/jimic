@@ -51,7 +51,7 @@ def test_las_etiquetas_son_las_del_formato_del_plan(conn):
         MADRID,
     )
     assert labels(message) == [
-        ["1 ✅", "1 ⏭"],
+        ["1 ✅", "1 ✏️", "1 ⏭"],
         ["2 🔄 A las 9:50", "2 🆗 Déjalo"],
         ["3 🗑️ Bórrala", "3 🆗 Déjala"],
         ["✅ Créalo todo", "⏭ Nada"],
@@ -135,18 +135,35 @@ def test_crealo_todo_crea_y_mueve_y_nunca_borra(conn):
     assert world.status(approval) == "pending"  # el borrado sigue esperando su botón
 
 
-def test_nada_descarta_sin_escribir_y_deja_el_borrado(conn):
+def test_nada_descarta_sin_escribir_deja_el_borrado_como_dejala_y_cierra(conn):
+    """Versión incorrecta 10 de la 1.14: una fila global que aplicara `del` a un borrado
+    pendiente lo borraría sin su propio botón. [Nada] lo deja como «Déjala» y el mensaje se
+    cierra (así puede reanudarse la conversación, 1.13-d)."""
     world = ExecutionWorld(conn, [todoist_task("t1"), todoist_task("t2")])
     approval, _ = world.show(
         [world.create_entry(), world.move_entry("t1", "2030-01-08"), world.delete_entry("t2")]
     )
-    world.tap(approval, None, "none")
+    assert world.tap(approval, None, "none").code == "resolved"
     assert world.writes() == []
     assert [item.result for item in world.message(approval).items] == [
         "⏭ descartada",
         "🆗 se queda",
-        None,
+        "🆗 se queda",
     ]
+    assert [item.chosen for item in world.message(approval).items] == ["no", "no", "keep"]
+    assert world.status(approval) == "rejected"
+    assert world.photos() == []
+
+
+def test_la_edicion_de_crear_cierra_el_elemento_y_pregunta_como(conn):
+    """[✏️ Cámbialo] (1.14-c): no crea nada, no aprueba y pregunta «¿cómo la quieres?»."""
+    world = ExecutionWorld(conn)
+    approval, _ = world.show([world.create_entry()])
+    world.tap(approval, 1, "edit")
+    assert world.writes() == []
+    (item,) = world.message(approval).items
+    assert (item.result, item.chosen) == ("✏️ ¿cómo la quieres?", "edit")
+    assert world.status(approval) == "rejected"
 
 
 def test_mover_una_tarea_que_ya_no_existe_lo_dice(conn):

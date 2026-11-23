@@ -247,7 +247,7 @@ función de purga con cortes absolutos en UTC (`jimic.memory.retention.purge`); 
 | `read_calendar` | Eventos de un día de los calendarios visibles: título, horas, `all_day`, si Pedro organiza y `declined` (si lo rechazó); sin descripción | Libre; contamina |
 | `read_tasks` | Tareas de hoy, vencidas y por proyecto | Libre; contamina (los títulos pueden venir de terceros) |
 | `read_apex_today` | Entreno previsto y hecho; objetivos de APEX; resumen de biométricos | Libre |
-| `propose_plan` | Propone crear, mover y borrar tareas, con su motivo | Libre (solo propone) |
+| `propose_plan` | Propone crear, mover y borrar tareas, con su motivo; en el plan del día, también lo que el código pinta (saludo, hábitos que quedan fuera, línea del entreno e iconos; decisión 122, de la 1.14) | Libre (solo propone) |
 | `propose_change` | Propone un cambio de memoria; lo escribe el código tras [Guardar] | Libre (solo propone); solo en una ejecución que no leyó el calendario ni las tareas (decisión 102, de la 1.12) |
 | `log_idea` | Propone apuntar una idea en `ideas.md`; la escribe el código tras [📝 Apuntar] | Libre (solo propone); la misma regla (decisión 103, que revisa la 100) |
 
@@ -483,8 +483,15 @@ secciones de esta especificación que le tocan; nada personal (los ejemplos, inv
 - **Un día real completo en el PC:** plan creado con [Créalo], una insistencia que se para al
   hacer la tarea, cierre con valoración y ningún aviso repetido ni fuera de los límites.
 - Evaluaciones por encima del umbral de 13.3 del diseño: latido ≥ 90 % y ≤ 5 % de «habla cuando
-  no debía»; plan, 100 % en las comprobaciones automáticas y 8 de 10 planes aprobados por Pedro;
+  no debía»; plan, 100 % en las reglas duras, las de criterio con el umbral de 13.3 y revisadas
+  en la 1.17 con los 10 planes de Pedro, y 8 de 10 planes aprobados por Pedro (decisión 131);
   inyección, 100 %.
+  - Reglas duras: `no_overlap`, `no_duplicates`, `max_new`, `due_from_now`, `no_item_on`,
+    `deletes_exactly`, `no_delete`, `no_deletes`, `no_move`, `no_create_title`, `creates`,
+    `left_out_or_absent`, `no_memory_proposal`, `learned_line`, `training_line`, y `moves` cuando es
+    una incoherencia con el calendario (H1-9).
+  - Criterio: `includes_habit`, `includes_or_left_out`, y `moves` de una atrasada que no duplica
+    (traerla a hoy o a mañana).
 - Cada regla de los límites, la guardia, el borrado y la validación tiene su test, y su versión
   incorrecta lo pone en rojo.
 - Los botones por elemento, comprobados en el móvil (H1-4).
@@ -2579,3 +2586,212 @@ pendientes, con el 5 corregido en la ronda de ajustes):
 **Pruebas contra servicios reales:** dos evaluaciones contra la API de Anthropic con la clave de
 `jimic-dev` (0,0376 $ y 0,0374 $), que no crean nada. Ni Todoist, ni Calendar, ni Telegram: no hay restos
 que comprobar.
+
+### Tarea 1.14: plan del día
+
+**Qué se hizo.** Issue #28, rama `feat/h1-plan`, aprobada a las 13:51 del 23-nov-2026 con dos
+ajustes de Pedro (la global de descartar y el tope de reintentos) y `plan.md` acotado al plan.
+Commits:
+- `feat(memoria)`: la fila del día sin mensaje de Pedro, migración 0007 (aa59710);
+- `refactor(agente)` y `feat(agente)`: las ejecuciones sin mensaje de Pedro (7791465, 597f804);
+- `feat(canal)`: los botones del plan, [✏️] al crear y la global que deja los borrados (d4588a3);
+- `feat(agente)`: `propose_plan` con los campos del plan y `follow_up` (a0edfe4);
+- `refactor(memoria)` y `feat(plan)`: el plan pintado por el código y el plan mínimo (1da592f,
+  a6153da);
+- `refactor(ejecución)`, `feat(conversación)` y `test(conversación)`: la reanudación tras los
+  toques (1055315, 6a9b699, b3e9261);
+- `feat(demo)`: el plan en `jimic telegram demo` (db1c7d6);
+- `refactor(evals)` y `feat(evals)`: `jimic evaluar plan` (d514dc3, fcda6c3);
+- `docs(diseno)`: las decisiones 118 a 128 (6795f3f); 129 y 130, en los ajustes de la revisión;
+- en los ajustes: `feat(conversación)` (95d25d3), `feat(agente)` (cba69b3 y 30bd361) y
+  `test(evals)` (c93e547);
+- las correcciones de la revisión propia: `fix(latido)` (03eea0d), `fix(plan)` (498ea2e, cba0080,
+  15e005b, 5e668e7), `fix(canal)` (a327780), `fix(ejecución)` (6ec47ef) y `refactor(plan)`
+  (b02196d).
+
+Este anexo es `docs(hito-1)`.
+
+**Decisiones de la tarea:** 1.13-c a 1.13-e y 1.14-a a 1.14-f son las decisiones 118 a 126 del
+diseño; los dos ajustes de Pedro, la 127 y la 128. Sin ADR nuevo: la reanudación no cambia la regla
+de origen (la 102 ya dice que fuera de una conversación no hay cambios de memoria). Las que tocan
+la guardia, en «Qué cambió al implementarla» del ADR 0005.
+
+**Decisiones del diff** (lo que el plan interpretaba):
+- **Paquetes:** `jimic/plan/` (`day.py`, «Tu día»; `message.py`, la plantilla y 🧠; `minimal.py`;
+  `runner.py`, el enganche), `execution/follow_up.py`, y en `evals/` `plan_checks.py`,
+  `plan_scenarios.py`, `plan.py` y `plan_report.py`.
+- **El plan cuenta en el cupo:** una fila en `notices` al enviarse.
+- **«Desde el plan anterior»:** el último plan enviado; sin ninguno, desde las 00:00 de ayer. Sin
+  `ideas.md` ni los cambios deshechos. «Desde ayer» solo si es verdad.
+- **«Tu día»:** eventos no rechazados y tareas **de hoy**; las atrasadas, solo como propuestas.
+  Iconos: la tabla de `preferencias.md`, luego el agente, luego `▫️`. El código lee las fuentes
+  tras la ejecución del agente.
+- **Plan tardío:** después del `to` de la ventana (sin ventana, de `default_time`; con `from ==
+  to`, nunca).
+- **[✏️ Cámbialo]** tiene la clave `edit` y resuelve con «✏️ ¿cómo la quieres?».
+- **Un agente que acaba bien sin llamar a `propose_plan`** da el plan mínimo.
+- **Mínimo:** los hábitos `high` cuyo `todoist_task` no está entre las abiertas de hoy o
+  atrasadas; con Todoist caído, ninguno. Límite conocido: un hábito ya marcado hoy no está entre
+  las abiertas y se volvería a proponer.
+- **Reanudación:** solo el toque que cierra la aprobación la provoca (sin estado nuevo). Si falla o
+  topa con el tope diario, no se envía nada.
+- **`plan.md` va siempre** en el *system prompt*, tras `prompt.md`, con sus reglas acotadas al plan.
+- **Evaluación:** `no_duplicates` compara solo títulos; «por intención» lo cubren p03
+  (`deletes_exactly`) y el prompt. En `no_overlap`, un evento con el mismo título que lo propuesto
+  es la misma cosa (p07: mover el webinar a la hora de su evento no es un choque).
+- **Una diferencia con el plan:** `left_out` no comprueba en la herramienta que el hábito exista
+  (el contexto de las herramientas no tiene las intenciones); sin efecto en la seguridad: la línea
+  se pinta igual y la evaluación no la reconocería.
+
+**Valores a mano** (código independiente, antes de implementar): Gimnasio 12:00 + 75 min =
+`12:00–13:15`; el ejemplo de la especificación tiene 14 líneas; el peor caso sin «Tu día», 19 (caben
+6 entradas); la evaluación, 13 ejecuciones por pasada × 3 = 39; `1️⃣` mide 3 en UTF-16; p05, 14:30 +
+30 min = 15:00 ≤ 15:00; sin plan anterior, desde 2030-01-08T23:00Z; p02 a las 12:30, 3 sin marcar y
+«Tu día» con 15:00 Comida, 15:30 Trabajo en el proyecto y 19:00 Paseo 5 km; p09, 45 min antes de las
+8:30; 10–11 frente a 11:00–11:30, sin solape.
+
+**Primera medida** (23-nov-2026, 14:43, `jimic-dev`, `claude-sonnet-5-5`, 3 pasadas): **90 %
+(27/30)** ❌ frente al 100 %, en 0,80 $ (39 ejecuciones, 0,021 $ cada una; la estimación era 1,5 $).
+Antes, una pasada de p01 sola: 100 %, 0,039 $ y 16 s.
+- **p03** (1/3): en dos pasadas no borra las atrasadas que duplican por intención, no trae a hoy el
+  gimnasio de ayer y crea otro; en una de ellas también borra el gimnasio de ayer.
+- **p04** (2/3): en una pasada no mete la cena y algo propuesto pisa un evento.
+Siguiendo las notas, no se tocó el prompt para aprobar escenario a escenario: Pedro decidió abrir el
+PR con esta medida y ajustar el prompt (reglas generales) como tarea aparte. El informe con el plan
+pintado de cada pasada está en la copia `dev` (`plan-20261123-1443.md`); el agente no tiene permiso
+para leer esa carpeta, así que los mensajes pintados los añade Pedro.
+
+**Segunda medida** (23-nov-2026, 17:09, tras las reglas generales de la decisión 129; mismo
+`evals/plan.yaml` y mismo catálogo): **90 % (27/30)** ❌, en 0,92 $ (39 ejecuciones, 0,023 $ cada
+una), 3 minutos. Frente a la primera, sobre los 10 comunes, 90 % → 90 %, pero con otros fallos:
+- **p03** pasa de 1/3 a **3/3**: las atrasadas que duplican se borran y la del hábito se mueve.
+- **p04** baja de 2/3 a **1/3**: en dos pasadas falta el hábito «ofertas» (`includes_habit`). Es de
+  prioridad alta, su `moment` es la tarde y la tarde está entera ocupada, pero hay hueco de 11:15
+  a 15:00. Hipótesis, sin leer el informe: el agente aplica a la alta el «en su momento del día»
+  de la media y, con la regla nueva de «si no cabe en ningún hueco, a `left_out`», lo deja fuera.
+- **p05** baja de 3/3 a **2/3**: en una pasada, tras «pasa la revisión de ofertas a las 14:30»,
+  no crea «Revisar ofertas» de 14:30 a 15:00 (comprobación de después).
+Informe: `plan-20261123-1709.md` en la copia `dev`.
+
+**Tercera medida** (23-nov-2026, 17:22, tras la línea de Pedro sobre el momento del día y con el
+conjunto de reserva; 13 escenarios, 3 pasadas): **97,4 % (38/39)** ❌, en 1,08 $ (48 ejecuciones,
+0,023 $ cada una), 3 minutos.
+- **`p01` a `p10`: 96,7 % (29/30)**, frente al 90 % de la segunda. p04 sube a 2/3 (el hábito
+  «ofertas» ya entra) y en una pasada falta la **cena** (`includes_habit(cena)`): es de prioridad
+  media, de noche, y el proyecto acaba a las 21:00, así que tenía hueco de 21:00 a 21:45. p05 pasa
+  3/3.
+- **Reserva (`r01` a `r03`): 100 % (9/9).** Escrita por el chat después del ajuste del prompt; el
+  prompt no se ajusta mirándola.
+Informe: `plan-20261123-1722.md` en la copia `dev`. Siguiendo las notas, no se tocó el prompt.
+
+**Las tres medidas por tipo de comprobación** (decisión 131, 1.14-i). Clasificadas con la salida
+de cada medida, que nombra cada comprobación que falla en cada pasada; se pudieron clasificar
+todas. Nota dura: pasadas que cumplen todas sus reglas duras; nota de criterio: pasadas que cumplen
+todas sus comprobaciones de criterio.
+
+| Medida | Duras | Criterio | Fallos duros | Fallos de criterio |
+| --- | --- | --- | --- | --- |
+| Primera (10 escenarios) | 90 % (27/30) | 90 % (27/30) | p03 ×2: `deletes_exactly` y `no_create_title(Gimnasio)` en las dos, y `no_delete(t-gimnasio-ayer)` en una (borró el gimnasio de ayer y creó otro); p04 ×1: `no_overlap` | p03 ×2: `moves(t-gimnasio-ayer, hoy)`; p04 ×1: `includes_habit(cena)` (la misma pasada que el solape) |
+| Segunda (10) | 96,7 % (29/30) | 93,3 % (28/30) | p05 ×1: `creates(Revisar ofertas, 14:30, 15:00)`, en el turno de después | p04 ×2: `includes_habit(ofertas)` |
+| Tercera (13) | **100 % (39/39)** | 97,4 % (38/39) | — | p04 ×1: `includes_habit(cena)` |
+
+En la tercera, `p01` a `p10`: duras 100 % (30/30) y criterio 96,7 % (29/30); la reserva, 100 % en
+las dos (9/9). Los fallos duros de la primera (p03 y el solape de p04) los corrigieron las reglas
+generales de la decisión 129. Matiz frente a las notas: la segunda también tuvo un fallo duro, pero
+de p05 (`creates`, tras el mensaje de Pedro), con las reglas generales ya puestas; en la tercera
+desaparece con solo la línea del momento del día, que no trata de eso, así que lo más probable es
+la variabilidad del modelo. Ver si vuelve es parte de la 1.16.
+
+**Versiones incorrectas** (aplicadas y deshechas; el árbol quedó limpio). Predicción frente a lo
+observado:
+
+| # | Versión incorrecta | Predicción | Observado |
+| --- | --- | --- | --- |
+| 1 | El plan corre con un origen | Rojo «en el plan, `propose_change` se rechaza»; verde «se lanza en la sesión del día» | Rojos los dos: el segundo también comprueba que no hay origen |
+| 2 | [Créalo todo] aplica los borrados | Rojo la fila global; verde [🗑️ Bórrala] | Rojos «Créalo todo nunca borra» y las dos inyecciones; verde el borrado |
+| 3 | La reanudación sale con filas pendientes | Rojo «con filas pendientes, no»; verde «resuelto y con `follow_up`, sí» | **Verde la primera vez**: el asistente ya descartaba una aprobación pendiente. Con tests de cada capa: rojo la regla sola; quitar la comprobación del estado, rojo «una propuesta caducada no se reanuda» |
+| 4 | El mínimo propone hábitos de media | Rojo el mínimo; verde los altos | Como se predijo |
+| 5 | La plantilla no corta «Tu día» | Rojo «25 líneas»; verdes orden e iconos | Como se predijo |
+| 6 | Sin origen se respeta `requested_by_pedro` | Rojo «sin origen nunca al momento»; verde la conversación | Como se predijo |
+| 7 | El plan llama a `note_message` | Rojo «no cuenta como Pedro conversa» | Rojo ese y «un cambio de memoria se rechaza» (comprueba lo mismo) |
+| 8 | 🧠 cuenta los deshechos | Rojo «no sale con uno deshecho» | Como se predijo |
+| 9 | `no_overlap` con intervalos cerrados | Rojo «contiguo no solapa» | Como se predijo |
+| 10 | La global de descartar aplica `del` | Rojo «Nada deja el borrado como Déjala» | Rojo ese y la inyección del asistente |
+| 11 | Sin tope de reintentos | Rojo «Telegram siempre caído» | Como se predijo |
+
+En la 3, además, el test de la caducada pasaba en vacío al principio: la aprobación no tenía id de
+mensaje y el barrido solo marcaba la fila. Ahora lo pone, como el canal.
+
+**Revisión propia** (`/code-review medium`, 10 hallazgos: 9 corregidos y 1 explicado):
+
+| Hallazgo | Qué se hizo |
+| --- | --- |
+| El plan pasado al agente no gastaba cupo en la segunda pasada: una tarea clave del mismo latido salía también con el último hueco antes del cierre | Corregido (03eea0d): el plan descuenta su mensaje; el cierre, que aún no sale, no |
+| `is_late` daba tardío a un plan sin ventana a las 8:00:00,3, y juzgaba mal una ventana que cruza la medianoche | Corregido (498ea2e): al minuto, y la nocturna solo es tardía entre su fin y su inicio |
+| Un evento de varios días no salía en «Tu día» de un día intermedio | Corregido (cba0080): sale si ocupa parte de hoy; si empezó antes, sin hora |
+| El plan salía fuera del orden de los turnos del canal y podía adelantar a la respuesta a Pedro | Corregido (a327780): `deliver` espera al turno en curso |
+| El refactor de `_reply` movió el día de la sugerencia tras el turno | Corregido (6ec47ef) |
+| El enganche bloquea el latido mientras corre el agente y vuelve a leer las fuentes | Explicado: el latido es cada 15 minutos y tiene su guarda de solape; leer tras la ejecución da datos frescos y es el mismo camino que la evaluación |
+| El contador de reintentos no iba por intención, y sin emisor se gastaba el agente | Corregido (15e005b) |
+| Las claves de [✏️] y el recorte, copiados en `follow_up.py` | Corregido (b02196d): se toman de sus opciones y de `plan.day` |
+| `WEEKDAYS` y el formato de hora, copiados | Corregido (b02196d) |
+| «Desde ayer» con un plan anterior de hoy; la evaluación puntuaba lo que el agente propuso aunque saliera el mínimo | Corregido (5e668e7) |
+
+Cada corrección lleva su test, y se comprobó que ese test falla con el código de antes.
+
+**Medidas.** La N3, tras la revisión: en verde en 1:58: 1560 tests y 11 de contrato saltados (eran 1418
+tras la 1.9); pre-commit 0:11, pytest 1:46 y gitleaks de la historia 0:01. Está cerca de los 2
+minutos del disparador del módulo `xdist`.
+
+**Ajustes de la revisión** (Pedro, en el PR #50; paso 1 de 2):
+- **El contexto de [✏️]** (95d25d3, decisión 130): el código recuerda el último [✏️ Cámbialo] o
+  [✏️ Cambiar] que tocó Pedro, con la etiqueta de la nota de la reanudación, y su siguiente mensaje
+  de ese día que llega al agente lleva delante `(JimiC) Pedro tocó ✏️ en: …`. Se usa una vez y se
+  olvida, también al cambiar de día o si otro toque cierra ese mensaje (el [✏️] que cierra, no).
+  `EditContext` envuelve los manejadores `plan` y `memory`; el cierre lo avisa `on_closed`. Vive
+  en la memoria del servicio: un reinicio lo olvida. Un comando o un «sí» escrito no llegan al
+  agente y no lo gastan. La línea no entra en el origen. Seis tests nuevos en
+  `test_reanudacion.py`, y el de la conexión del `runtime` comprueba que el [✏️] del canal se
+  recuerda.
+  - Versión incorrecta (la línea entra en el origen): predicción, rojo «la línea no entra en el
+    origen» y verdes los demás; observado, como se predijo.
+- **Las reglas generales del plan** (cba69b3, decisión 129), en `agent/plan.md`, sin escenarios:
+  atrasadas (solo se borra la que duplica; la que no, se mueve), huecos (de inicio a fin, contra
+  eventos y tareas con hora; la alta que no cabe, a `left_out`) y prioridad media (hueco libre
+  para su duración en su `moment`). La segunda medida, arriba.
+- **Paso 2** (Pedro, en el PR #50), en este orden:
+  1. La línea de Pedro en `agent/plan.md`, tal cual, junto a la de prioridad media (30bd361): «el
+     momento del día solo limita a los de prioridad media…». El prompt no cambió en nada más.
+  2. El conjunto de reserva en `evals/plan.yaml` (c93e547), `r01` a `r03`, con `origin: reserva` y
+     el comentario de Pedro, con el catálogo tal como está. El id de la atrasada de `r01` es
+     `t-estiramientos-ayer`, como en p03. El test del fichero real carga ahora 13 escenarios.
+  3. La tercera medida, arriba.
+  - N3 del paso 2: en verde en 2:37, 1566 tests (pre-commit 0:13, pytest 2:22 y gitleaks de la
+    historia 0:02).
+- **Ajustes finales** (decisión 1.14-i de Pedro, la 131; solo documentación): las comprobaciones,
+  de dos tipos, en este anexo, en `evals/README.md`, en el criterio de aceptación del hito y en 13.3
+  del diseño; las tres medidas por tipo, arriba.
+  - N3 de los ajustes finales: en verde en 2:01, 1566 tests (pre-commit 0:12, pytest 1:47 y
+    gitleaks de la historia 0:02).
+- N3 de la ronda: en verde en 2:20, 1566 tests (pre-commit 0:14, pytest 2:05 y gitleaks de la
+  historia 0:01). pytest pasa de los 2 minutos: se cumple el disparador del módulo `xdist`.
+
+**Pendiente.**
+- **El prompt del plan** (p04 de la tercera medida, la cena de prioridad media en 1 de 3
+  pasadas): es de criterio y se revisa en la 1.17 con los 10 planes de Pedro.
+- **Las dos notas por separado** (1.16, que reutiliza el programa del agente): el informe de
+  `jimic evaluar plan` da la nota de las duras y la de criterio, y cada comprobación del catálogo
+  lleva su tipo.
+- **El disparador del módulo `xdist`** (1.17): pytest pasa de 2 minutos (2:05 y 2:22 en las N3 de
+  los ajustes).
+- **El plan confirmado** (`day_plans` y `plan_items`, CU-01 paso 6): con el cierre, en la 1.16.
+- **Un hábito ya marcado hoy** no está entre las tareas abiertas y el plan mínimo lo volvería a
+  proponer (raro: el plan sale a primera hora).
+- **El modelo juez** con rúbrica (13.3 y decisión 35): idea de Pedro; se revisa en el cierre del
+  hito (1.17).
+- **Los mensajes pintados** de las tres medidas y la captura del móvil: los añade Pedro.
+
+**Pruebas contra servicios reales:** solo la API de Anthropic con la clave de `jimic-dev` (la medida
+de arriba). Todo inventado; no toca Todoist, Calendar ni Telegram: no hay restos que comprobar.
+
+**Captura del móvil:** `JIMIC_ENTORNO=dev uv run jimic telegram demo` (la lanza Pedro).

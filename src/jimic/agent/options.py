@@ -7,9 +7,10 @@ memory and the non-essential traffic. Two layers decide each call: the `PreToolU
 `guard.py` (task 1.11), which sees every call and denies what is not in the table or not `free`
 in `tool_levels`, and `allowed_tools` with only the `free` ones, where `dontAsk` denies the rest.
 
-The system prompt is the fixed instructions of `prompt.md` and, after them, the text of Pedro's
-five personal files (decision 1.12-c), rebuilt on every request, also when the session of the
-day is resumed.
+The system prompt is the fixed instructions of `prompt.md` and of `plan.md` (the rules of the
+plan of the day, task 1.14, which only apply when the code asks for the plan) and, after them,
+the text of Pedro's five personal files (decision 1.12-c), rebuilt on every request, also when
+the session of the day is resumed. The fixed part goes first, so it can be cached.
 
 The key goes in the `env` of the options, never in `os.environ`: JimiC only reads its `.env`.
 The options hold it, so they are never logged.
@@ -33,10 +34,15 @@ MAX_TURNS = 12
 to spare; a loop of tools stops here, and so does its cost."""
 
 
+PROMPT_FILES = ("prompt.md", "plan.md")
+
+
 @cache
 def prompt_text() -> str:
-    """Read once per process: it is a file of the package."""
-    return files("jimic.agent").joinpath("prompt.md").read_text(encoding="utf-8")
+    """The fixed instructions, read once per process: they are files of the package."""
+    folder = files("jimic.agent")
+    texts = [folder.joinpath(name).read_text(encoding="utf-8").strip() for name in PROMPT_FILES]
+    return "\n\n".join(texts) + "\n"
 
 
 def agent_env(settings: Settings, config_dir: Path) -> dict[str, str]:

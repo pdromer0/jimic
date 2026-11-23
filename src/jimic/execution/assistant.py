@@ -25,25 +25,36 @@ The onboarding (CU-12, task 1.13), with a `config_dir`:
   run, nor in what the heartbeat sends, and it is no message of its own: it costs no quota.
 
 Everything an approval offers expires at the end of the local day (RF-07, 1.11-c).
+
+After a tap that closes a proposal, `follow_up` may run the agent once more, without a message
+of Pedro, so that the conversation goes on (decisions 1.13-c and 1.13-d, `follow_up.py`). Its
+answer goes like any other, without the suggestion of the onboarding; if it does not run or
+fails, nothing is sent: Pedro did not write.
+
+After [✏️ Cámbialo] or [✏️ Cambiar], Pedro's next message of that day carries a line of the code
+with the item he tapped (decision 1.14-h, `edit_context.py`); `track` watches the handlers.
 """
 
 import logging
 import sqlite3
+from collections.abc import Mapping
 from datetime import date, datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from jimic.agent.conversation import Conversation
+from jimic.agent.conversation import Conversation, Turn
 from jimic.agent.proposals import expires_at
 from jimic.agent.tools import ManualChange, RunState
 from jimic.channel import store
 from jimic.channel.bot import Incoming, Outgoing, Reply
 from jimic.channel.message import Tap
-from jimic.channel.taps import Failed, failure_note, process_tap
+from jimic.channel.taps import Failed, TapHandler, failure_note, process_tap
 from jimic.clock import Clock
 from jimic.execution import confirm
 from jimic.execution.commands import Commands, command_of
+from jimic.execution.edit_context import EditContext
 from jimic.execution.execute import Executor
+from jimic.execution.follow_up import follow_up_note
 from jimic.execution.immediate import runs_now
 from jimic.execution.memory_message import DROPPED_TEXT, MEMORY_KIND, memory_message
 from jimic.execution.plan_message import (
@@ -115,6 +126,11 @@ class Assistant:
         self._conn = conn
         self._clock = clock
         self._timezone = timezone
+        self._edits = EditContext(clock, timezone)
+
+    def track(self, handlers: Mapping[str, TapHandler]) -> dict[str, TapHandler]:
+        """`handlers`, with [✏️] of the proposals remembered for Pedro's next message."""
+        return self._edits.track(handlers)
 
     async def reply(self, incoming: Incoming) -> str | Reply:
         command = command_of(incoming.text)
@@ -160,8 +176,13 @@ class Assistant:
         return True
 
     async def _converse(self, message: str, suggest: bool) -> str | Reply:
-        day = self._today()
-        turn = await self._conversation.respond(message)
+        day = self._today()  # the day Pedro wrote, not the one the agent finished
+        turn = await self._conversation.respond(message, self._edits.take(day))
+        return await self._reply(turn, suggest, day)
+
+    async def _reply(self, turn: Turn, suggest: bool, day: date) -> str | Reply:
+        """The answer of a turn, with what its run proposed under it; `day` is the one the
+        onboarding suggestion is claimed for."""
         run = turn.run
         if run is None:
             return turn.text
@@ -206,6 +227,38 @@ class Assistant:
             item = message.items[0].model_copy(update={"note": failure_note(done.code)})
             message = message.model_copy(update={"items": (item,)})
         return Outgoing(PLAN_KIND, message, expires)
+
+    async def follow_up(self, approval_id: int) -> str | Reply | None:
+        """What follows a tap that closed approval `approval_id` (1.13-c), or `None`. Never
+        raises: what goes wrong only reaches the log."""
+        self._edits.closed(approval_id)
+        try:
+            return await self._follow_up(approval_id)
+        except Exception as error:
+            logger.error("follow-up failed (%s)", type(error).__name__)
+            return None
+
+    async def _follow_up(self, approval_id: int) -> str | Reply | None:
+        try:
+            approval = store.load(self._conn, approval_id)
+        except ValueError:
+            return None
+        if approval is None or approval.status not in ("approved", "rejected"):
+            return None
+        note = follow_up_note(approval.kind, approval.message)
+        if note is None:
+            return None
+        day = self._today()
+        turn = await self._conversation.run_note(
+            note, "follow_up", unless_written_after=approval.created_at
+        )
+        if turn is None:
+            return None
+        if turn.code != "ok":
+            logger.info("follow-up not sent (%s)", turn.code)
+            return None
+        logger.info("follow-up of approval %d", approval_id)
+        return await self._reply(turn, False, day)
 
     async def _confirm(self, found: confirm.Target) -> Reply:
         """The «sí»: a tap of `del` on that item, by the code; it counts as Pedro writing."""

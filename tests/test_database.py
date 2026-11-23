@@ -27,8 +27,8 @@ TABLES = {
     "handovers",
     "conversations",
 }
-LATEST = 6
-"""La última migración del paquete (0006, la de la puesta en marcha)."""
+LATEST = 7
+"""La última migración del paquete (0007, la del plan del día)."""
 
 
 def table_names(conn: sqlite3.Connection) -> set[str]:
@@ -252,5 +252,31 @@ def test_la_0006_anade_el_bit_de_la_sugerencia_sin_perder_las_conversaciones(tmp
         ]
         with pytest.raises(sqlite3.IntegrityError):
             conn.execute("UPDATE conversations SET onboarding_suggested = 2")
+    finally:
+        conn.close()
+
+
+def test_la_0007_admite_un_dia_sin_mensaje_de_pedro_sin_perder_las_conversaciones(tmp_path):
+    """Pilla una 0007 que pierde filas o columnas de `conversations`, o que sigue exigiendo un
+    mensaje de Pedro para tener la fila del día."""
+    from jimic.memory.database import load_migrations, migrate
+
+    conn = sqlite3.connect(tmp_path / "jimic.db", autocommit=True)
+    try:
+        migrate(conn, load_migrations()[:6])
+        conn.execute(
+            "INSERT INTO conversations (day, session_id, last_message_at, read_external,"
+            " onboarding_suggested) VALUES ('2030-01-07', 's-1', '2030-01-07T09:00:00+00:00', 1, 1)"
+        )
+        migrate(conn, load_migrations())
+        assert conn.execute("SELECT * FROM conversations").fetchall() == [
+            ("2030-01-07", "s-1", "2030-01-07T09:00:00+00:00", 1, 1)
+        ]
+        conn.execute("INSERT INTO conversations (day) VALUES ('2030-01-08')")
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute(
+                "UPDATE conversations SET last_message_at = '2030-01-08 09:00'"
+                " WHERE day = '2030-01-08'"
+            )
     finally:
         conn.close()

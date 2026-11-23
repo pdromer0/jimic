@@ -560,3 +560,25 @@ def test_los_logs_y_el_repr_de_los_veredictos_no_llevan_el_texto(conn, caplog):
     assert SECRET_TEXT not in caplog.text
     assert SECRET_TEXT not in repr(verdicts)
     assert SECRET_TEXT not in repr(queue)
+
+
+def test_el_plan_pasado_al_agente_gasta_su_mensaje_en_el_mismo_lote(conn):
+    """Tarea 1.14 (revisión propia): el plan ya se envía, así que al pasarlo al agente ocupa su
+    mensaje. Con uno libre antes del hueco del cierre, la tarea clave del mismo lote se para en
+    vez de salir también (dos mensajes, y el hueco del cierre gastado)."""
+    fill(conn, 6)
+    verdicts = batch(conn, "2030-01-07T14:00", "plan_del_dia", "insistir_gimnasio")
+    assert [(v.action, v.reason, v.intents) for v in verdicts] == [
+        ("handover", "ok", ("plan_del_dia",)),
+        ("block", "close_slot", ("insistir_gimnasio",)),
+    ]
+
+
+def test_el_cierre_pasado_al_agente_aun_no_gasta(conn):
+    """El cierre no sale hasta la 1.16: no ocupa mensaje."""
+    fill(conn, 5)
+    verdicts = batch(conn, "2030-01-07T14:00", "cierre_del_dia", "insistir_gimnasio")
+    assert [(v.action, v.intents) for v in verdicts] == [
+        ("handover", ("cierre_del_dia",)),
+        ("send", ("insistir_gimnasio",)),
+    ]

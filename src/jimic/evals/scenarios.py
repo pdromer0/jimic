@@ -188,12 +188,12 @@ class Suite:
         return tuple(scenario for scenario in self.scenarios if scenario.id in ids)
 
 
-def _plain(value: object) -> object:
+def plain(value: object) -> object:
     """The YAML document as plain Python: dicts, lists and strings; dates as ISO text."""
     if isinstance(value, dict):
-        return {str(key): _plain(item) for key, item in value.items()}
+        return {str(key): plain(item) for key, item in value.items()}
     if isinstance(value, list):
-        return [_plain(item) for item in value]
+        return [plain(item) for item in value]
     if isinstance(value, date):  # `datetime` too: it is a `date`
         return value.isoformat()
     if isinstance(value, str):
@@ -213,7 +213,7 @@ def _where(loc: Sequence[str | int], raw: object) -> str:
     return ".".join(parts) or "(fichero)"
 
 
-def _invalid(path: Path, error: ValidationError, raw: object) -> EvalError:
+def invalid_file(path: Path, error: ValidationError, raw: object) -> EvalError:
     lines = [f"  {_where(item['loc'], raw)}: {item['msg']}" for item in error.errors()]
     return EvalError(f"{path} no vale:\n" + "\n".join(lines))
 
@@ -225,12 +225,12 @@ def _as_text(value: object) -> object:
     return str(value)
 
 
-def _fingerprint(document: dict[str, Any]) -> str:
+def fingerprint_of(document: dict[str, Any]) -> str:
     text = json.dumps(document, ensure_ascii=False, sort_keys=True, default=_as_text)
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
-def _local(moment: datetime, timezone: ZoneInfo) -> datetime:
+def local(moment: datetime, timezone: ZoneInfo) -> datetime:
     return moment.replace(tzinfo=timezone) if moment.tzinfo is None else moment
 
 
@@ -249,8 +249,8 @@ def build_state(suite: Suite, scenario: Scenario) -> DayState:
             events=[
                 CalendarEvent(
                     title=event.title,
-                    start=_local(event.start, tz),
-                    end=_local(event.end, tz),
+                    start=local(event.start, tz),
+                    end=local(event.end, tz),
                     all_day=False,
                     organizer_is_me=event.organizer_is_me,
                     declined=event.declined,
@@ -269,7 +269,7 @@ def build_state(suite: Suite, scenario: Scenario) -> DayState:
                     id=task.id,
                     title=task.title,
                     project_id=PROJECT,
-                    due=_local(task.due, tz) if isinstance(task.due, datetime) else task.due,
+                    due=local(task.due, tz) if isinstance(task.due, datetime) else task.due,
                     is_recurring=False,
                     has_subtasks=False,
                     duration_minutes=task.duration_minutes,
@@ -323,10 +323,8 @@ def _resolve(item: ScenarioIn, earlier: dict[str, dict[str, Any]]) -> dict[str, 
     return own
 
 
-def load_suite(path: Path = EVALS_FILE) -> Suite:
-    """Read, validate and resolve `path`. Every scenario builds its state here, and the expected
-    intentions of those that are not pending must be active that day: a typo fails before
-    spending. A pending one may expect what its task has not brought yet."""
+def read_document(path: Path) -> object:
+    """The YAML document of `path` as plain Python; `EvalError` if it cannot be read."""
     try:
         text = path.read_text(encoding="utf-8")
     except FileNotFoundError:
@@ -334,22 +332,34 @@ def load_suite(path: Path = EVALS_FILE) -> Suite:
     except (OSError, UnicodeDecodeError) as error:
         raise EvalError(f"no se puede leer {path} ({type(error).__name__})") from None
     try:
-        raw = _plain(parse_yaml(text))
+        return plain(parse_yaml(text))
     except YamlSyntaxError as error:
         raise EvalError(f"{path}: YAML inválido ({error.kind}, línea {error.line})") from None
+
+
+def template_limits() -> tuple[str, Limits]:
+    """The text of the template of `limites.yaml` and its limits: those of every evaluation."""
+    text = template("limites.yaml")
+    return text, Limits.model_validate(plain(parse_yaml(text)))
+
+
+def load_suite(path: Path = EVALS_FILE) -> Suite:
+    """Read, validate and resolve `path`. Every scenario builds its state here, and the expected
+    intentions of those that are not pending must be active that day: a typo fails before
+    spending. A pending one may expect what its task has not brought yet."""
+    raw = read_document(path)
     try:
         document = EvalFile.model_validate(raw)
         base = document.base
         intentions = Intentions.model_validate(base.intentions)
         apex_base = ApexData.model_validate(base.apex)
     except ValidationError as error:
-        raise _invalid(path, error, raw) from None
+        raise invalid_file(path, error, raw) from None
     try:
         timezone = ZoneInfo(base.timezone)
     except ZoneInfoNotFoundError, ValueError:
         raise EvalError(f"{path}: zona horaria desconocida en base.timezone") from None
-    limits_text = template("limites.yaml")
-    limits = Limits.model_validate(_plain(parse_yaml(limits_text)))
+    limits_text, limits = template_limits()
     seen: set[str] = set()
     earlier: dict[str, dict[str, Any]] = {}
     scenarios = []
@@ -374,7 +384,7 @@ def load_suite(path: Path = EVALS_FILE) -> Suite:
             "unavailable": dict(own.get("unavailable", {})),
         }
         expected = tuple(frozenset(alternative) for alternative in item.expected)
-        fingerprint = _fingerprint(
+        fingerprint = fingerprint_of(
             {
                 "timezone": base.timezone,
                 "intentions": base.intentions,

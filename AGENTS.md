@@ -34,6 +34,7 @@ uv run pre-commit run --all-files   # ruff, pyright, gitleaks (lo preparado) y f
 uv run jimic --version   # CLI
 JIMIC_ENTORNO=dev uv run jimic telegram demo   # plan inventado en el bot de pruebas; lo lanza Pedro
 JIMIC_ENTORNO=dev uv run jimic evaluar latido   # evaluación del latido (API real, unos céntimos; evals/README.md)
+JIMIC_ENTORNO=dev uv run jimic evaluar plan     # evaluación del plan (agente real, ~0,80 $; evals/README.md)
 scripts/n3.sh                # antes del push: pre-commit, gitleaks de la historia y pytest
 scripts/gh.sh …              # GitHub por REST (issues, PR, checks)
 ```

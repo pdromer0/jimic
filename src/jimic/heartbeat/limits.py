@@ -27,11 +27,11 @@ logger = logging.getLogger(__name__)
 URGENT_TYPES = frozenset({"daily_plan", "day_close", "key_task"})
 """They never wait in the group window. A `notice` is the only kind that does (1.7-b)."""
 
-HANDOVER_TASK = {"daily_plan": "1.14", "day_close": "1.16"}
-"""The types the heartbeat hands over to the agent, and the task that will send them."""
-HANDOVER_TYPES = frozenset(HANDOVER_TASK)
+HANDOVER_TYPES = frozenset({"daily_plan", "day_close"})
 """They are not sent: the heartbeat hands them over to the agent (decision 1.8-b), and that counts
-as attended today, not as a message."""
+as attended today, not as a message (the plan counts as one when it goes out, task 1.14)."""
+PENDING_TASK = {"day_close": "1.16"}
+"""The types handed over whose task has not come yet, and that task: they only go to the log."""
 
 SEPARATOR = "\n\n"
 """Between the blocks of one message: a blank line (decision 1.8-d)."""
@@ -311,9 +311,12 @@ class _Pass:
             taken.add(item.intent)
             kind = self.by_id[item.intent].type
             if kind in HANDOVER_TYPES:
-                # What 1.14 and 1.16 will send must fit; handing over spends nothing yet.
+                # What the agent will send must fit. The plan goes out (task 1.14): it takes its
+                # message now, so the rest of this batch sees one fewer. The close does not yet.
                 refusal = self.quota.refusal(is_close=kind == "day_close")
                 self.decide("block" if refusal else "handover", refusal or "ok", item)
+                if refusal is None and kind not in PENDING_TASK:
+                    self.quota = self.quota.after_sending(is_close=False)
             else:
                 (urgent if kind in URGENT_TYPES else notices).append(item)
         released: list[Outgoing] = []

@@ -307,6 +307,7 @@ def test_propose_change_en_una_ejecucion_limpia_se_anota_con_el_origen(conn, tmp
     assert entry == {"action": "change"} | CHANGE | {
         "origin": PEDRO,
         "after_external_content": False,
+        "follow_up": False,
     }
     assert shas(config_dir) == before
     assert conn.execute("SELECT COUNT(*) FROM changes").fetchone() == (0,)
@@ -504,3 +505,108 @@ def test_leer_marca_la_ejecucion_que_lee(conn, config_dir, name, contaminates):
     run = RunState()
     call(conn, config_dir, name, {}, run=run)
     assert run.contaminated is contaminates
+
+
+# --- El plan del día y `follow_up` (tarea 1.14) ----------------------------------------------
+
+
+def creates(count: int, reason: str = "toca hoy") -> list[dict]:
+    return [CREATE | {"title": f"Tarea {n}", "reason": reason} for n in range(count)]
+
+
+def plan_run() -> RunState:
+    return RunState(origin=None, mode="plan")
+
+
+def test_en_el_plan_una_quinta_tarea_nueva_se_rechaza_aunque_llegue_en_otra_llamada(
+    conn, config_dir
+):
+    """Pilla un tope por llamada en vez de por ejecución, o ninguno (decisión 1.14-b)."""
+    run = plan_run()
+    srv = server(conn, config_dir, run=run)
+    _, is_error = asyncio.run(call_tool(srv, "propose_plan", {"items": creates(3)}))
+    assert not is_error
+    text, is_error = asyncio.run(call_tool(srv, "propose_plan", {"items": creates(2)}))
+    assert is_error and "4 tareas nuevas como mucho" in text
+    assert len(run.items) == 3
+    _, is_error = asyncio.run(call_tool(srv, "propose_plan", {"items": creates(1)}))
+    assert not is_error and len(run.items) == 4
+
+
+def test_fuera_del_plan_no_hay_tope_de_cuatro(conn, config_dir):
+    run = RunState(origin="crea cinco", mode="message")
+    _, is_error = call(conn, config_dir, "propose_plan", {"items": creates(5)}, run=run)
+    assert not is_error and len(run.items) == 5
+
+
+def test_en_el_plan_un_motivo_de_mas_de_ocho_palabras_se_rechaza(conn, config_dir):
+    run = plan_run()
+    long = "uno dos tres cuatro cinco seis siete ocho nueve"
+    text, is_error = call(conn, config_dir, "propose_plan", {"items": creates(1, long)}, run=run)
+    assert is_error and "8 palabras" in text and run.items == []
+    eight = "uno dos tres cuatro cinco seis siete ocho"
+    _, is_error = call(conn, config_dir, "propose_plan", {"items": creates(1, eight)}, run=run)
+    assert not is_error
+
+
+def test_en_el_plan_los_campos_se_guardan_y_una_llamada_posterior_los_sustituye(conn, config_dir):
+    run = plan_run()
+    srv = server(conn, config_dir, run=run)
+    first = {
+        "greeting": "Buenos días, máquina",
+        "training_line": "Hoy toca pierna",
+        "left_out": [{"habit": "gimnasio", "line": "Hoy el gimnasio descansa"}],
+    }
+    _, is_error = asyncio.run(call_tool(srv, "propose_plan", first))
+    assert not is_error and run.items == [] and run.proposed_plan
+    asyncio.run(call_tool(srv, "propose_plan", {"greeting": "Otra vez hola"}))
+    assert run.plan == {
+        "greeting": "Otra vez hola",
+        "training_line": "Hoy toca pierna",
+        "left_out": [{"habit": "gimnasio", "line": "Hoy el gimnasio descansa"}],
+    }
+
+
+def test_en_la_conversacion_los_campos_del_plan_se_ignoran_y_hace_falta_un_elemento(
+    conn, config_dir
+):
+    run = RunState(origin="hola")
+    text, is_error = call(conn, config_dir, "propose_plan", {"greeting": "Hola"}, run=run)
+    assert is_error and "items está vacío" in text
+    _, is_error = call(
+        conn, config_dir, "propose_plan", {"items": creates(1), "greeting": "Hola"}, run=run
+    )
+    assert not is_error and run.plan == {}
+
+
+@pytest.mark.parametrize("bad", ["dos\nlíneas", "x" * 121])
+def test_una_linea_del_plan_es_una_sola_y_corta(conn, config_dir, bad):
+    run = plan_run()
+    text, is_error = call(conn, config_dir, "propose_plan", {"greeting": bad}, run=run)
+    assert is_error and run.plan == {}
+
+
+def test_un_icono_es_un_emoji_no_texto(conn, config_dir):
+    run = plan_run()
+    _, is_error = call(
+        conn, config_dir, "propose_plan", {"items": [CREATE | {"icon": "gym"}]}, run=run
+    )
+    assert is_error
+    _, is_error = call(
+        conn, config_dir, "propose_plan", {"items": [CREATE | {"icon": "🏋️"}]}, run=run
+    )
+    assert not is_error and run.items[0]["icon"] == "🏋️"
+
+
+def test_follow_up_queda_en_cada_elemento_de_las_tres_propuestas(conn, tmp_path):
+    """Lo lee la reanudación (1.13-d) en los datos de cada elemento del mensaje."""
+    config_dir = tmp_path / "config"
+    write_personal(config_dir)
+    run = RunState(origin=PEDRO)
+    srv = server(conn, config_dir, run=run)
+    asyncio.run(call_tool(srv, "propose_plan", {"items": creates(2), "follow_up": True}))
+    asyncio.run(call_tool(srv, "propose_change", CHANGE | {"follow_up": True}))
+    asyncio.run(call_tool(srv, "log_idea", {"text": "una idea", "follow_up": True}))
+    asyncio.run(call_tool(srv, "log_idea", {"text": "otra idea"}))
+    assert [entry["follow_up"] for entry in run.items] == [True, True]
+    assert [entry["follow_up"] for entry in run.memory] == [True, True, False]

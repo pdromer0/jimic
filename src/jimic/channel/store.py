@@ -27,6 +27,8 @@ class StoredApproval:
     telegram_message_id: int | None = None
     payload: str = ""
     """The stored JSON as it is: what `save(expected=...)` compares."""
+    created_at: datetime | None = None
+    """Aware, in UTC: when the message was saved, just before it went out."""
 
 
 def create(
@@ -55,7 +57,7 @@ def create(
     return cursor.lastrowid
 
 
-COLUMNS = "id, kind, expires_at, status, payload, telegram_message_id"
+COLUMNS = "id, kind, expires_at, status, payload, telegram_message_id, created_at"
 
 
 def _approval(row: tuple) -> StoredApproval:
@@ -67,6 +69,7 @@ def _approval(row: tuple) -> StoredApproval:
         message=InteractiveMessage.model_validate_json(row[4]),
         telegram_message_id=row[5],
         payload=row[4],
+        created_at=datetime.fromisoformat(row[6]),
     )
 
 

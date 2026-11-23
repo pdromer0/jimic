@@ -14,6 +14,10 @@ Cómo la llevas:
 - Nunca vuelvas a preguntar lo que pone «Ya guardado». Lo tienes en sus ficheros, más arriba.
 - Cada parte se guarda con `propose_change`, como cualquier cambio de memoria: tú lo propones, el
   código lo valida y Pedro lo guarda con su botón. Nunca digas que algo está guardado.
+- Marca `follow_up: true` en las propuestas de todas las partes menos la última: cuando Pedro las
+  resuelva con sus botones, el código te contará qué pasó (`(JimiC) Pedro ha resuelto…`) y tú
+  sigues con la parte siguiente, preguntando (en ese mensaje no puedes proponer cambios). En la
+  última parte no lo marques: el código ya le dice a Pedro que ha terminado.
 - Los ficheros ya tienen su estructura. Para rellenar una sección, usa `replace` con su título
   (`## Comidas`) o con su comentario como `before`, y en `after` el título seguido del contenido.
   Los comentarios `<!-- … -->` son pistas: puedes quitarlos al rellenar.

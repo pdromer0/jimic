@@ -1,8 +1,9 @@
 """The conversation of each local day in `conversations` (decision 1.10-a).
 
 One row per day: the id of the agent's session (`NULL` until its first answer), the last moment
-Pedro wrote (decision 1.10-c) and whether the session has read external content (the calendar or
-the tasks), which the origin rule of task 1.12 needs, and whether the onboarding was suggested
+Pedro wrote (decision 1.10-c; `NULL` while the day has had only runs without his message, the
+plan or a follow-up of task 1.14), whether the session has read external content (the calendar
+or the tasks), which the origin rule of task 1.12 needs, and whether the onboarding was suggested
 that day (decision 1.13-b). No text: ids, moments and two flags.
 """
 
@@ -21,8 +22,18 @@ def note_message(conn: sqlite3.Connection, day: date, moment: datetime) -> None:
     )
 
 
+def ensure_day(conn: sqlite3.Connection, day: date) -> None:
+    """The row of `day`, without saying that Pedro wrote: what a run without his message needs
+    (its session, and the mark of external content that the guard writes before a read)."""
+    conn.execute(
+        "INSERT INTO conversations (day) VALUES (?) ON CONFLICT (day) DO NOTHING",
+        (day.isoformat(),),
+    )
+
+
 def last_message_at(conn: sqlite3.Connection) -> datetime | None:
-    """The last moment Pedro wrote, of any day kept; aware, in UTC."""
+    """The last moment Pedro wrote, of any day kept; aware, in UTC. A row without a message
+    (`NULL`) does not count."""
     (moment,) = conn.execute("SELECT MAX(last_message_at) FROM conversations").fetchone()
     return None if moment is None else datetime.fromisoformat(moment)
 

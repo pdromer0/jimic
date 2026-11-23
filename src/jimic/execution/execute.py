@@ -3,7 +3,8 @@
 `Executor.handlers` are the tap handlers of the two kinds of approval:
 
 - `plan`: a proposal of the agent. `ok` creates or moves, `del` deletes (with every rule of
-  `deletion.py`), `no` and `keep` only say so.
+  `deletion.py`), `no` and `keep` only say so, and `edit` closes a create and asks Pedro how he
+  wants it (decision 1.14-c): his answer goes to the agent like any message.
 - `undo`: what was done at once (decision 1.11-b), with its [Deshacer] until the end of the day.
   Undoing a creation deletes what JimiC created; undoing a move puts back the date it had. Both
   check first that the task is still as JimiC left it: if Pedro changed it, nothing is undone.
@@ -36,6 +37,7 @@ logger = logging.getLogger(__name__)
 CREATED = "✓ creada"
 MOVED = "✓ movida"
 DISCARDED = "⏭ descartada"
+ASK_HOW = "✏️ ¿cómo la quieres?"
 STAYS = "🆗 se queda"
 UNDONE = "↩️ deshecho"
 CHANGED = "ha cambiado: no lo deshago"
@@ -90,6 +92,8 @@ class Executor:
             return DISCARDED if action == "create" else STAYS
         if option == "keep":
             return STAYS
+        if option == "edit" and action == "create":
+            return ASK_HOW
         if action == "delete" and option == "del":
             return await deletion.delete(
                 conn=self._conn,

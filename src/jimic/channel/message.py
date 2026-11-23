@@ -70,13 +70,23 @@ class Option(BaseModel):
 
 class GlobalOption(BaseModel):
     """A button of the global row: it applies the option `option` to everything pending that
-    offers it. An item that does not offer it stays pending (a delete is never included)."""
+    offers it, or `then` to what offers that one instead (task 1.14: [⏭ Nada] keeps a delete
+    with its «Déjala»). An item that offers neither stays pending."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     key: Key
     label: Label
     option: Key
+    then: Key | None = None
+
+    def applies_to(self, item: Item) -> Key | None:
+        """The option this button chooses on `item`, or `None` if it does not touch it."""
+        if item.offers(self.option):
+            return self.option
+        if self.then is not None and item.offers(self.then):
+            return self.then
+        return None
 
 
 class Item(BaseModel):
@@ -121,14 +131,22 @@ class Item(BaseModel):
         return any(option.key == key for option in self.options)
 
 
+type Style = Literal["list", "plan"]
+
+
 class InteractiveMessage(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     header: Text | None = None
-    """In bold, just above the items."""
+    """In bold, just above the items (in the `plan` style, plain and with no blank line)."""
     body: Text | None = None
-    """Plain text before the header: the agent's answer (decision 1.11-a)."""
+    """Plain text before the header: the agent's answer (decision 1.11-a), or the top of the
+    plan of the day (task 1.14)."""
     items: tuple[Item, ...]
+    footer: Text | None = None
+    """Plain text after the items (the plan of the day: what was left out, 🧠 and 🏋️)."""
+    style: Style = "list"
+    """`list` numbers the items `1.`; `plan` numbers them `1️⃣`, as the format of the plan."""
     global_options: tuple[GlobalOption, ...] = ()
     expired: bool = False
     expired_text: Short = EXPIRED_RESULT
@@ -187,18 +205,28 @@ def _escape(text: str) -> str:
     return html.escape(text, quote=False)
 
 
+def number_mark(number: int, style: Style) -> str:
+    """`1.` in a list; the keycap `1️⃣` in the plan of the day."""
+    return f"{number}." if style == "list" else f"{number}\ufe0f\u20e3"
+
+
 def _text(message: InteractiveMessage) -> str:
     lines: list[str] = []
     if message.body is not None:
         lines += [_escape(message.body), ""]
     if message.header is not None:
-        lines += [f"<b>{_escape(message.header)}</b>", ""]
+        if message.style == "plan":
+            lines.append(_escape(message.header))
+        else:
+            lines += [f"<b>{_escape(message.header)}</b>", ""]
     for number, item in enumerate(message.items, start=1):
-        line = f"{number}. {_escape(item.title)}"
+        line = f"{number_mark(number, message.style)} {_escape(item.title)}"
         status = item.result or (RUNNING_TEXT if item.running else item.note)
         if status is not None:
             line += f" — {_escape(status)}"
         lines.append(line)
+    if message.footer is not None:
+        lines += ["", _escape(message.footer)]
     return "\n".join(lines)
 
 
@@ -217,7 +245,7 @@ def _keyboard(message: InteractiveMessage, approval_id: int) -> tuple[tuple[Butt
     global_row = tuple(
         Button(option.label, f"{approval_id}:{GLOBAL_TARGET}:{option.key}")
         for option in message.global_options
-        if any(item.pending and item.offers(option.option) for item in message.items)
+        if any(item.pending and option.applies_to(item) for item in message.items)
     )
     if global_row:
         rows.append(global_row)
@@ -302,7 +330,8 @@ def targets(message: InteractiveMessage, tap: Tap) -> list[tuple[int, str]]:
     """The pending items a tap touches, as `(index from 0, option key)`.
 
     An item tap touches that item if it is pending and offers the option. A global tap touches
-    every pending item that offers the option the global button applies. Anything else, none.
+    every pending item the global button applies to, with the option it chooses there.
+    Anything else, none.
     """
     if message.expired:
         return []
@@ -314,11 +343,12 @@ def targets(message: InteractiveMessage, tap: Tap) -> list[tuple[int, str]]:
     chosen = next((o for o in message.global_options if o.key == tap.option), None)
     if chosen is None:
         return []
-    return [
-        (index, chosen.option)
-        for index, item in enumerate(message.items)
-        if item.pending and item.offers(chosen.option)
-    ]
+    touched = []
+    for index, item in enumerate(message.items):
+        option = chosen.applies_to(item) if item.pending else None
+        if option is not None:
+            touched.append((index, option))
+    return touched
 
 
 def resolve(message: InteractiveMessage, outcomes: Mapping[int, Outcome]) -> InteractiveMessage:

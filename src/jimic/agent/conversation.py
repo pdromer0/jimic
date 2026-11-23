@@ -36,7 +36,7 @@ from jimic.agent.guard import guard_hooks
 from jimic.agent.memory_context import memory_block, stem
 from jimic.agent.onboarding_context import onboarding_block
 from jimic.agent.options import build_options
-from jimic.agent.tools import RunState, ToolContext, build_server
+from jimic.agent.tools import RunMode, RunState, ToolContext, build_server
 from jimic.clock import Clock
 from jimic.config import Settings
 from jimic.heartbeat.decide import status_kind
@@ -59,6 +59,9 @@ CAPPED_TEXT = (
     "Esto se me ha hecho largo y he parado para no gastar de más. ¿Me lo pides más concreto?"
 )
 FAILED_TEXT = "Se me ha atascado algo por dentro y no he podido contestarte. Prueba en un rato."
+DAILY_CAP = "agent:daily_cap"
+CODE_MARK = "(JimiC)"
+"""What goes after the time of a message the code writes, not Pedro (task 1.14)."""
 WEEKDAYS = ("lun", "mar", "mié", "jue", "vie", "sáb", "dom")
 STUCK = ("agent:process:", "agent:error:")
 """The failures after which today's session is forgotten when it was resumed."""
@@ -180,6 +183,9 @@ class Turn:
 
     text: str
     run: RunState | None = None
+    code: str = "ok"
+    """How the run ended: `ok`, `agent:daily_cap` (the SDK was not called) or the code of its
+    failure (`agent:api:503`, `agent:max_turns`...)."""
 
 
 def api_notice_detail(status: int | None) -> str:
@@ -227,28 +233,72 @@ class Conversation:
         """The answer to `text`, which Pedro wrote just now."""
         return (await self.respond(text)).text
 
-    async def respond(self, text: str) -> Turn:
-        """The turn for `text`, which Pedro wrote just now."""
+    async def respond(self, text: str, code_line: str | None = None) -> Turn:
+        """The turn for `text`, which Pedro wrote just now. `code_line` goes before it, as a
+        line of the code (`[lun 07/01 10:15] (JimiC) …`): what he tapped (decision 1.14-h). It
+        is not his: the origin is `text` alone."""
         received = self._now()
         conversations.note_message(self._conn, received.date(), received)
         async with self._lock:
             try:
-                return await self._turn(text, received)
+                return await self._turn(text, received, code_line)
             except Exception as error:
                 logger.error("agent turn failed (%s)", type(error).__name__)
-                return Turn(FAILED_TEXT)
+                return Turn(FAILED_TEXT, code=f"error:{type(error).__name__}")
 
-    async def _turn(self, text: str, received: datetime) -> Turn:
+    def _capped(self, day: date) -> bool:
+        """Today's spend has reached `daily_cap_usd`: the SDK is not called."""
+        if usage.spent_on(self._conn, day) < self._active_limits.budget.daily_cap_usd:
+            return False
+        logger.info("agent: daily_cap")
+        system_notices.check_budget(self._conn, self._active_limits.budget, self._now())
+        return True
+
+    async def _turn(self, text: str, received: datetime, code_line: str | None) -> Turn:
         day = received.date()
-        if usage.spent_on(self._conn, day) >= self._active_limits.budget.daily_cap_usd:
-            logger.info("agent: daily_cap")
-            system_notices.check_budget(self._conn, self._active_limits.budget, self._now())
-            return Turn(DAILY_CAP_TEXT)
+        if self._capped(day):
+            return Turn(DAILY_CAP_TEXT, code=DAILY_CAP)
+        prompt = f"{stamp(received)} {text}"
+        if code_line is not None:
+            prompt = f"{stamp(received)} {CODE_MARK} {code_line}\n{prompt}"
+        return await self._execute(prompt, RunState(origin=text), day)
+
+    async def run_note(
+        self, note: str, mode: RunMode, unless_written_after: datetime | None = None
+    ) -> Turn | None:
+        """A run without a message of Pedro (task 1.14): the plan the heartbeat hands over, or
+        the follow-up after his taps (1.13-c). It resumes today's session with `note`, written
+        by the code as `[jue 10/01 07:45] (JimiC) …`, waits for the lock like any message and
+        spends from the same budget, but it is not «Pedro conversa» (no `note_message`) and it
+        has no origin: no memory proposals, and nothing runs at once.
+
+        With `unless_written_after`, it does not run (`None`) if Pedro wrote after that moment:
+        his message already moved the conversation on. Checked inside the lock."""
+        async with self._lock:
+            try:
+                if unless_written_after is not None:
+                    last = conversations.last_message_at(self._conn)
+                    if last is not None and last > unless_written_after:
+                        logger.info("agent: %s skipped (pedro_wrote)", mode)
+                        return None
+                now = self._now()
+                day = now.date()
+                if self._capped(day):
+                    return Turn(DAILY_CAP_TEXT, code=DAILY_CAP)
+                conversations.ensure_day(self._conn, day)
+                run = RunState(origin=None, mode=mode)
+                return await self._execute(f"{stamp(now)} {CODE_MARK} {note}", run, day)
+            except Exception as error:
+                logger.error("agent %s failed (%s)", mode, type(error).__name__)
+                return Turn(FAILED_TEXT, code=f"error:{type(error).__name__}")
+
+    async def _execute(self, prompt: str, run: RunState, day: date) -> Turn:
+        """One run of the agent in the session of `day` (its row exists), with `run` as its
+        state; the caller holds the lock."""
         agent_dir = self._paths.agent_dir
         agent_dir.mkdir(mode=0o700, exist_ok=True)
         session = conversations.session_of(self._conn, day)
         limits = self._active_limits
-        run = RunState(origin=text)
         memory = memory_block(self._paths.config_dir)
         if memory.clipped:
             detail = ",".join(stem(name) for name in memory.clipped)
@@ -271,10 +321,10 @@ class Conversation:
             guard_hooks(limits, self._conn, day, run),
             with_onboarding(memory.text, self._paths.config_dir),
         )
-        outcome = await run_once(self._run_agent, f"{stamp(received)} {text}", options)
+        outcome = await run_once(self._run_agent, prompt, options)
         self._bookkeeping(day, outcome, resumed=session is not None)
         if outcome.code != "ok":
-            return Turn(self._answer(outcome))
+            return Turn(self._answer(outcome), code=outcome.code)
         run.close()
         return Turn(self._answer(outcome), run)
 

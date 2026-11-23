@@ -14,11 +14,13 @@ from zoneinfo import ZoneInfo
 import pytest
 from conftest import VALID_ENV, FixedClock, write_env
 from heartbeat_data import FakeMessages, intentions, limits
+from pydantic import JsonValue
 from todoist_data import FakeTodoistApi
 
 import jimic.cli
 import jimic.service
 from jimic.channel.bot import ChannelError
+from jimic.channel.message import Item, Option
 from jimic.config import load_settings
 from jimic.heartbeat.decide import ModelApi
 from jimic.logs import LOG_FILE
@@ -355,9 +357,10 @@ class FakeRuntimeChannel:
     async def send_text(self, text: str) -> int:
         raise AssertionError("the runtime test sends nothing")
 
-    def wired(self, on_text, handlers):
+    def wired(self, on_text, handlers, on_closed):
         self.on_text = on_text
         self.handlers = handlers
+        self.on_closed = on_closed
         return self
 
     async def sweep(self) -> None:
@@ -387,8 +390,8 @@ def runtime_with(conn, events, fail_start=False):
         conn,
         intentions(),
         limits(),
-        channel_factory=lambda settings, conn, clock, on_text, handlers: channel.wired(  # pyright: ignore[reportArgumentType] - a double of the channel
-            on_text, handlers
+        channel_factory=lambda settings, conn, clock, on_text, handlers, closed: channel.wired(  # pyright: ignore[reportArgumentType] - a double of the channel
+            on_text, handlers, closed
         ),
         model_factory=lambda settings: ModelApi(FakeMessages().create, close_model),
         todoist_api=todoist,
@@ -426,8 +429,23 @@ def test_el_runtime_programa_el_latido_alineado_y_la_purga_y_para_en_orden(tmp_p
     # comandos (1.12); nunca al agente solo.
     assert runtime.assistant is not None and runtime.executor is not None
     assert channel.on_text == runtime.assistant.reply
-    assert runtime.executor.handlers.items() <= channel.handlers.items()
+    # Tarea 1.14: el toque que cierra va a la reanudación, y el plan del latido, al runner.
+    assert channel.on_closed == runtime.assistant.follow_up
+    assert runtime.plan is not None and runtime.heartbeat is not None
+    assert (
+        runtime.heartbeat._on_handover == runtime.plan.handover
+    )  # lo que se prueba es la conexión
+    assert channel.handlers["undo"] == runtime.executor.handlers["undo"]
     assert set(channel.handlers) == {"plan", "undo", "memory", "memory_view", "undo_list"}
+    # Decisión 1.14-h: el [✏️] del canal pasa por el asistente, que lo recuerda.
+    create: dict[str, JsonValue] = {
+        "action": "create",
+        "title": "Tarea inventada",
+        "due": "2026-11-19",
+    }
+    item = Item(title="Tarea inventada", options=(Option(key="edit", label="✏️"),), data=create)
+    asyncio.run(channel.handlers["plan"](item, "edit", 1))
+    assert runtime.assistant._edits.take(runtime.assistant._today()) is not None
 
 
 def test_si_el_canal_no_arranca_el_runtime_cierra_el_modelo_y_las_fuentes(tmp_path):

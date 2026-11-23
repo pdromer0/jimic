@@ -2,8 +2,10 @@
 
 `Runtime.start` opens the sources, the client of the model, the conversation with the agent, the
 executor of what Pedro approves, the memory (its buttons, `/memoria` and `/deshacer`, task 1.12),
-the onboarding (`/puesta_en_marcha`, task 1.13) and the Telegram channel (Pedro's text goes to the
-assistant, the taps to their handlers), all on one live configuration of the YAML files. Then it
+the onboarding (`/puesta_en_marcha`, task 1.13), the Telegram channel (Pedro's text goes to the
+assistant, the taps to their handlers, and a tap that closes a proposal may go on with the
+conversation, 1.13-c) and the plan of the day (task 1.14: the hook of the
+heartbeat for a `daily_plan`), all on one live configuration of the YAML files. Then it
 sweeps what expired while the service was down and schedules the heartbeat every 15 minutes (from
 the next quarter of an hour), the sweep of expired approvals every day at 00:01 (1.11-c) and the
 purge once a day: the database and the files of the agent older than 7 days. `Runtime.stop` undoes
@@ -22,7 +24,7 @@ from functools import partial
 
 from jimic.agent.conversation import Conversation
 from jimic.agent.transcripts import purge_agent_files
-from jimic.channel.bot import TelegramChannel, TextHandler, build_channel
+from jimic.channel.bot import ClosedHandler, TelegramChannel, TextHandler, build_channel
 from jimic.channel.taps import TapHandler
 from jimic.clock import Clock
 from jimic.config import Settings
@@ -38,6 +40,7 @@ from jimic.memory.live import LiveConfig
 from jimic.memory.retention import purge
 from jimic.memory.schemas import Intentions, Limits
 from jimic.paths import Paths
+from jimic.plan.runner import DailyPlanRunner
 from jimic.tools.todoist import TodoistApi
 
 logger = logging.getLogger(__name__)
@@ -51,7 +54,8 @@ expired."""
 
 
 type ChannelFactory = Callable[
-    [Settings, sqlite3.Connection, Clock, TextHandler, Mapping[str, TapHandler]], TelegramChannel
+    [Settings, sqlite3.Connection, Clock, TextHandler, Mapping[str, TapHandler], ClosedHandler],
+    TelegramChannel,
 ]
 type ModelFactory = Callable[[Settings], ModelApi]
 
@@ -62,8 +66,11 @@ def default_channel(
     clock: Clock,
     on_text: TextHandler,
     handlers: Mapping[str, TapHandler],
+    on_closed: ClosedHandler,
 ) -> TelegramChannel:
-    return build_channel(settings, conn, clock, handlers=handlers, on_text=on_text)
+    return build_channel(
+        settings, conn, clock, handlers=handlers, on_text=on_text, on_closed=on_closed
+    )
 
 
 class Runtime:
@@ -97,6 +104,7 @@ class Runtime:
         self.conversation: Conversation | None = None
         self.assistant: Assistant | None = None
         self.executor: Executor | None = None
+        self.plan: DailyPlanRunner | None = None
 
     async def start(self) -> None:
         """Raises what the channel raises (`ChannelError`), with everything opened closed."""
@@ -150,9 +158,27 @@ class Runtime:
                 commands=commands,
                 config_dir=self._paths.config_dir,
             )
-            handlers = executor.handlers | {MEMORY_KIND: memory.memory} | commands.handlers
+            handlers = (
+                assistant.track(executor.handlers | {MEMORY_KIND: memory.memory})
+                | commands.handlers
+            )
             channel = self._channel_factory(
-                self._settings, self._conn, self._clock, assistant.reply, handlers
+                self._settings,
+                self._conn,
+                self._clock,
+                assistant.reply,
+                handlers,
+                assistant.follow_up,
+            )
+            plan = DailyPlanRunner(
+                conversation=conversation,
+                sources=sources,
+                config=self.config,
+                conn=self._conn,
+                clock=self._clock,
+                timezone=self._settings.timezone,
+                config_dir=self._paths.config_dir,
+                sender=channel,
             )
             heartbeat = Heartbeat(
                 clock=self._clock,
@@ -165,6 +191,7 @@ class Runtime:
                     model.create, self._settings.heartbeat_model, self._intentions, self.config
                 ),
                 sender=channel,
+                on_handover=plan.handover,
                 config=self.config,
             )
             await channel.start()
@@ -182,6 +209,7 @@ class Runtime:
             self.conversation = conversation
             self.assistant = assistant
             self.executor = executor
+            self.plan = plan
         except BaseException:
             await stack.aclose()
             raise

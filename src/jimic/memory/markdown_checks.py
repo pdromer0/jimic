@@ -127,20 +127,30 @@ def check_objectives(text: str) -> list[Problem]:
     return problems
 
 
+def _table_lines(text: str, start: int) -> list[tuple[int, str]]:
+    """The lines of tables of the section that starts at line `start`, separators included."""
+    lines = []
+    for number, line in _lines(text):
+        if number <= start:
+            continue
+        heading = HEADING.fullmatch(line)
+        if heading and len(heading[1]) <= 2:
+            break
+        if TABLE_ROW.fullmatch(line):
+            lines.append((number, line))
+    return lines
+
+
 def check_preferences(text: str) -> list[Problem]:
     starts = [number for number, title in _sections(text) if title == ICONS_SECTION]
     if not starts:
         return [Problem(None, f"falta la sección «{ICONS_SECTION}»")]
     problems = [Problem(n, f"la sección «{ICONS_SECTION}» está repetida") for n in starts[1:]]
-    rows = []
-    for number, line in _lines(text):
-        if number <= starts[0]:
-            continue
-        heading = HEADING.fullmatch(line)
-        if heading and len(heading[1]) <= 2:
-            break
-        if TABLE_ROW.fullmatch(line) and not SEPARATOR_ROW.fullmatch(line):
-            rows.append((number, line))
+    rows = [
+        (number, line)
+        for number, line in _table_lines(text, starts[0])
+        if not SEPARATOR_ROW.fullmatch(line)
+    ]
     if not rows:
         problems.append(Problem(starts[0], f"la sección «{ICONS_SECTION}» no tiene tabla"))
     for number, line in rows:
@@ -150,3 +160,26 @@ def check_preferences(text: str) -> list[Problem]:
         elif not all(cell.strip() for cell in cells):
             problems.append(Problem(number, "la fila de iconos tiene una celda vacía"))
     return problems
+
+
+def icon_rows(text: str) -> list[tuple[str, str]]:
+    """The rows of the table of `## Iconos` as `(task, icon)`, stripped (task 1.14): what the
+    plan of the day paints «Tu día» with. The header (a row followed by a separator) and the rows
+    without two non-empty cells are skipped; only the first section counts."""
+    starts = [number for number, title in _sections(text) if title == ICONS_SECTION]
+    if not starts:
+        return []
+    lines = _table_lines(text, starts[0])
+    rows = []
+    for index, (_, line) in enumerate(lines):
+        if SEPARATOR_ROW.fullmatch(line):
+            continue
+        if index + 1 < len(lines) and SEPARATOR_ROW.fullmatch(lines[index + 1][1]):
+            continue  # the header
+        cells = [
+            cell.strip()
+            for cell in UNESCAPED_PIPE.split(line.strip().removeprefix("|").removesuffix("|"))
+        ]
+        if len(cells) == 2 and all(cells):
+            rows.append((cells[0], cells[1]))
+    return rows

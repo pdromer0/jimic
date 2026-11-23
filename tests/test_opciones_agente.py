@@ -165,3 +165,14 @@ def test_la_guarda_impide_arrancar_el_motor_en_un_test_rapido(conn, tmp_path):
     transport = SubprocessCLITransport(prompt="x", options=options(conn, tmp_path))
     with pytest.raises(AssertionError, match="motor del agente"):
         asyncio.run(transport.connect())
+
+
+def test_el_prompt_lleva_las_reglas_del_plan_acotadas_al_plan(conn):
+    """Tarea 1.14: las reglas del plan van tras las de siempre y solo valen cuando el código pide
+    el plan (ajuste de Pedro), para que no cambien una conversación normal."""
+    text = prompt_text()
+    general, _, plan = text.partition("## El plan del día")
+    assert "Nunca anuncies" in general and plan
+    assert plan.lstrip().startswith("Esto solo vale cuando el código te pide el plan del día")
+    for rule in ("4 tareas nuevas", "left_out", "manda el calendario", "solo lectura"):
+        assert rule in plan

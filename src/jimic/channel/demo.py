@@ -1,21 +1,22 @@
 """`jimic telegram demo`: an invented proposal in the test bot, to see the buttons on the phone.
 
 Only with `ENTORNO=dev`: the demo refuses before it reads the `.env` or builds anything. It
-sends five messages, as the assistant would: a proposal with a create, a move and a delete under
-an answer, with the global row `[✅ Créalo todo] [⏭ Nada]`; what was done at once with its
-[Deshacer] (task 1.11); a step of the onboarding, the meals of the routine with [Guardar] (task
-1.13); a change of memory with [Guardar] [Cambiar] [No] and an idea with [📝 Apuntar]; and a list
-of `/deshacer` (task 1.12). The taps edit the messages and touch nothing
-in Todoist or in the files: the handlers only say what would have happened. A text from Pedro
-gets the fixed phrase. It is a process that does not end (stop it with Ctrl+C): **Pedro launches
-it, never the agent**.
+sends six messages, as the assistant would: the plan of the day as the code paints it, with
+`[n ✅] [n ✏️] [n ⏭]` and `[✅ Créalo todo] [⏭ Hoy sin plan]` (task 1.14); a proposal with a
+create, a move and a delete under an answer, with the global row `[✅ Créalo todo] [⏭ Nada]`;
+what was done at once with its [Deshacer] (task 1.11); a step of the onboarding, the meals of the
+routine with [Guardar] (task 1.13); a change of memory with [Guardar] [Cambiar] [No] and an idea
+with [📝 Apuntar]; and a list of `/deshacer` (task 1.12). The taps edit the messages and touch
+nothing in Todoist or in the files: the handlers only say what would have happened. A text from
+Pedro gets the fixed phrase. It is a process that does not end (stop it with Ctrl+C): **Pedro
+launches it, never the agent**.
 """
 
 import asyncio
 import logging
 import sqlite3
 from collections.abc import Mapping
-from datetime import date, timedelta
+from datetime import date, datetime, time, timedelta
 from typing import Any
 
 from jimic.channel.bot import TelegramChannel, build_channel
@@ -27,7 +28,11 @@ from jimic.execution.commands import UNDO, UNDO_HEADER, UNDO_LIST_KIND
 from jimic.execution.memory_message import MEMORY_KIND, memory_message
 from jimic.execution.plan_message import PLAN_KIND, UNDO_KIND, plan_message, undo_message
 from jimic.paths import Paths, resolve_paths
+from jimic.plan.day import day_view
+from jimic.plan.message import PlanContent, paint
 from jimic.service import ChannelFactory, serve_until_signal
+from jimic.tools.calendar import CalendarDay, CalendarEvent
+from jimic.tools.todoist import TaskList, TodoistTask
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +43,7 @@ DAY = date(2030, 1, 7)
 ANSWER = "Te propongo meter el gimnasio, mover el webinar y quitar un duplicado (inventado)."
 RESULTS = {
     ("create", "ok"): "✓ creada",
+    ("create", "edit"): "✏️ ¿cómo la quieres?",
     ("create", "no"): "⏭ descartada",
     ("move", "ok"): "✓ movida",
     ("move", "no"): "🆗 se queda",
@@ -76,6 +82,82 @@ ENTRIES: list[dict[str, Any]] = [
         "snapshot": _snapshot("Andar 30 min", "2030-01-06"),
     },
 ]
+
+
+PLAN_ENTRIES: list[dict[str, Any]] = [
+    {
+        "action": "create",
+        "title": "Gimnasio",
+        "due": "2030-01-07T12:00",
+        "duration_minutes": 75,
+        "icon": "🏋️",
+        "reason": "toca empuje",
+    },
+    {
+        "action": "create",
+        "title": "Estiramientos",
+        "due": "2030-01-07T21:30",
+        "duration_minutes": 15,
+        "icon": "🧘",
+        "reason": "hábito de la noche",
+    },
+    {
+        "action": "move",
+        "task_id": "demo-1",
+        "due": "2030-01-07T09:50",
+        "icon": "⚠️",
+        "reason": "manda el calendario",
+        "snapshot": _snapshot("Webinar", "2030-01-07T10:00:00+01:00"),
+    },
+    {
+        "action": "delete",
+        "task_id": "demo-2",
+        "reason": "duplica «Paseo 30 min» de hoy",
+        "snapshot": _snapshot("Andar 30 min", "2030-01-06"),
+    },
+]
+PLAN_TABLE = {"comida": "🍽️", "trabajo en el proyecto": "🤖"}
+
+
+def demo_plan_message(settings: Settings) -> InteractiveMessage:
+    """The plan of the day of an invented Monday at 7:45, painted by the code (task 1.14)."""
+    now = datetime.combine(DAY, time(7, 45), tzinfo=settings.timezone)
+    calendar = CalendarDay(
+        available=True,
+        events=[
+            CalendarEvent(
+                title="Trabajo en el proyecto",
+                start=now.replace(hour=15, minute=30),
+                end=now.replace(hour=19, minute=0),
+                all_day=False,
+                organizer_is_me=True,
+                declined=False,
+            )
+        ],
+    )
+    tasks = TaskList(
+        available=True,
+        tasks=[
+            TodoistTask(
+                id="demo-3",
+                title="Comida",
+                project_id="demo",
+                due=now.replace(hour=14, minute=0),
+                is_recurring=False,
+                has_subtasks=False,
+                duration_minutes=60,
+            )
+        ],
+    )
+    content = PlanContent(
+        greeting="Lunes de empuje, ¿listo? (inventado)",
+        entries=PLAN_ENTRIES,
+        learned="🧠 Desde ayer he aprendido: preferencias.md · cambiado (inventado)",
+        training="Empuje · fuerza: 75 minutos a mediodía (inventado)",
+    )
+    plan = paint(content, day_view(calendar, tasks, now, late=False), False, now, PLAN_TABLE)
+    assert isinstance(plan, InteractiveMessage)
+    return plan
 
 
 QUIET = 'quiet_hours: {from: "23:00", to: "07:00"}'
@@ -120,9 +202,9 @@ UNDO_ITEMS = (
 
 
 def demo_messages(settings: Settings) -> list[tuple[str, InteractiveMessage]]:
-    """The invented proposal, the invented [Deshacer], a step of the onboarding with [Guardar]
-    (task 1.13), a change of memory with [Guardar] and a list of `/deshacer` (task 1.12):
-    nothing of them is real."""
+    """The invented plan of the day (task 1.14), the invented proposal, the invented [Deshacer],
+    a step of the onboarding with [Guardar] (task 1.13), a change of memory with [Guardar] and a
+    list of `/deshacer` (task 1.12): nothing of them is real."""
     proposal = plan_message(ENTRIES, DAY, settings.timezone).model_copy(update={"body": ANSWER})
     undo = undo_message("➕ 🧘 Estiramientos · hoy 21:30", {"action": "create", "task_id": "x"})
     undo = undo.model_copy(update={"body": "Apuntado (inventado)."})
@@ -130,6 +212,7 @@ def demo_messages(settings: Settings) -> list[tuple[str, InteractiveMessage]]:
     memory = memory_message(MEMORY_ENTRIES).model_copy(update={"body": MEMORY_ANSWER})
     undo_list = InteractiveMessage(header=UNDO_HEADER, items=UNDO_ITEMS)
     return [
+        (PLAN_KIND, demo_plan_message(settings)),
         (PLAN_KIND, proposal),
         (UNDO_KIND, undo),
         (MEMORY_KIND, onboarding),

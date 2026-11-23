@@ -381,23 +381,28 @@ pregunta y los enlazados con el estado de su app.
 - **Flujo:**
   1. El código monta el estado del día: hora, rutina, calendario de hoy, tareas de hoy y vencidas
      en Todoist, entreno previsto en APEX y avisos de hoy. Haiku decide hablar y anota el motivo.
-  2. Sonnet arma la propuesta: respeta los eventos del calendario, incluye los hábitos recurrentes
-     de Todoist, pone el entreno a una hora viable y ordena los pendientes según la prioridad de
-     las metas de área, con un tope de tareas para no sobrecargar el día.
-  3. Telegram, en un solo mensaje: «Tu día» en vertical con iconos y su origen, las propuestas
-     numeradas (hábitos prioritarios ausentes, ajustes por incoherencias entre fuentes, borrados
-     de duplicados) y una fila de botones por elemento, [✅] [✏️] [⏭], más la fila global
-     [Créalo todo] [Hoy sin plan] (decisiones 58 a 61 y 63; formato en
+  2. El agente, en la conversación del día y sin origen (decisión 121), arma la propuesta:
+     respeta los eventos del calendario, incluye los hábitos recurrentes de Todoist, pone el
+     entreno a una hora viable y ordena los pendientes según la prioridad de las metas de área,
+     con un tope de cuatro tareas nuevas para no sobrecargar el día. Aporta solo su criterio con
+     `propose_plan`; el mensaje lo pinta el código (decisión 122). Si el agente no puede, sale el
+     plan mínimo, sin modelo (decisión 125).
+  3. Telegram, en un solo mensaje de 25 líneas como mucho: «Tu día» en vertical con iconos y su
+     origen, las propuestas numeradas (hábitos prioritarios ausentes, ajustes por incoherencias
+     entre fuentes, borrados de duplicados) y una fila de botones por elemento, [✅] [✏️] [⏭],
+     más la fila global [Créalo todo] [Hoy sin plan] (decisiones 58 a 61, 63, 123 y 127; formato en
      [specs/hito-1.md](specs/hito-1.md#plan-del-día-cu-01-con-h1-4-a-h1-7-h1-9-a-h1-11)). Un
      mensaje de Pedro vale lo mismo que los botones.
-  4. [✏️] abre una conversación (CU-04) hasta una propuesta nueva. [⏭] en una tarea clave queda
+  4. [✏️] cierra el elemento y pregunta «¿cómo la quieres?»: la respuesta de Pedro sigue la
+     conversación (CU-04) hasta una propuesta nueva (decisión 123). [⏭] en una tarea clave queda
      registrado y ese día no insiste.
   5. [✅] o [Créalo todo]: el código crea las tareas en Todoist con hora y duración, sin duplicar
      las que ya existían; los borrados, solo con su propio botón (decisiones 55 y 56). El plan
      gratuito de Todoist no guarda la duración: el código la escribe también en la descripción
      (`Duración: 75 min`) y el lector la interpreta de ahí (anexo B, contrato del 19-nov-2026).
   6. El plan confirmado se guarda: lo usan el cierre del día (CU-14) y el objetivo medible «plan
-     antes de las 9:00».
+     antes de las 9:00». Llega con el cierre (tarea 1.16): la 1.14 envía el plan y lo anota en
+     `notices`, pero no escribe `day_plans` ni `plan_items`.
 - **Si ya hay tareas para hoy:** propone completar el día, no crearlo de cero.
 - **Plan tardío:** pasada la ventana, solo el resto del día; lo pasado sin marcar se menciona en
   una línea y se ve en el cierre (decisión 61).
@@ -682,7 +687,8 @@ Los nodos morados son los únicos que razonan; todo lo demás es código determi
 6. **Guardia**: libre, con botón o bloqueado (6.5).
 7. **Salida**: Telegram; se registran la decisión con su motivo y el aviso.
 8. **Pulsaciones**: un botón con acción predefinida («A las 11:00») lo resuelve el código, sin
-   modelo; uno que necesita razonar («Cámbialo») pasa al agente.
+   modelo; uno que necesita razonar («Cámbialo») pasa al agente: el siguiente mensaje de Pedro le
+   llega con una línea del código que dice qué tocó (decisión 130).
 
 Si la API falla en el paso 4, cada intención se cumple a su hora por defecto (RF-04).
 
@@ -707,10 +713,12 @@ Martes, 9:45. El entreno estaba previsto a las 8:30; a las 10:00 hay una reunió
 8. Pedro pulsa [A las 11:00]: el código mueve la tarea en Todoist y confirma, sin modelo.
 9. 10:00: reunión en curso; la primera pasada corta el ciclo sin llamar al modelo.
 
-**Con el agente** (plan del día): Haiku decide «plan del día» y pasa el turno al agente, que llama a
-`read_calendar`, `read_tasks` y `read_apex_today` y devuelve el plan con `propose_plan`. El código
-lo guarda como aprobación y enseña la lista exacta; cuando Pedro pulsa [Créalo], el código crea las
-tareas, sin modelo (decisión 55).
+**Con el agente** (plan del día): Haiku decide «plan del día» y el latido lo pasa al agente en la
+conversación del día, con una nota del código (decisión 121). El agente llama a `read_calendar`,
+`read_tasks` y `read_apex_today` y devuelve su criterio con `propose_plan`. El código lee «Tu día»,
+pinta el plan con la plantilla de la especificación, lo guarda como aprobación y lo envía (decisión
+122); cuando Pedro pulsa [Créalo todo], el código crea las tareas, sin modelo (decisión 55). Si el
+agente no puede, sale el plan mínimo, sin modelo (decisión 125).
 
 ### 6.5 La guardia
 
@@ -742,7 +750,7 @@ Herramientas del agente (decisión 55):
 | `read_calendar` | Eventos de un día de los calendarios que Pedro tiene visibles: título, horas, si es de todo el día (`all_day`), si Pedro organiza y si lo rechazó (`declined`); sin descripción (decisión 34) | Libre; contamina | API de Google Calendar, solo lectura |
 | `read_tasks` | Tareas de hoy, vencidas y por proyecto | Libre; contamina (los títulos pueden venir de terceros) | API de Todoist |
 | `read_apex_today` | Entreno previsto y hecho; objetivos de APEX; resumen de los biométricos (decisión 73) | Libre | El lector de APEX (decisiones 17, 18 y 29) |
-| `propose_plan` | Propone crear, mover y borrar tareas, cada una con su motivo | Libre (solo propone) | — |
+| `propose_plan` | Propone crear, mover y borrar tareas, cada una con su motivo; en el plan del día, también el saludo, los hábitos que quedan fuera, la línea del entreno y los iconos, con los que el código pinta el mensaje (decisión 122). Con `follow_up`, la conversación sigue tras los toques (decisión 119), como en `propose_change` y `log_idea` | Libre (solo propone) | — |
 | `propose_change` | Propone un cambio de memoria (`file`, `operation`, `before`, `after`, `reason`); el código lo valida y lo escribe tras [Guardar] | Libre (solo propone); solo en una ejecución limpia (decisión 102) | Ficheros de memoria |
 | `log_idea` | Propone apuntar una idea en `ideas.md`; la escribe el código tras [📝 Apuntar] | Libre (solo propone); solo en una ejecución limpia (decisión 103) | Fichero propio |
 
@@ -1425,7 +1433,7 @@ modelo solo el título, las horas y si Pedro es el organizador, sin descripción
 | --- | --- |
 | Tests deterministas | Cada regla de los límites, la guardia y la validación tiene su test, y su «versión incorrecta» lo pone en rojo |
 | Evaluación del latido | ≥ 90 % de aciertos en hablar sí o no y en el conjunto de intenciones (sobre todas las pasadas de 3 por escenario), y ≤ 5 % de «habla cuando no debía», contado solo sobre las pasadas sin error de los escenarios cuyo único resultado aceptable es callar (decisión 109) |
-| Evaluación del agente | 100 % en las comprobaciones automáticas; Pedro da por buenos al menos 8 de 10 planes |
+| Evaluación del agente | 100 % en las comprobaciones automáticas; Pedro da por buenos al menos 8 de 10 planes. En el plan, dos tipos de comprobaciones (decisión 131): las reglas duras, al 100 %; las de criterio, con este umbral y revisadas en el cierre del hito con los 10 planes de Pedro |
 | Inyección | 100 %: cero acciones y cero cambios de memoria, garantizado por el código |
 | Regresión | Al cambiar el prompt, el modelo o el SDK, ninguna evaluación baja más de 5 puntos. En el latido, el informe compara con el anterior escenario a escenario, solo sobre los que no han cambiado (decisión 111) |
 
@@ -1554,6 +1562,20 @@ cuando haya casos reales de sobra y si Pedro lo considera necesario; exige evalu
 | 115 | **Lo que falla del latido se arregla en la 1.15, con la evaluación como criterio de aceptación** (1.9-i): ≥ 90 % y ≤ 5 %, comparada escenario a escenario con la medida de referencia de la 1.9. Allí van `grace`, el «hecho» (l16), el e02 y, en el prompt, el hueco del cierre (l27 a l29), el plan tardío (l05 y l06), el aviso que se quedó sin salir (l25) y la insistencia de la tarde (l22 y l23). El prompt explica reglas, no escenarios; el chat escribe en las notas de la 1.15 un conjunto de reserva que el agente no ve hasta después del ajuste | Ajustar el prompt a los mismos escenarios que lo miden lo sobreajusta; el conjunto de reserva lo destapa. Pedro, en la revisión del PR de la 1.9 | — |
 | 116 | **Con una tarea clave sin hacer y avisos pendientes, a las 19:00 se insiste aunque haya acabado la jornada** (1.9-j): l22 y l23 esperan la insistencia junto a los avisos | La tarea clave es la que se persigue (CU-02); la jornada no la cierra. Pedro, en la revisión del PR de la 1.9 | — |
 | 117 | **l26 admite callar** (1.9-k): con un solo mensaje libre a las 19:00, gastarlo en regar y reciclar deja sin hueco la basura de las 21:00, y callar lo guarda para ella. Las tres respuestas (los dos avisos, solo reciclar, callar) son aciertos | Es un dilema sin respuesta única; exigir una mediría el gusto del escenario, no el juicio. Pedro, en la revisión del PR de la 1.9 | — |
+| 118 | **Tras los toques, el código vuelve a llamar al agente con el resultado y este sigue** (1.13-c): reanuda la sesión del día con una nota que escribe él (`[jue 10/01 12:05] (JimiC) Pedro ha resuelto tu propuesta: …`, con lo que pasó con cada elemento). Esa ejecución no tiene origen: `propose_change` y `log_idea` se rechazan (102) y nada se ejecuta al momento aunque el agente marque `requested_by_pedro` (condición 0 de la 97). No cuenta como «Pedro conversa», gasta del presupuesto como cualquier ejecución y usa el candado de la conversación. Si falla o topa con el tope diario, no se envía nada | En el uso real de la puesta en marcha, tras [Guardar] el agente no sabía que se había guardado y la entrevista se cortaba hasta que Pedro escribía. Es el patrón de aprobación humana: se aprueba, se ejecuta y el resultado vuelve al agente. Notas del chat de la 1.14 (23-nov-2026) | [0005](decisiones/0005-la-guardia.md) |
+| 119 | **La reanudación sale solo cuando el mensaje queda resuelto del todo y si el agente lo pidió al proponer** (1.13-d): las tres herramientas de propuesta ganan `follow_up` (por defecto, no). Sin filas pendientes (un elemento que falla sigue pendiente) y con algún elemento con `follow_up`, una vez por mensaje: solo el toque que cierra la aprobación la provoca. [✏️ Cambiar] y [✏️ Cámbialo] no la provocan (ya preguntan «¿cómo lo quieres?»), y si Pedro escribió después de enviarse el mensaje, tampoco. El prompt de la puesta en marcha pide marcarlo en todas las partes menos la última | Seguir la conversación sin cortar a Pedro a mitad de sus toques ni contestar dos veces. Notas del chat de la 1.14 | [0005](decisiones/0005-la-guardia.md) |
+| 120 | **1.13-c y 1.13-d se hacen dentro de la 1.14** (1.13-e), en su rama, sin ADR propio: no cambian la regla de origen, que ya decía que fuera de una conversación no hay cambios de memoria (102) | Comparten la ejecución sin origen con el plan. Notas del chat de la 1.14 | — |
+| 121 | **El plan corre en la conversación del día, con un mensaje que escribe el código** (1.14-a): el enganche `on_handover` de `daily_plan` lanza el agente en la sesión de hoy (89) con `(JimiC) Toca proponer el plan del día…`, que dice si es plan tardío. Sin origen, como la 118; no es «Pedro conversa»; espera al candado si Pedro está en mitad de un turno. La fila del día en `conversations` admite no tener mensaje de Pedro (`last_message_at` NULL, migración 0007): sin ella la guardia no podría marcar las lecturas. El plan enviado cuenta en el cupo (una fila en `notices`) | Una respuesta de Pedro al plan («pon el gimnasio a las 18») la entiende el agente con el plan en su contexto. Cierra el pendiente de la 1.12 («el plan del latido ejecuta sin origen»). Notas del chat de la 1.14; la migración y el cupo, del plan de la tarea | [0005](decisiones/0005-la-guardia.md) |
+| 122 | **El código pinta el plan entero con la plantilla de la especificación; el agente aporta solo el criterio** (1.14-b): `propose_plan` gana campos opcionales del plan (`greeting`, `left_out`, `training_line`, `day_icons` y el `icon` de cada elemento) y en el plan admite cero elementos, cuatro tareas nuevas como mucho y motivos de ocho palabras; en la conversación esos campos se ignoran. El código lee Todoist y el calendario para «📅 Tu día» (por hora, lo de todo el día arriba, sin rechazados; iconos de `preferencias.md`, luego del agente, luego `▫️`), numera con 1️⃣, pone los botones y garantiza 25 líneas como mucho («… y N más»). En el plan tardío, solo el resto del día y «N cosas de esta mañana sin marcar». El texto libre del agente no sale en el plan. Las reglas del plan, en `agent/plan.md`, acotadas al plan | Una herramienta nueva exigiría su línea en `tool_levels` (zona protegida) y en los ficheros reales quedaría bloqueada por defecto. La lista que se aprueba la escribe el código (H1-1). Notas del chat de la 1.14; acotar `plan.md` al plan, de Pedro en la revisión del plan | — |
+| 123 | **Los botones de la especificación, el mismo componente en el plan y en la conversación** (1.14-c): crear lleva `[n ✅] [n ✏️] [n ⏭]`; [✏️ Cámbialo] cierra el elemento y pregunta «¿cómo la quieres?», como el [✏️ Cambiar] de la memoria, y la respuesta de Pedro va al agente. Mover y borrar, como antes. Fila global del plan: `[✅ Créalo todo] [⏭ Hoy sin plan]`, que es [⏭ Nada] con otra etiqueta; [Créalo todo] sigue sin incluir borrados | El formato de CU-01. Notas del chat de la 1.14 | [0005](decisiones/0005-la-guardia.md) |
+| 124 | **«🧠 He aprendido algo» es una línea informativa del código** (1.14-d): sale si desde el plan anterior (el último enviado; sin ninguno, desde las 00:00 de ayer) se guardó algún cambio de memoria, sin los deshechos, las reversiones ni `ideas.md`: `🧠 Desde ayer he aprendido: preferencias.md · cambiado (lo ves y lo deshaces con /memoria)`; con varios, cuántos y en qué ficheros. «Desde ayer» solo si el plan anterior fue ayer; si no, su fecha. Sin modelo; nunca propone nada | Que Pedro vea lo que JimiC aprendió y pueda deshacerlo. Notas del chat de la 1.14; la fecha y `ideas.md`, del plan de la tarea | — |
+| 125 | **Plan mínimo sin modelo** (1.14-e) si el agente no puede (la API, los topes de la ejecución, `daily_cap_usd`) o no propone plan: la misma plantilla con un saludo fijo que avisa de que va a medio gas, «Tu día» con lo que se pueda leer, los hábitos de prioridad **alta** que faltan hoy como propuestas para hoy sin hora (por el nombre de su tarea de Todoist) y la línea del entreno de APEX. Sin borrados, incoherencias ni hábitos de media; con Todoist caído, sin propuestas. Con Haiku caído, el latido pasa el plan al agente a su hora por defecto (cierra el pendiente de la 85) | Que el plan salga aunque falle el modelo, sin inventar criterio. Notas del chat de la 1.14 | — |
+| 126 | **`jimic evaluar plan`** (1.14-f), con el armazón de la 1.9: `evals/plan.yaml`, solo `dev`, 3 pasadas, informe `.json` y `.md` con el plan pintado de cada pasada y comparación escenario a escenario. El agente de verdad (prompt, herramientas, guardia y opciones de 9.2) con fuentes fijas y ficheros personales inventados en una carpeta temporal (también `CLAUDE_CONFIG_DIR`); escenarios de varios turnos en la misma sesión. Cada escenario declara sus comprobaciones de un catálogo fijo de funciones de los datos de la propuesta; nota = pasadas que cumplen todas; umbral 100 % | La evaluación del agente de 13.3. «Duplicado por intención» no es función de los datos: lo cubren escenarios con `deletes_exactly` y `no_create_title`. Notas del chat de la 1.14 | — |
+| 127 | **La fila global de descartar cierra también los borrados, como «Déjala»**: [⏭ Hoy sin plan] y [⏭ Nada] aplican `no` y, a un borrado, `keep`, así que el mensaje se cierra (y puede reanudarse, 119) sin borrar nada. Ninguna fila global aplica `del` | Un borrado pendiente dejaba el mensaje abierto para siempre tras «hoy sin plan». Pedro, en la revisión del plan de la 1.14 | [0005](decisiones/0005-la-guardia.md) |
+| 128 | **Como mucho un reintento del plan con el agente al día**: si el envío del plan falla, el enganche lanza y el plan no queda atendido; el segundo intento vuelve a lanzar el agente, el tercero manda el plan mínimo y los siguientes solo escriben el log y lo dan por atendido. El contador vive en el servicio | Que un fallo persistente de Telegram no lance el agente en cada latido. Pedro, en la revisión del plan de la 1.14 | — |
+| 129 | **Reglas generales del plan para atrasadas, huecos y prioridad media** (1.14-g), en `agent/plan.md`: solo se propone borrar la atrasada que duplica una de hoy; la que no duplica nada (la tarea de un hábito) se propone mover a hoy, a un hueco libre, o a mañana si Pedro dijo hoy que no, y nunca se crea otra igual ni se borra. Antes de proponer una hora, de su inicio a su fin (con la duración) no pisa ningún evento ni tarea con hora; un hábito de prioridad alta que no cabe va a `left_out`. «Si queda sitio» (prioridad media) es un hueco libre para su duración en su `moment` del día; el momento del día solo limita a la media: la alta va en cualquier hueco libre de hoy | La primera medida de `jimic evaluar plan` (90 %) falló en atrasadas que duplican por intención y en solapes. Reglas generales, nunca escenario a escenario. Pedro, en la revisión del PR de la 1.14 | — |
+| 130 | **El contexto de [✏️] para el agente** (1.14-h): el código recuerda el último [✏️ Cámbialo] o [✏️ Cambiar] que tocó Pedro (el elemento, con la etiqueta de la nota de la reanudación) y su siguiente mensaje de ese día que llega al agente lleva delante una línea del código, `(JimiC) Pedro tocó ✏️ en: …`. Se usa una vez y se olvida, también al cambiar de día o si otro toque cierra ese mensaje; vive en la memoria del servicio. La línea no cuenta como origen: `RunState.origin` es solo el texto de Pedro | Que el agente sepa a qué responde «mejor a las 19» sin que el código interprete nada. Pedro, en la revisión del PR de la 1.14 | [0005](decisiones/0005-la-guardia.md) |
+| 131 | **Las comprobaciones de `jimic evaluar plan` son de dos tipos** (1.14-i). **Reglas duras**, al 100 %: `no_overlap`, `no_duplicates`, `max_new`, `due_from_now`, `no_item_on`, `deletes_exactly`, `no_delete`, `no_deletes`, `no_move`, `no_create_title`, `creates`, `left_out_or_absent`, `no_memory_proposal`, `learned_line`, `training_line`, y `moves` cuando es una incoherencia con el calendario (H1-9). **Criterio**, con el umbral de 13.3 y revisadas en la 1.17 con los 10 planes de Pedro: `includes_habit`, `includes_or_left_out`, y `moves` de una atrasada que no duplica (traerla a hoy o a mañana). El informe aún da una sola nota; las dos por separado (cada comprobación del catálogo con su tipo), en la 1.16 | Una regla dura dice algo que el plan nunca debe hacer (pisar, duplicar, borrar de más); una de criterio, una elección en la que un plan distinto también puede ser bueno, y la juzga mejor Pedro con planes reales. En la tercera medida de la 1.14, las duras al 100 % y el único fallo, de criterio. Pedro, en la revisión del PR de la 1.14 | — |
 
 ### Correspondencia con las decisiones candidatas de la referencia
 

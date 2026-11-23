@@ -181,6 +181,43 @@ def test_un_toque_edita_el_mismo_mensaje_y_no_envia_otro(make_channel, request_d
     assert keyboard_rows(params) == [["2 Sí", "2 No"], ["Créalo todo"]]
 
 
+def test_el_toque_que_cierra_el_mensaje_sigue_la_conversacion_despues_de_editar(
+    make_channel, request_double
+):
+    """Decisión 1.13-c: `on_closed` corre solo con el toque que cierra (el segundo), y su
+    respuesta sale después de editar el mensaje y de responder al toque."""
+    closed: list[int] = []
+
+    async def on_closed(approval_id: int) -> str:
+        closed.append(approval_id)
+        return "Seguimos 👍"
+
+    channel, application = make_channel(on_closed=on_closed)
+    approval_id = send_and_drive(channel, application)
+    request_double.calls.clear()
+    drive(application, callback_update(f"{approval_id}:1:y", message_id=77))
+    assert closed == []
+    drive(application, callback_update(f"{approval_id}:2:n", message_id=77, update_id=2))
+    assert closed == [approval_id]
+    assert request_double.methods()[-3:] == [
+        "editMessageText",
+        "answerCallbackQuery",
+        "sendMessage",
+    ]
+    assert request_double.params("sendMessage")[-1]["text"] == "Seguimos 👍"
+
+
+def test_si_la_reanudacion_no_tiene_nada_que_decir_no_se_envia_nada(make_channel, request_double):
+    async def on_closed(approval_id: int) -> None:
+        return None
+
+    channel, application = make_channel(on_closed=on_closed)
+    approval_id = send_and_drive(channel, application)
+    request_double.calls.clear()
+    drive(application, callback_update(f"{approval_id}:g:all", message_id=77))
+    assert "sendMessage" not in request_double.methods()
+
+
 def test_un_toque_de_otro_chat_se_ignora_sin_responder_ni_editar(
     make_channel, request_double, caplog
 ):
@@ -465,6 +502,81 @@ def test_un_texto_que_telegram_rechaza_levanta_send_error(make_channel, request_
     async def before():
         with pytest.raises(SendError):
             await channel.send_text("hola")
+
+    drive(application, before=before)
+
+
+def test_el_plan_sin_botones_va_escapado_y_devuelve_el_id_del_mensaje(
+    make_channel, request_double, conn
+):
+    """Tarea 1.14: el plan del día escrito por el código va en HTML con todo escapado (lleva
+    títulos de terceros) y sin aprobación cuando no tiene propuestas."""
+    channel, application = make_channel()
+    ids: list[int] = []
+
+    async def before():
+        ids.append(await channel.deliver("plan", "¡Pedro! <b>Hola</b> & más", EXPIRES))
+
+    drive(application, before=before)
+    assert ids == [10] and channel.last_sent == 10
+    (params,) = request_double.params("sendMessage")
+    assert params["text"] == "¡Pedro! &lt;b&gt;Hola&lt;/b&gt; &amp; más"
+    assert params["parse_mode"] == "HTML"
+    assert conn.execute("SELECT COUNT(*) FROM approvals").fetchone() == (0,)
+
+
+def test_el_plan_con_botones_se_guarda_como_aprobacion_y_devuelve_el_id(
+    make_channel, request_double, conn
+):
+    channel, application = make_channel()
+    ids: list[int] = []
+
+    async def before():
+        ids.append(await channel.deliver("demo", make_message(), EXPIRES))
+
+    drive(application, before=before)
+    assert ids == [10]
+    assert conn.execute("SELECT kind, telegram_message_id FROM approvals").fetchall() == [
+        ("demo", 10)
+    ]
+
+
+def test_el_plan_sale_despues_de_la_respuesta_que_esta_en_camino(make_channel, request_double):
+    """Hallazgo de la revisión propia: el plan que llega mientras sale la respuesta a Pedro
+    espera a que salga entera, así el último mensaje enviado es el plan."""
+    thinking, started = asyncio.Event(), asyncio.Event()
+
+    async def on_text(incoming: Incoming) -> str:
+        started.set()
+        await thinking.wait()
+        return "respuesta a Pedro"
+
+    channel, application = make_channel(on_text=on_text, typing_every=0.001)
+
+    async def scenario():
+        async with application:
+            await application.process_update(to_update(text_update("hola"), application.bot))
+            await started.wait()
+            plan = asyncio.create_task(channel.deliver("plan", "¡Pedro! el plan", EXPIRES))
+            for _ in range(20):
+                await asyncio.sleep(0)
+            assert not plan.done()
+            thinking.set()
+            await plan
+            await settle()
+
+    asyncio.run(scenario())
+    texts = [params["text"] for params in request_double.params("sendMessage")]
+    assert texts == ["respuesta a Pedro", "¡Pedro! el plan"]
+
+
+def test_un_plan_que_telegram_rechaza_levanta_send_error(make_channel, request_double):
+    channel, application = make_channel()
+    request_double.failures["sendMessage"] = (403, "Forbidden: bot was blocked by the user")
+
+    async def before():
+        with pytest.raises(SendError):
+            await channel.deliver("plan", "hola", EXPIRES)
 
     drive(application, before=before)
 

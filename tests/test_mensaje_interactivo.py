@@ -399,3 +399,58 @@ def test_release_nunca_lanza_si_el_titulo_nuevo_no_cabe_se_queda_el_anterior():
         True,
     )
     ensure_fits(released)
+
+
+# --- El plan del día (tarea 1.14) -------------------------------------------------------------
+
+KEEP = Option(key="k", label="Déjala", approves=False)
+DELETE = Option(key="d", label="Bórrala")
+
+
+def test_el_estilo_del_plan_numera_con_teclas_y_pone_el_pie_tras_los_elementos():
+    """Pilla el estilo del plan con `1.`, con la cabecera en negrita y una línea en blanco (no es
+    el formato de la especificación) o sin el pie."""
+    message = InteractiveMessage(
+        body="¡Pedro! Hola & buenos días",
+        header="🧩 Te propongo añadir",
+        items=(Item(title="🏋️ Gimnasio <pierna>", options=(YES, NO)),),
+        footer="🏋️ Hoy toca pierna",
+        style="plan",
+    )
+    assert render(message, 1).text.split("\n") == [
+        "¡Pedro! Hola &amp; buenos días",
+        "",
+        "🧩 Te propongo añadir",
+        "1️⃣ 🏋️ Gimnasio &lt;pierna&gt;",
+        "",
+        "🏋️ Hoy toca pierna",
+    ]
+
+
+def test_la_global_con_then_aplica_la_otra_opcion_a_quien_no_ofrece_la_primera():
+    """Pilla un `then` que no se aplica (el borrado se quedaría con su fila) o que se aplica a
+    quien sí ofrece la primera."""
+    message = InteractiveMessage(
+        header="Plan",
+        items=(
+            Item(title="Crear", options=(YES, NO)),
+            Item(title="Borrar", options=(DELETE, KEEP)),
+        ),
+        global_options=(
+            GlobalOption(key="all", label="Todo", option="y"),
+            GlobalOption(key="none", label="Nada", option="n", then="k"),
+        ),
+    )
+    assert targets(message, Tap(1, None, "none")) == [(0, "n"), (1, "k")]
+    assert targets(message, Tap(1, None, "all")) == [(0, "y")]
+    only_delete = message.model_copy(update={"items": message.items[1:]})
+    assert labels(render(only_delete, 1))[-1] == ["Nada"]
+
+
+def test_un_payload_guardado_antes_de_then_sigue_cargando():
+    """Las aprobaciones de hoy guardadas antes de esta versión no llevan `then`."""
+    saved = make_message().model_dump(mode="json", exclude={"global_options": {0: {"then"}}})
+    for option in saved["global_options"]:
+        option.pop("then", None)
+    loaded = InteractiveMessage.model_validate(saved)
+    assert loaded.global_options[1].then is None
