@@ -13,7 +13,7 @@ from functools import partial
 
 import pytest
 from agent_data import FakeAgent, ToolCall, result_message
-from conftest import VALID_ENV
+from conftest import VALID_ENV, FixedClock
 from execution_data import AssistantWorld
 from heartbeat_data import (
     MADRID,
@@ -630,3 +630,29 @@ def test_un_fallo_al_leer_el_progreso_no_impide_guardar_ni_apuntar(conn, tmp_pat
 
     assert "- Sin emojis" in (w.config_dir / "preferencias.md").read_text(encoding="utf-8")
     assert "una idea inventada" in (w.config_dir / "ideas.md").read_text(encoding="utf-8")
+
+
+class MidnightAgent(FakeAgent):
+    """An agent that finishes after midnight: it moves the clock while it runs."""
+
+    def __init__(self, *scripts, finish_at: str):
+        super().__init__(*scripts)
+        self.finish_at = finish_at
+        self.clock: FixedClock | None = None
+
+    def __call__(self, prompt, options):
+        assert self.clock is not None
+        self.clock.moment = madrid(self.finish_at)
+        return super().__call__(prompt, options)
+
+
+def test_la_sugerencia_es_del_dia_en_que_pedro_escribio_aunque_el_agente_acabe_despues(
+    conn, tmp_path
+):
+    """Hallazgo de la revisión propia: Pedro escribe a las 23:59:50 por primera vez ese día y el
+    agente acaba pasada la medianoche; la sugerencia es de su día, no del siguiente."""
+    agent = MidnightAgent([result_message("Respuesta 1")], finish_at="2030-01-08T00:00:20")
+    w = OnboardingWorld(conn, tmp_path, agent)
+    agent.clock = w.clock
+    w.clock.moment = madrid("2030-01-07T23:59:50")
+    assert w.say("Hola") == f"Respuesta 1\n\n{SUGGESTION}"

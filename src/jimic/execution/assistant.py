@@ -166,12 +166,13 @@ class Assistant:
         return True
 
     async def _converse(self, message: str, suggest: bool) -> str | Reply:
+        day = self._today()  # the day Pedro wrote, not the one the agent finished
         turn = await self._conversation.respond(message)
-        return await self._reply(turn, suggest)
+        return await self._reply(turn, suggest, day)
 
-    async def _reply(self, turn: Turn, suggest: bool) -> str | Reply:
-        """The answer of a turn, with what its run proposed under it."""
-        day = self._today()
+    async def _reply(self, turn: Turn, suggest: bool, day: date) -> str | Reply:
+        """The answer of a turn, with what its run proposed under it; `day` is the one the
+        onboarding suggestion is claimed for."""
         run = turn.run
         if run is None:
             return turn.text
@@ -236,6 +237,7 @@ class Assistant:
         note = follow_up_note(approval.kind, approval.message)
         if note is None:
             return None
+        day = self._today()
         turn = await self._conversation.run_note(
             note, "follow_up", unless_written_after=approval.created_at
         )
@@ -245,7 +247,7 @@ class Assistant:
             logger.info("follow-up not sent (%s)", turn.code)
             return None
         logger.info("follow-up of approval %d", approval_id)
-        return await self._reply(turn, suggest=False)
+        return await self._reply(turn, False, day)
 
     async def _confirm(self, found: confirm.Target) -> Reply:
         """The «sí»: a tap of `del` on that item, by the code; it counts as Pedro writing."""
