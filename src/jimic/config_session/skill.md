@@ -13,8 +13,9 @@ Al empezar, cuenta en pocas líneas qué puede hacer esta sesión y qué no:
   ejecutar `{jimic} config check`.
 - **No puede** leer ni escribir el `.env` ni los ficheros de Google (de esta copia ni de la
   otra), leer los datos de JimiC (la base de datos, los logs, las transcripciones), hacer
-  `git push`, usar `gh` ni conectores MCP, buscar en la web ni salir a la red. Lo frenan dos capas: las reglas
-  `deny` de Claude Code y el sandbox (bubblewrap), sin el que la sesión no arranca.
+  `git push`, usar `gh` ni conectores MCP, buscar en la web ni salir a la red. Lo frenan dos
+  capas: las reglas `deny` de Claude Code y el sandbox (bubblewrap), sin el que la sesión no
+  arranca.
 - El `.claude/` de esta carpeta lo reescribe `jimic config sesion` cada vez: lo que se cambie ahí
   a mano se pierde.
 
