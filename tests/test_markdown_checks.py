@@ -1,6 +1,12 @@
 """Estructura de rutina, objetivos y preferencias: se comprueba la forma, nunca el contenido."""
 
-from jimic.memory.markdown_checks import check_objectives, check_preferences, check_routine
+from jimic.memory.markdown_checks import (
+    Section,
+    check_objectives,
+    check_preferences,
+    check_routine,
+    outline,
+)
 from jimic.memory.problems import Problem
 
 ROUTINE = """\
@@ -139,3 +145,21 @@ def test_una_fila_de_iconos_con_otras_columnas_o_vacia_se_senala():
         Problem(9, "la fila de iconos no tiene dos columnas"),
         Problem(10, "la fila de iconos tiene una celda vacía"),
     ]
+
+
+def test_outline_parte_por_secciones_de_nivel_2_sin_comentarios_ni_codigo():
+    text = (
+        "# Título\nantes\n\n## Uno\n<!-- pista -->\nlínea\n### Sub\nmás\n"
+        "```\n## No es sección\n```\n## Dos\n"
+    )
+
+    sections = outline(text)
+
+    assert [section.title for section in sections] == [None, None, "Uno", "Dos"]
+    assert [line for _, line in sections[1].body] == ["antes", ""]
+    assert [line for _, line in sections[2].body] == ["línea", "### Sub", "más"]
+    assert sections[3].body == ()
+
+
+def test_outline_de_un_texto_vacio_es_una_seccion_sin_titulo():
+    assert outline("") == [Section(None, None, ())]
