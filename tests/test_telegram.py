@@ -541,6 +541,35 @@ def test_el_plan_con_botones_se_guarda_como_aprobacion_y_devuelve_el_id(
     ]
 
 
+def test_el_plan_sale_despues_de_la_respuesta_que_esta_en_camino(make_channel, request_double):
+    """Hallazgo de la revisión propia: el plan que llega mientras sale la respuesta a Pedro
+    espera a que salga entera, así el último mensaje enviado es el plan."""
+    thinking, started = asyncio.Event(), asyncio.Event()
+
+    async def on_text(incoming: Incoming) -> str:
+        started.set()
+        await thinking.wait()
+        return "respuesta a Pedro"
+
+    channel, application = make_channel(on_text=on_text, typing_every=0.001)
+
+    async def scenario():
+        async with application:
+            await application.process_update(to_update(text_update("hola"), application.bot))
+            await started.wait()
+            plan = asyncio.create_task(channel.deliver("plan", "¡Pedro! el plan", EXPIRES))
+            for _ in range(20):
+                await asyncio.sleep(0)
+            assert not plan.done()
+            thinking.set()
+            await plan
+            await settle()
+
+    asyncio.run(scenario())
+    texts = [params["text"] for params in request_double.params("sendMessage")]
+    assert texts == ["respuesta a Pedro", "¡Pedro! el plan"]
+
+
 def test_un_plan_que_telegram_rechaza_levanta_send_error(make_channel, request_double):
     channel, application = make_channel()
     request_double.failures["sendMessage"] = (403, "Forbidden: bot was blocked by the user")

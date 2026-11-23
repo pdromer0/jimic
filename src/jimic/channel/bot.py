@@ -309,7 +309,14 @@ class TelegramChannel:
     ) -> int:
         """A proactive message the code wrote (the plan of the day, task 1.14): an interactive
         one, saved as an approval of `kind`, or escaped text, in as few messages as fit. Returns
-        the id of the (last) message sent; raises `SendError` if Telegram refuses it."""
+        the id of the (last) message sent; raises `SendError` if Telegram refuses it.
+
+        It goes after the answer that is on its way, if any: the plan never lands before the
+        reply to what Pedro wrote just before, nor in the middle of it (a «sí» after the plan
+        answers the plan)."""
+        previous = self._last_turn
+        if previous is not None and not previous.done():
+            await asyncio.wait([previous])
         if isinstance(content, InteractiveMessage):
             await self.send(kind, content, expires_at)
         else:
