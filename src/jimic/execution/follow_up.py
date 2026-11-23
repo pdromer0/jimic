@@ -21,22 +21,19 @@ It is once per message because only the tap that closes it can trigger it (`TapR
 from typing import Any
 
 from jimic.channel.message import InteractiveMessage, Item
+from jimic.execution.memory_message import EDIT as EDIT_CHANGE
 from jimic.execution.memory_message import MEMORY_KIND, OPERATIONS
+from jimic.execution.plan_message import EDIT as EDIT_CREATE
 from jimic.execution.plan_message import PLAN_KIND
+from jimic.plan.day import clip
 
 FOLLOW_KINDS = frozenset({PLAN_KIND, MEMORY_KIND})
-EDIT = "edit"
-"""The key of [✏️ Cambiar] (memory) and [✏️ Cámbialo] (plan)."""
-MAX_LABEL = 60
+EDITS = frozenset({EDIT_CREATE.key, EDIT_CHANGE.key})
+"""The keys of [✏️ Cámbialo] (plan) and [✏️ Cambiar] (memory), from their options."""
 NOTE = (
     "Pedro ha resuelto tu propuesta con sus botones: {parts}. Sigue la conversación donde la"
     " dejaste; si no hay nada más que decir, contesta muy corto."
 )
-
-
-def _clip(text: str) -> str:
-    line = " ".join(text.split())
-    return line if len(line) <= MAX_LABEL else line[: MAX_LABEL - 1].rstrip() + "…"
 
 
 def item_label(data: dict[str, Any]) -> str:
@@ -44,15 +41,15 @@ def item_label(data: dict[str, Any]) -> str:
     operation, or the idea."""
     action = data.get("action")
     if action == "create":
-        return f"crear «{_clip(str(data['title']))}» ({data['due']})"
+        return f"crear «{clip(str(data['title']))}» ({data['due']})"
     if action == "move":
-        return f"mover «{_clip(str(data['snapshot']['title']))}» a {data['due']}"
+        return f"mover «{clip(str(data['snapshot']['title']))}» a {data['due']}"
     if action == "delete":
-        return f"borrar «{_clip(str(data['snapshot']['title']))}»"
+        return f"borrar «{clip(str(data['snapshot']['title']))}»"
     if action == "change":
         return f"{data['file']} · {OPERATIONS.get(str(data['operation']), data['operation'])}"
     if action == "idea":
-        return f"idea «{_clip(str(data['text']))}»"
+        return f"idea «{clip(str(data['text']))}»"
     return "propuesta"
 
 
@@ -66,6 +63,6 @@ def follow_up_note(kind: str, message: InteractiveMessage) -> str | None:
         return None
     if not any((item.data or {}).get("follow_up") is True for item in message.items):
         return None
-    if any(item.chosen == EDIT for item in message.items):
+    if any(item.chosen in EDITS for item in message.items):
         return None
     return NOTE.format(parts="; ".join(_part(item) for item in message.items))

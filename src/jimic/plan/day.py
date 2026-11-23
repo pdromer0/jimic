@@ -17,7 +17,7 @@ not answer» are not the same.
 """
 
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, time
 from zoneinfo import ZoneInfo
 
 from jimic.clock import local_day_bounds
@@ -39,7 +39,7 @@ def clip(title: str, length: int = MAX_TITLE) -> str:
     return line if len(line) <= length else line[: length - 1].rstrip() + "…"
 
 
-def hour(moment: datetime) -> str:
+def hour(moment: datetime | time) -> str:
     """`9:50`, `14:00`: as the plan and its buttons write a time."""
     return f"{moment.hour}:{moment.minute:02d}"
 

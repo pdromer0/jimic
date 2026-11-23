@@ -33,6 +33,7 @@ from datetime import date, datetime, time, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from jimic.agent.conversation import WEEKDAYS
 from jimic.agent.proposals import due_value
 from jimic.channel.message import InteractiveMessage, fit_titles, render
 from jimic.clock import local_day_bounds, to_db
@@ -53,7 +54,6 @@ MORE_TEXT = "… y {count} más"
 LEARNED_FILES = ("rutina.md", "objetivos.md", "preferencias.md", "intenciones.yaml", "limites.yaml")
 """The memory files whose changes count as learned (not `ideas.md`: an idea is not learning)."""
 SEE_IT = "(lo ves y lo deshaces con /memoria)"
-WEEKDAYS = ("lun", "mar", "mié", "jue", "vie", "sáb", "dom")
 DEFAULT_ICONS = {"create": "▫️", "move": "🔄", "delete": "🗑️"}
 
 
