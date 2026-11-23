@@ -2406,3 +2406,128 @@ sin ella (el de la 9, un `refactor`, no tiene rojo posible).
 
 **Pruebas contra servicios reales:** cuatro ejecuciones del contrato contra la API de Anthropic,
 unos 0,18 $, que no crean nada. Ni Todoist, ni Calendar, ni Telegram: no hay restos que comprobar.
+
+### Tarea 1.9: evaluaciones
+
+**Qué se hizo.** Issue #22, rama `test/h1-evaluaciones`, aprobada a las 11:30 del 23-nov-2026.
+Commits:
+- `feat(evals)`: los escenarios del latido y su corrección (dcd9db4), y `jimic evaluar latido` con
+  su informe (9ae755e);
+- `docs(diseno)`: 13.2, 13.3 y las decisiones 107 a 114 (ef27a11);
+- `fix(evals)`: las tres correcciones de la revisión (7bcd809, b6218d5, 345325f).
+
+Este anexo es el último, `docs(hito-1)`.
+
+**Decisiones de la tarea:** 1.9-a a 1.9-h son las decisiones 107 a 114 del diseño. Sin ADR: todo
+se revierte sin dificultad.
+
+**Decisiones del diff** (lo que el plan interpretaba, aprobado con dos ajustes de Pedro):
+- **Paquetes:** `evals/scenarios.py` (el esquema, `like`, la huella y el estado),
+  `evals/heartbeat.py` (la pasada, el lanzador y la corrección), `evals/report.py` y
+  `evals/command.py`. La CLI solo llama a `command.run`.
+- **El formato:** `expected` es una lista de listas (`[[]]` es callar). `like: <id>` hereda el
+  estado de un escenario anterior, nunca `now`, `expected`, `why` ni `pending`. Un cambio
+  sustituye la lista entera o la sección de APEX.
+- **El día base:** el APEX inventado de la 1.6, trasladado tres días (sincronizado el jueves a las
+  8:15; hoy toca «Cardio suave»). «Hecho» es la tarea ausente de Todoist y, en el gimnasio, un
+  entreno de hoy en APEX. «Enviado» son filas en `notices`, y las de la misma hora, un mensaje.
+- **El cupo de l26 a l29:** l26 y l27 comparten seis mensajes (plan, dos avisos del gimnasio y
+  tres de las ofertas); l28 les añade `regar` y `reciclar` juntos a las 19:00.
+- **l30 y l31** dan la misma petición que l18, y un test lo comprueba: Haiku no ve los avisos del
+  sistema (86) ni la conversación (91).
+- **La corrección** usa las intenciones que deja `judge`; para «habla cuando no debía», «habla» es
+  `Decision.speak`. Cuatro llamadas a la vez, con el cliente del servicio.
+- **La comparación (ajuste de Pedro):** escenario a escenario con el informe más reciente, solo
+  sobre los de mismo id y misma huella (sha256 del escenario resuelto, sin título ni `why`), con
+  `Fraction`. Los nuevos, quitados y cambiados se listan aparte.
+
+**Valores a mano** (código independiente, antes de implementar):
+- 19 escenarios de callar y 20 de hablar: 117 pasadas, 57 de callar. Con 2 fallos de callar,
+  3,51 %; con 3, 5,26 %. El acierto admite 11 fallos (90,60 %); con 12, 89,74 %.
+- El denominador: un escenario de callar que habla 1 de 3 y uno de hablar con 3 de 3 dan 1/3,
+  no 1/6.
+- El cupo: 6 enviados dejan `messages_left` 1 y 7 dejan 0, los dos con el hueco del cierre.
+- Regresión: 95 % → 90 % son 5 puntos justos y no se señala. En `float`,
+  `0.57*100 - 0.52*100` da `4.999999999999993`: por eso las cifras van en `Fraction`.
+- El coste del doble: 0,00032 $ por llamada y 0,03744 $ las 117.
+
+Todos los comprueban los tests.
+
+**Primera medida** (23-nov-2026, 11:42, `jimic-dev`, `claude-haiku-5-5`, 3 pasadas):
+
+| Cifra | Valor | Umbral |
+| --- | --- | --- |
+| Acierto | 79,5 % (93/117) | ≥ 90 % ❌ |
+| Habla cuando no debía | 5,3 % (3/57) | ≤ 5 % ❌ |
+| Saltados | 1 (e02, pendiente de la 1.15) | — |
+| Coste | 0,0376 $ en 117 llamadas (0,00032 $ por llamada) | tope de la tarea: 0,20 $ |
+
+Fallan nueve escenarios. Como dicen las notas, el prompt no se toca en esta tarea: lo decidimos.
+La lectura sale del resumen y del estado de cada escenario. Los motivos de Haiku están en el `.md`
+de Pedro: el agente no puede leer la carpeta de datos.
+- **l16 (0/3), las tres pasadas de «habla cuando no debía»:** con el gimnasio y las ofertas hechos,
+  a las 17:20 insiste con las ofertas. «Hecho» le llega solo como la tarea ausente de Todoist, sin
+  un dato que diga que se completó: **falta de dato**, como `grace`.
+- **l26 y l27 (0/3) y l29 (1/3), el cupo:** con `messages_left` 1 o 0 y el hueco del cierre
+  guardado, calla. Parece leer «quedan pocos, guárdalos» sin entender que el cierre ya tiene su
+  hueco: el prompt explica `close_slot_kept` en una línea.
+- **l22 y l23 (0/3):** a las 19:00 elige `regar` y `reciclar` y deja fuera la insistencia de una
+  tarea clave con su aviso ya enviado.
+- **l25 (0/3):** a las 21:00 manda la basura (y el cierre), pero olvida el `regar` que quedó sin
+  enviar a las 19:00.
+- **l05 (2/3) y l06 (0/3):** sin plan a las 9:00 o a las 11:15, a veces calla; el plan tardío
+  (H1-7) no lo ve como algo que toque.
+- **l07 acertó las 3**: el margen que Haiku no ve (`grace`) no pesó en esta medida.
+
+**Medidas.** La N3, tras la revisión: en verde en 1:03: 1418 tests y 11 de contrato saltados (eran 1367 tras la 1.13); pre-commit 0:11, pytest 0:51 y gitleaks de la historia 0:01. Cargar `evals/latido.yaml` y montar los 40
+estados tarda 0,17 s; la evaluación real, unos minutos con 4 llamadas a la vez.
+
+**Versiones incorrectas** (aplicadas y deshechas con un script; el árbol quedó limpio). Predicción
+antes, observado después:
+
+| # | Versión | Predicción | Observado |
+| --- | --- | --- | --- |
+| 1 | Intenciones como listas (en el orden del fichero) | Rojo «el orden no cuenta»; sigue «un conjunto de más» | **3**: además, los dos tests que tratan lo esperado como conjunto (el del fichero real y el de `like`) |
+| 2 | «Habla cuando no debía» entre todas las pasadas | Rojo el del denominador; siguen los del acierto | **3**: también «sin escenarios de callar no divide entre cero» y el del informe (0/57 pasa a 0/117) |
+| 3 | Lanzar los pendientes | Rojo «el pendiente no se lanza»; siguen los de corrección | **2**: también el del informe (40 escenarios) |
+| 4 | Mirar `ENTORNO` después de leer el `.env` | Rojo «se niega sin leer el `.env`»; sigue «con `dev` arranca» | **2**: también el de la CLI (sin `.env`, el error es otro) |
+| 5 | Ignorar las alternativas | Rojo «una alternativa es acierto»; sigue «un conjunto de menos» | **3**: l10 callando, l26 con solo `reciclar` y el informe (l10 deja de contar) |
+| 6 | Regresión con `>=` | Rojos los de «5 justos»; siguen «más de 5» | **2**, los dos de 5 justos |
+| 7 | Comparar por id, sin la huella | Rojo «uno cambiado no entra»; sigue «uno nuevo no rompe» | **1**, el del nuevo y el cambiado, que comprueba las dos cosas; la segunda ejecución del mismo minuto sigue en verde |
+
+Además, cada corrección de la revisión se comprobó quitando su código: su test nuevo falla sin
+ella.
+
+**Revisión propia** (`/code-review medium`, 9 hallazgos: 3 corregidos y 6 explicados):
+- **Corregidos:**
+  - (1) una excepción que no era de la API hacía caer el `gather` y se perdían las pasadas
+    pagadas. Ahora es una pasada fallida con `unexpected:<Tipo>` (7bcd809);
+  - (4) a los pendientes también se les exigía que lo esperado estuviera activo (b6218d5);
+  - (7) `--pasadas 0` se comprobaba antes que la copia `prod` (345325f).
+- **Explicados:**
+  - (2) un `invalid_decision` con `speak: true` no cuenta como «habla»: es el punto 11 del plan
+    aprobado (lo que cuenta es que salga un mensaje). Va a Pendiente;
+  - (3) tras una ejecución parcial, la siguiente completa compara solo con ella (los demás salen
+    como «nuevos»): es el ajuste de Pedro, el más reciente. Va a Pendiente;
+  - (5) un error de la API cuenta como pasada de callar en el denominador: es 1.9-c al pie de la
+    letra, y los errores salen aparte en pantalla. Va a Pendiente;
+  - (6) `refuse_unless_dev` repite la de la demo: cada una lanza su error con su texto, y
+    compartirla ataría la demo a las evaluaciones por cinco líneas;
+  - (8) el nombre en hora local se desordena en el cambio de hora de octubre: una hora al año,
+    en ejecuciones a mano;
+  - (9) la rama `str` de `_plain` no es redundante: convierte los `ScalarString` de ruamel en `str`.
+
+**Pendiente.**
+- **Decidir con Pedro** qué hacer con la medida bajo el umbral (prompt, datos del estado o
+  esperados). El umbral es para cerrar el hito (1.17), no para fusionar la 1.9.
+- **1.15:** `KeyTask.grace` no lo usa nada: ni el estado del día, ni el bloque fijo, ni los
+  límites (solo `schemas.py`). Si l07 falla en una medida, es falta de dato, no criterio del
+  modelo; el esperado de l07 no cambia. También el e02 («hoy no»).
+- **1.15, con la misma lectura:** «hecho» llega a Haiku solo como una tarea que falta (l16).
+- **1.9-h (ronda de ajustes):** el coste diario real de Haiku con el fragmento de solo lectura
+  sobre `model_usage`, frente a la estimación de la 1.8 y los 30 $/mes.
+- **Si molesta:** los hallazgos 2, 3 y 5, explicados arriba.
+
+**Pruebas contra servicios reales:** una evaluación contra la API de Anthropic con la clave de
+`jimic-dev` (0,0376 $), que no crea nada. Ni Todoist, ni Calendar, ni Telegram: no hay restos
+que comprobar.
