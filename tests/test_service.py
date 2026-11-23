@@ -338,6 +338,15 @@ def test_jimic_run_no_arranca_con_un_modelo_sin_precio(capsys):
     )
 
 
+def test_jimic_run_no_arranca_con_un_agente_sin_precio(capsys):
+    """Su coste sale de sus tokens (fix #51): sin precio, cada ejecución contaría el tope."""
+    write_setup({**VALID_ENV, "MODELO_AGENTE": "modelo-sin-precio"})
+    assert jimic.cli.main(["run"]) == 2
+    assert capsys.readouterr().err == (
+        "jimic: el modelo modelo-sin-precio no tiene precio en jimic.memory.usage\n"
+    )
+
+
 class FakeRuntimeChannel:
     """The channel as the runtime uses it: start, stop, send and schedule, all recorded."""
 

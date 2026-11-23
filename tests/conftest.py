@@ -21,7 +21,7 @@ VALID_ENV = {
     "ENTORNO": "prod",
     "ZONA_HORARIA": "Europe/Madrid",
     "MODELO_LATIDO": "claude-haiku-5-5",
-    "MODELO_AGENTE": "modelo-agente-de-prueba",
+    "MODELO_AGENTE": "claude-sonnet-5-5",
     "CLAVE_ANTHROPIC": "test-clave-anthropic-123",
     "TOKEN_TELEGRAM": "test-token-telegram-456",
     "CHAT_TELEGRAM": "987654321",
