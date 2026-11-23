@@ -2771,6 +2771,8 @@ minutos del disparador del módulo `xdist`.
 - **Ajustes finales** (decisión 1.14-i de Pedro, la 131; solo documentación): las comprobaciones,
   de dos tipos, en este anexo, en `evals/README.md`, en el criterio de aceptación del hito y en 13.3
   del diseño; las tres medidas por tipo, arriba.
+  - N3 de los ajustes finales: en verde en 2:01, 1566 tests (pre-commit 0:12, pytest 1:47 y
+    gitleaks de la historia 0:02).
 - N3 de la ronda: en verde en 2:20, 1566 tests (pre-commit 0:14, pytest 2:05 y gitleaks de la
   historia 0:01). pytest pasa de los 2 minutos: se cumple el disparador del módulo `xdist`.
 
