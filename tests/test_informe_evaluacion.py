@@ -12,7 +12,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 from conftest import FixedClock, write_env
-from evals_data import DEV_ENV, REAL_FILE, ApiFactory, outcome, use_dev
+from evals_data import DEV_ENV, REAL_FILE, ApiFactory, outcome, use_dev, variant
 from heartbeat_data import SECRET_REASON, SECRET_TEXT, FakeMessages, api_down, api_message, picks
 
 import jimic.cli
@@ -26,15 +26,20 @@ MADRID = ZoneInfo("Europe/Madrid")
 START = datetime(2030, 1, 20, 10, 30, tzinfo=MADRID)
 
 
-def evaluate(factory, ids=None, passes=1, clock=None):
+def evaluate(factory, ids=None, passes=1, clock=None, eval_file=REAL_FILE, compare_to=None):
     return command.run(
         os.environ,
         ids,
         passes,
-        eval_file=REAL_FILE,
+        eval_file=eval_file,
         model_api=factory,
         clock=clock or FixedClock(START),
+        compare_to=compare_to,
     )
+
+
+def at(hour: int, minute: int = 0) -> FixedClock:
+    return FixedClock(datetime(2030, 1, 20, hour, minute, tzinfo=MADRID))
 
 
 def reports_dir():
@@ -100,27 +105,32 @@ def test_un_modelo_sin_precio_no_gasta(monkeypatch):
 # --- El informe --------------------------------------------------------------------------------
 
 
-def test_el_informe_tiene_sus_dos_ficheros_y_el_resumen_con_los_saltados(monkeypatch):
+def test_el_informe_tiene_sus_dos_ficheros_y_el_resumen_con_los_saltados(monkeypatch, tmp_path):
     use_dev(monkeypatch)
-    run = evaluate(ApiFactory(), passes=3)
+    pending = '\n  - id: zz1\n    title: futuro\n    now: "19:00"\n    expected: [[]]\n'
+    path = variant(tmp_path, pending + '    pending: "1.99"\n')
+    run = evaluate(ApiFactory(), passes=3, eval_file=path)
     assert run.json_path.name == "latido-20300120-1030.json"
     assert run.md_path.name == "latido-20300120-1030.md"
     document = json.loads(run.json_path.read_text(encoding="utf-8"))
-    assert len(document["scenarios"]) == 39
-    assert document["summary"]["skipped"] == [{"id": "e02", "pending": "1.15-b"}]
-    # El doble siempre calla: aciertan los 19 de callar, l10 y l26 (callar es una de sus
-    # alternativas, 1.9-k), y nadie habla de más.
-    assert (document["summary"]["correct"], document["summary"]["passes"]) == (63, 117)
+    assert (document["version"], document["complete"]) == (2, True)
+    assert len(document["scenarios"]) == 40
+    assert document["summary"]["skipped"] == [{"id": "zz1", "pending": "1.99"}]
+    # El doble siempre calla: aciertan los 20 de callar (con el e02, 1.15-b), l10 y l26 (callar
+    # es una de sus alternativas, 1.9-k), y nadie habla de más.
+    assert (document["summary"]["correct"], document["summary"]["passes"]) == (66, 120)
     assert (document["summary"]["spoke_when_silent"], document["summary"]["silent_passes"]) == (
         0,
-        57,
+        60,
     )
-    assert "Acierto: 53,8 % (63/117) ❌" in run.screen
-    assert "Habla cuando no debía: 0,0 % (0/57) ✅" in run.screen
-    assert "Saltados: 1: e02 (pendiente: 1.15-b)" in run.screen
+    assert document["summary"]["reserve"] is None
+    assert "Acierto: 55,0 % (66/120) ❌" in run.screen
+    assert "Habla cuando no debía: 0,0 % (0/60) ✅" in run.screen
+    assert "Saltados: 1: zz1 (pendiente: 1.99)" in run.screen
+    assert "Reserva" not in run.screen
     assert "l03 (0/3 bien): callar; callar; callar · esperado: {plan_del_dia}" in run.screen
-    assert "Comparación: es el primer informe." in run.screen
-    assert "Coste: 0,03744 $ en 117 llamadas (0,00032 $/llamada)" in run.screen
+    assert "Comparación: no hay un informe completo anterior." in run.screen
+    assert "Coste: 0,03840 $ en 120 llamadas (0,00032 $/llamada)" in run.screen
     assert run.md_path.read_text(encoding="utf-8").startswith("# Evaluación del latido")
 
 
@@ -153,11 +163,93 @@ def test_ningun_log_lleva_el_motivo_ni_los_mensajes(monkeypatch, caplog):
 def test_dos_ejecuciones_en_el_mismo_minuto_no_se_pisan_y_la_segunda_compara(monkeypatch):
     use_dev(monkeypatch)
     first = evaluate(ApiFactory(), ["l01", "l03"])
-    second = evaluate(ApiFactory(), ["l01", "l03"])
+    second = evaluate(ApiFactory(), ["l01", "l03"], compare_to=first.json_path.name)
     assert second.json_path.name == "latido-20300120-1030-2.json"
     assert first.json_path.exists()
     assert "Comparación con latido-20300120-1030.json:" in second.screen
     assert "sobre 2 escenarios comunes" in second.screen
+
+
+# --- Con el último informe completo (1.15-b) ----------------------------------------------------
+
+
+def test_una_ejecucion_parcial_no_es_completa_y_una_entera_si(monkeypatch):
+    use_dev(monkeypatch)
+    partial = evaluate(ApiFactory(), ["l01"], clock=at(9))
+    whole = evaluate(ApiFactory(), clock=at(10))
+    assert json.loads(partial.json_path.read_text(encoding="utf-8"))["complete"] is False
+    assert json.loads(whole.json_path.read_text(encoding="utf-8"))["complete"] is True
+
+
+def test_un_parcial_no_rompe_la_comparacion_de_la_siguiente_completa(monkeypatch):
+    """Versión incorrecta 4: la siguiente completa se compara con la completa de antes, no con
+    el parcial más reciente (la prueba de Pedro en la 1.9)."""
+    use_dev(monkeypatch)
+    evaluate(ApiFactory(), clock=at(9))
+    evaluate(ApiFactory(), ["l03"], clock=at(10))
+    run = evaluate(ApiFactory(), clock=at(11))
+    assert "Comparación con latido-20300120-0900.json:" in run.screen
+    assert "sobre 40 escenarios comunes" in run.screen
+
+
+def test_con_comparar_con_se_compara_con_el_elegido_aunque_sea_parcial(monkeypatch):
+    """Lo que sigue verde con la versión incorrecta 4: el informe elegido a mano manda."""
+    use_dev(monkeypatch)
+    chosen = evaluate(ApiFactory(), ["l01", "l03"], clock=at(9))
+    evaluate(ApiFactory(), clock=at(10))
+    by_name = evaluate(ApiFactory(), clock=at(11), compare_to="latido-20300120-0900.json")
+    by_path = evaluate(ApiFactory(), clock=at(12), compare_to=str(chosen.json_path))
+    for run in (by_name, by_path):
+        assert "Comparación con latido-20300120-0900.json:" in run.screen
+        assert "sobre 2 escenarios comunes" in run.screen
+
+
+def test_un_informe_de_la_version_1_no_cuenta_como_completo(monkeypatch):
+    """Sin el campo no se adivina: la referencia de la 1.15 se elige con `--comparar-con`."""
+    use_dev(monkeypatch)
+    old = evaluate(ApiFactory(), clock=at(9))
+    document = json.loads(old.json_path.read_text(encoding="utf-8"))
+    del document["complete"]
+    old.json_path.write_text(json.dumps(document), encoding="utf-8")
+    run = evaluate(ApiFactory(), ["l01"], clock=at(10))
+    assert "Comparación: no hay un informe completo anterior." in run.screen
+
+
+@pytest.mark.parametrize(
+    ("name", "error"),
+    [("latido-20990101-0000.json", "no existe"), ("roto.json", "no se puede leer")],
+)
+def test_un_comparar_con_que_no_vale_no_gasta(monkeypatch, name, error):
+    use_dev(monkeypatch)
+    reports_dir().mkdir(parents=True)
+    (reports_dir() / "roto.json").write_text('{"scenarios": 3}')
+    factory = ApiFactory()
+    with pytest.raises(EvalError, match=f"--comparar-con: .*{error}"):
+        evaluate(factory, ["l01"], compare_to=name)
+    assert factory.built == 0
+
+
+def test_la_cli_pasa_comparar_con(monkeypatch, capsys):
+    use_dev(monkeypatch)
+    assert jimic.cli.main(["evaluar", "latido", "--comparar-con", "no-esta.json"]) == 2
+    assert "--comparar-con: no existe" in capsys.readouterr().err
+
+
+def test_la_reserva_se_mide_tambien_aparte(monkeypatch, tmp_path):
+    """El conjunto de reserva (paso 2 de la 1.15-b): en las cifras de todo y en una línea suya."""
+    use_dev(monkeypatch)
+    reserve = (
+        '\n  - id: r01\n    title: reserva\n    now: "07:05"\n    expected: [[]]\n'
+        "    origin: reserva\n"
+        '\n  - id: r02\n    title: reserva\n    now: "07:45"\n    expected: [[plan_del_dia]]\n'
+        "    origin: reserva\n"
+    )
+    run = evaluate(ApiFactory(), ["l01", "r01", "r02"], eval_file=variant(tmp_path, reserve))
+    assert "Acierto: 66,7 % (2/3)" in run.screen
+    assert "Reserva, aparte (2 escenarios):\n  Acierto: 50,0 % (1/2) ❌" in run.screen
+    document = json.loads(run.json_path.read_text(encoding="utf-8"))
+    assert document["summary"]["reserve"]["correct"] == 1
+    assert [item["origin"] for item in document["scenarios"]] == [None, "reserva", "reserva"]
 
 
 def test_el_anterior_es_el_mas_reciente_por_su_nombre(tmp_path):
@@ -169,9 +261,19 @@ def test_el_anterior_es_el_mas_reciente_por_su_nombre(tmp_path):
 
 
 def test_un_informe_anterior_ilegible_no_rompe_la_evaluacion(monkeypatch):
+    """Uno que no se puede leer no puede decir que es completo: se salta (1.15-b)."""
+    use_dev(monkeypatch)
+    evaluate(ApiFactory(), clock=at(9))
+    (reports_dir() / "latido-20300120-0950.json").write_text("{no es json")
+    run = evaluate(ApiFactory(), ["l01"], clock=at(10))
+    assert "Comparación con latido-20300120-0900.json:" in run.screen
+
+
+def test_un_completo_que_no_se_deja_leer_entero_lo_dice(monkeypatch):
+    """Completo pero sin sus pasadas: la comparación lo dice y la evaluación sigue."""
     use_dev(monkeypatch)
     reports_dir().mkdir(parents=True)
-    (reports_dir() / "latido-20300101-0000.json").write_text('{"scenarios": 3}')
+    (reports_dir() / "latido-20300101-0000.json").write_text('{"complete": true}')
     run = evaluate(ApiFactory(), ["l01"])
     assert "latido-20300101-0000.json no se puede leer" in run.screen
 

@@ -3,7 +3,7 @@
 The file has a **base day** and the scenarios. Each scenario says only what changes over the base
 day, or over an earlier scenario (`like`): a change replaces the whole list (events, tasks, sent
 messages, what waits) or the whole section of APEX (`meta`, `plan`, `entrenamientos`...). `like`
-inherits only the state, never `now`, `expected`, `why` or `pending`.
+inherits only the state, never `now`, `expected`, `why`, `pending` or `origin`.
 
 Each scenario becomes a `DayState` through the same `build_day_state` the heartbeat uses: the
 sent messages and the marks of the key tasks go to a temporary SQLite in memory (one message per
@@ -135,6 +135,9 @@ class ScenarioIn(_State):
     why: str | None = None
     pending: str | None = None
     """The task that will let the scenario run: until then it is skipped."""
+    origin: Literal["reserva"] | None = None
+    """`reserva`: the reserve set, written after the prompt was tuned and measured apart too
+    (task 1.15-b). It does not change the state nor the grade: it is not in the fingerprint."""
 
     @model_validator(mode="after")
     def _distinct(self) -> ScenarioIn:
@@ -189,6 +192,7 @@ class Scenario:
     expected: tuple[frozenset[str], ...]
     why: str | None
     pending: str | None
+    origin: str | None
     fingerprint: str
     """sha256 of what builds the state and grades it (not the title nor `why`): a report
     compares two runs only on the scenarios whose fingerprint did not change."""
@@ -481,6 +485,7 @@ def load_suite(path: Path = EVALS_FILE) -> Suite:
                 expected=expected,
                 why=item.why,
                 pending=item.pending,
+                origin=item.origin,
                 fingerprint=fingerprint,
                 **state_fields,
             )
