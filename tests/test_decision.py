@@ -6,12 +6,15 @@ red. Los textos y motivos son inventados y fáciles de buscar en un log.
 
 import asyncio
 import logging
+import re
 from datetime import date
+from typing import get_args
 
 import anthropic
 import httpx2
 import pytest
 from conftest import VALID_ENV
+from evals_data import REAL_FILE
 from heartbeat_data import (
     BINS,
     CLOSE,
@@ -34,6 +37,7 @@ from heartbeat_data import (
 from pydantic import SecretStr
 
 from jimic.config import Settings
+from jimic.evals.scenarios import load_suite
 from jimic.heartbeat.decide import (
     API_URL,
     CACHE_TTL,
@@ -45,6 +49,7 @@ from jimic.heartbeat.decide import (
     prompt_template,
     usage_of,
 )
+from jimic.heartbeat.due import DueWhy
 from jimic.memory import key_marks
 from jimic.memory.database import open_database
 from jimic.memory.notices import record_handover
@@ -393,10 +398,29 @@ def test_el_prompt_del_latido_explica_los_campos_de_la_tarea_clave_y_el_tono():
     """Tarea 1.15 (1.15-h): el único cambio de prompt del latido. Pilla un campo del estado que
     el modelo no sabría leer o un nivel del tono sin describir."""
     text = " ".join(prompt_template().split())
-    for field in ("done_by", "rescheduled", "not_today", "paused_until", "insist_from"):
+    for field in ("done_by", "rescheduled", "not_today", "paused_until", "due_now", "why"):
         assert f"`{field}`" in text
     for level in ("1, amable", "2, más directo", "3, con un reto o con humor"):
         assert level in text
+
+
+def test_el_prompt_explica_cada_motivo_de_lo_que_toca_y_no_habla_de_horas():
+    """Tarea 1.15-b: un código de `why` sin explicar sería un dato que Haiku no sabe leer; y el
+    prompt ya no le pide comparar ventanas ni `insist_from`."""
+    text = prompt_template()
+    for code in get_args(DueWhy.__value__):
+        assert f"`{code}`" in text, code
+    for field in ("insist_from", "`window`", "default_time"):
+        assert field not in text
+
+
+def test_el_prompt_no_copia_los_escenarios_de_la_evaluacion():
+    """Reglas generales, sin aprenderse el examen (1.15-b): ningún id de intención ni de
+    escenario de `evals/latido.yaml` aparece en el prompt."""
+    suite = load_suite(REAL_FILE)
+    text = prompt_template()
+    ids = [i.id for i in suite.intentions.intentions] + [s.id for s in suite.scenarios]
+    assert [name for name in ids if re.search(rf"\b{name}\b", text)] == []
 
 
 def test_con_la_api_caida_tras_una_pausa_que_tapa_su_tramo_sale_al_acabar_la_pausa(conn):
