@@ -1,8 +1,9 @@
 """«📅 Tu día» of the plan of the day (decision 1.14-b): what is already on today, as the code
 reads it from Todoist and the calendar. Pure: no clock, no I/O.
 
-- The events of today that Pedro did not decline, and the open tasks **due today** (the overdue
-  ones only appear as proposals: moving or deleting them).
+- The events that take part of today and that Pedro did not decline, and the open tasks **due
+  today** (the overdue ones only appear as proposals: moving or deleting them). An event that
+  began before today goes with the all-day ones, without its time.
 - The all-day ones (an all-day event, a task without a time) go first; then by time. At the same
   time, events before tasks, and then by title.
 - In a late plan (H1-7) only the rest of the day stays: the events that have not ended and the
@@ -19,6 +20,7 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
+from jimic.clock import local_day_bounds
 from jimic.tools.calendar import CalendarDay
 from jimic.tools.todoist import TaskList
 
@@ -82,11 +84,13 @@ def day_view(calendar: CalendarDay, tasks: TaskList, now: datetime, late: bool) 
             continue
         assert isinstance(event.end, datetime)
         start, end = event.start.astimezone(timezone), event.end.astimezone(timezone)
-        if start.date() != today and end.date() != today:
-            continue
+        day_start, day_end = local_day_bounds(today, timezone)
+        if start >= day_end or end <= day_start:
+            continue  # not today
         if late and end <= now:
             continue
-        entries.append(DayEntry(event.title, start, True))
+        # One that began before today is under way: it goes with the all-day ones, without time.
+        entries.append(DayEntry(event.title, start if start >= day_start else None, True))
     unmarked = 0
     for task in tasks.tasks if tasks.available else []:
         if task.due is None:

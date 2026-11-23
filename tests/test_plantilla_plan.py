@@ -360,3 +360,20 @@ def test_el_plan_es_tardio_al_minuto_tras_su_ventana(window, now, late):
     )
     moment = datetime.fromisoformat(f"2030-01-10T{now}").replace(tzinfo=NOW.tzinfo)
     assert late_after(span, time(8, 0), moment) is late
+
+
+def test_un_evento_de_varios_dias_sale_sin_hora_y_uno_de_ayer_que_acabo_no():
+    """Pilla un evento de tres días que no sale el del medio, y uno de anoche que sale con la hora
+    de ayer (hallazgo de la revisión propia)."""
+    calendar = calendar_with(
+        event(madrid("2030-01-09T09:00"), 3 * 24 * 60, "Congreso"),
+        event(madrid("2030-01-09T23:00"), 90, "Guardia de noche"),
+        event(madrid("2030-01-09T20:00"), 60, "Cena de ayer"),
+    )
+    view = day_view(calendar, tasks(), NOW, late=False)
+    assert [(e.title, e.start) for e in view.entries] == [
+        ("Congreso", None),
+        ("Guardia de noche", None),
+    ]
+    later = day_view(calendar, tasks(), madrid("2030-01-10T12:00"), late=True)
+    assert [e.title for e in later.entries] == ["Congreso"]  # la guardia ya acabó
