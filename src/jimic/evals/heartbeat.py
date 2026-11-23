@@ -112,14 +112,21 @@ def score(outcomes: Sequence[Outcome]) -> Score:
 async def run_pass(
     create: CreateMessage, model: str, suite: Suite, scenario: Scenario
 ) -> PassResult:
-    """One call of the model on `scenario`, as the heartbeat makes it."""
+    """One call of the model on `scenario`, as the heartbeat makes it.
+
+    Any error of the call or of reading its answer is a failed pass with its code
+    (`unexpected:<Type>` if it is not one of the API's): one odd answer never loses the passes
+    already paid for.
+    """
     state = build_state(suite, scenario)
     request = build_request(model, fixed_block(suite.intentions, state.now), state)
     try:
         message = await create(**request)
+        decision = judge(message, state)
     except anthropic.APIError as error:
         return PassResult(False, frozenset(), "", api_error=api_error_code(error))
-    decision = judge(message, state)
+    except Exception as error:  # noqa: BLE001 - see the docstring: a pass, never the run
+        return PassResult(False, frozenset(), "", api_error=f"unexpected:{type(error).__name__}")
     intents = (
         frozenset(decision.intent.split(",")) if decision.speak and decision.intent else frozenset()
     )

@@ -198,6 +198,24 @@ def test_un_error_de_la_api_es_una_pasada_fallida_con_su_codigo(suite):
     assert not is_correct(by_id(suite, "l01").expected, result)
 
 
+def test_un_error_inesperado_es_una_pasada_fallida_y_no_pierde_las_demas(suite):
+    """Pilla un `gather` que se rompe con una excepción ajena a la API: lo ya pagado se perdería
+    sin informe."""
+
+    def reply(request):
+        if '"now":"2030-01-10T07:45' in request["messages"][0]["content"]:
+            return RuntimeError("respuesta rara")
+        return api_message(answer())
+
+    fake = FakeMessages(reply)
+    chosen = suite.select(["l01", "l03"])
+    results = asyncio.run(run_scenarios(fake.create, "claude-haiku-5-5", suite, chosen, 2))
+    l01, l03 = results
+    assert [result.api_error for result in l03.passes] == ["unexpected:RuntimeError"] * 2
+    assert l03.outcome.correct == (False, False)
+    assert l01.outcome.correct == (True, True)
+
+
 def test_lo_que_judge_descarta_no_entra_en_el_conjunto(suite):
     """Un elemento de una intención que no existe cae en `judge`: cuenta lo que queda."""
     reply = picks(("regar", "Agua"), ("inventada", "x"), ("reciclar", "Reciclaje"))
