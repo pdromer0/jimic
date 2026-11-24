@@ -7,7 +7,7 @@ import sys
 from collections.abc import Callable
 from importlib.metadata import version
 
-from jimic import service
+from jimic import config_session, service
 from jimic.channel import demo
 from jimic.channel.bot import ChannelError
 from jimic.config import ConfigError
@@ -34,13 +34,14 @@ SETUP_ERRORS = (
     UnpricedError,
     MigrationError,
     ChannelError,
+    config_session.SessionError,
     demo.DemoError,
     EvalError,
     sqlite3.Error,
     OSError,
 )
-"""What `jimic run`, `jimic telegram demo` and `jimic evaluar` turn into a message and
-`SETUP_ERROR`."""
+"""What `jimic run`, `jimic config sesion`, `jimic telegram demo` and `jimic evaluar` turn into
+a message and `SETUP_ERROR`."""
 
 CHECK_FAILED = 1
 """Exit status of `jimic config check` when a personal file is invalid or a YAML one is missing."""
@@ -56,6 +57,9 @@ def build_parser() -> argparse.ArgumentParser:
     config_commands = config.add_subparsers(dest="config_command", required=True)
     config_commands.add_parser("check", help="dice dónde falla cada fichero, sin enseñarlo")
     config_commands.add_parser("init", help="crea los YAML que faltan; nunca sobrescribe")
+    config_commands.add_parser(
+        "sesion", help="abre Claude Code en la carpeta de configuración, con sus límites"
+    )
     google = commands.add_parser("google", help="permiso de Google")
     google_commands = google.add_subparsers(dest="google_command", required=True)
     google_commands.add_parser(
@@ -112,7 +116,9 @@ def google_command() -> int:
 
 
 def config_command(command: str) -> int:
-    """Run `jimic config check` or `jimic config init` in the config root of the environment."""
+    """Run `jimic config check`, `init` or `sesion` in the config root of the environment."""
+    if command == "sesion":
+        return setup_errors_as_exit(lambda: config_session.run(os.environ))
     try:
         config_dir = resolve_paths(os.environ).config_dir
     except PathsError as error:

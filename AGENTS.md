@@ -32,6 +32,7 @@ uv run pytest                # todo, incluidos los slow (como el CI)
 uv run pytest -m "not slow"  # rápidos
 uv run pre-commit run --all-files   # ruff, pyright, gitleaks (lo preparado) y ficheros
 uv run jimic --version   # CLI
+uv run jimic config sesion   # Claude Code en la carpeta de configuración (sandbox); lo lanza Pedro
 JIMIC_ENTORNO=dev uv run jimic telegram demo   # plan inventado en el bot de pruebas; lo lanza Pedro
 JIMIC_ENTORNO=dev uv run jimic evaluar latido   # evaluación del latido (API real, unos céntimos; evals/README.md)
 JIMIC_ENTORNO=dev uv run jimic evaluar plan     # evaluación del plan (agente real, ~0,80 $; evals/README.md)
