@@ -386,3 +386,19 @@ def test_lo_marcado_despues_de_la_manana_siguiente_no_es_de_ese_dia(conn, tmp_pa
     w.settle()
     figures = day_plans.figures(conn, THURSDAY)
     assert figures is not None and (figures.fulfilled, figures.planned) == (1, 2)
+
+
+# --- Los días del hábito (decisión F2-a) -------------------------------------------------------
+
+
+@pytest.mark.parametrize(("off_day", "said"), [(False, True), (True, False)])
+def test_la_tarea_clave_de_un_dia_que_no_le_toca_no_sale_como_sin_hacer(
+    conn, tmp_path, off_day, said
+):
+    """Revisión propia: el día que su hábito no toca, el cierre no dice «Gimnasio: sin hacer»."""
+    w = CloseRunWorld(conn, tmp_path, noting())
+    w.with_plan()
+    status = key_status(w, "t-cena").model_copy(update={"task": None, "off_day": off_day})
+    w.build_close([status])
+    prompt, _ = w.agent.runs[-1]
+    assert ("Gimnasio: sin hacer" in prompt) is said
