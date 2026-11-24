@@ -7,7 +7,7 @@ but callers still never print `msg`: only `loc` and `type`.
 """
 
 import re
-from datetime import time, timedelta
+from datetime import date, time, timedelta
 from typing import Annotated, Literal, get_args
 
 from pydantic import BaseModel, ConfigDict, Field, PlainValidator, StringConstraints
@@ -54,6 +54,15 @@ NonEmptyStr = Annotated[str, StringConstraints(min_length=1)]
 Priority = Literal["high", "medium", "low"]
 Moment = Literal["morning", "midday", "afternoon", "evening"]
 Weekday = Literal["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
+WEEKDAYS: tuple[Weekday, ...] = get_args(Weekday)
+"""In the order of `date.weekday()`."""
+
+
+def on_days(days: list[Weekday] | None, day: date) -> bool:
+    """Whether `day` is one of `days` (of a habit or a notice); `None` is every day."""
+    return days is None or WEEKDAYS[day.weekday()] in days
+
+
 Count = Annotated[int, Field(ge=0)]
 Usd = Annotated[float, Field(ge=0, allow_inf_nan=False)]
 
@@ -94,6 +103,13 @@ class Habit(_Strict):
     training: bool = False
     """The training (task 1.15): the workout of today in APEX counts as done, and its key task
     offers [Ya entrené] instead of [Hecho]. At most one habit has it."""
+    days: Annotated[list[Weekday], Field(min_length=1)] | None = None
+    """The days it applies (decision F2-a), like a notice; without it, every day. The code
+    applies it: the plan does not propose it, nor does its key task insist, on another day."""
+
+    def on(self, day: date) -> bool:
+        """Whether the habit applies on `day`."""
+        return on_days(self.days, day)
 
 
 class _Intention(_Strict):
@@ -204,8 +220,8 @@ def field_names() -> frozenset[str]:
 
 
 def cross_check(intentions: Intentions) -> list[tuple[Loc, str]]:
-    """Return `(loc, type)` for repeated ids, repeated days, `habit:` that names no habit and a
-    second habit with `training: true`.
+    """Return `(loc, type)` for repeated ids, repeated days (of a notice or a habit), `habit:` that
+    names no habit and a second habit with `training: true`.
 
     The second appearance of an id (or of `training`) is the one reported; `habit:` looks only
     among the habits.
@@ -219,6 +235,9 @@ def cross_check(intentions: Intentions) -> list[tuple[Loc, str]]:
             seen.add(item.id)
     trainings = [index for index, habit in enumerate(intentions.habits) if habit.training]
     problems += [(("habits", index, "training"), "second_training") for index in trainings[1:]]
+    for index, habit in enumerate(intentions.habits):
+        if habit.days is not None and len(set(habit.days)) != len(habit.days):
+            problems.append((("habits", index, "days"), "repeated_days"))
     habit_ids = {habit.id for habit in intentions.habits}
     for index, intention in enumerate(intentions.intentions):
         if isinstance(intention, KeyTask) and intention.habit not in habit_ids:

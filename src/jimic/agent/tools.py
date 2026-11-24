@@ -67,12 +67,16 @@ from jimic.execution.rules import FOR_THE_AGENT, refusal
 from jimic.heartbeat.sources import Sources
 from jimic.memory import changes, conversations
 from jimic.memory.changes import IDEAS_FILE, ChangeRefused, Proposed
+from jimic.memory.live import read_valid
 from jimic.memory.onboarding import OBJECTIVES_FILE, copied_goal
+from jimic.memory.personal import INTENTIONS_FILE
+from jimic.memory.schemas import Intentions, Limits, is_free
+from jimic.plan.rules import refusals
 from jimic.tools.apex import ApexReader
 from jimic.tools.apex_schema import ApexSnapshot
 from jimic.tools.calendar import CalendarDay, CalendarReader
 from jimic.tools.failures import ToolFailure
-from jimic.tools.todoist import TaskList, TodoistReader
+from jimic.tools.todoist import TaskList, TodoistReader, TodoistTask
 
 logger = logging.getLogger(__name__)
 
@@ -101,11 +105,13 @@ def model_name(name: str) -> str:
 
 @dataclass(frozen=True)
 class ManualChange:
-    """A change of `limites.yaml` that relaxes a limit (decision 1.13-a): the keys it relaxes
-    and the fragment the agent proposed, which is what Pedro would write by hand."""
+    """A change that the asymmetric rule refused (decision 1.13-a): the keys it relaxes, the
+    fragment the agent proposed, which is what Pedro would write by hand, and its file."""
 
     keys: tuple[str, ...]
     after: str | None
+    file: str = "limites.yaml"
+    """Where Pedro would write it: `limites.yaml`, or `intenciones.yaml` (`spacing`, `days`)."""
 
 
 type RunMode = Literal["message", "plan", "follow_up", "close"]
@@ -143,6 +149,11 @@ class RunState:
     """The run read after proposing: what it proposed for the memory was dropped."""
     manual: list[ManualChange] = field(default_factory=list)
     """What the asymmetric rule refused in `limites.yaml`: Pedro may do it by hand (1.13-a)."""
+    day_sources: tuple[CalendarDay, TaskList] | None = None
+    """The calendar and the tasks of today that `propose_plan` read to check the plan of the day
+    (decision 1.16-e): once per run."""
+    read_tasks: dict[str, TodoistTask] = field(default_factory=dict)
+    """The tasks that the plan of the day moves or deletes, as `propose_plan` read them."""
 
     def close(self) -> None:
         """At the end of the run: a run that read external content proposes nothing for the
@@ -169,6 +180,8 @@ class ToolContext:
     config_dir: Path
     day: date
     run: RunState = field(default_factory=RunState)
+    limits: Limits | None = None
+    """The limits the guard applies: `propose_plan` reads no source the agent may not read."""
 
     @classmethod
     def of(
@@ -180,6 +193,7 @@ class ToolContext:
         config_dir: Path,
         day: date,
         run: RunState | None = None,
+        limits: Limits | None = None,
     ) -> ToolContext:
         """Only the reader of Todoist goes in: the writer stays out of the agent's reach."""
         return cls(
@@ -192,6 +206,7 @@ class ToolContext:
             config_dir,
             day,
             run if run is not None else RunState(),
+            limits,
         )
 
 
@@ -250,6 +265,10 @@ def guarded(name: str, run: Callable[[dict[str, Any]], Awaitable[Result]]):
     return handler
 
 
+async def _down[S](source: S) -> S:
+    return source
+
+
 NO_ARGS: dict[str, Any] = {"type": "object", "properties": {}, "additionalProperties": False}
 
 
@@ -297,6 +316,61 @@ def build_tools(ctx: ToolContext) -> list[SdkMcpTool[Any]]:
                     " palabras como mucho"
                 )
 
+    def allowed(name: str) -> bool:
+        """Whether the agent may read this source itself (`tool_levels`, as the guard says);
+        without limits (a test), it may."""
+        return ctx.limits is None or is_free(ctx.limits, name)
+
+    async def day_sources() -> tuple[CalendarDay, TaskList]:
+        """Today's calendar and tasks, read once per run. A source that fails counts as down, and
+        one the agent may not read (`blocked`) is not read: that part of the check is skipped,
+        since nothing can be known (decision 1.16-e)."""
+        if ctx.run.day_sources is None:
+            contaminated()
+            calendar, tasks = await asyncio.gather(
+                ctx.calendar.read_day(today())
+                if allowed("read_calendar")
+                else _down(CalendarDay.unavailable("blocked")),
+                ctx.tasks.read_today()
+                if allowed("read_tasks")
+                else _down(TaskList.unavailable("blocked")),
+                return_exceptions=True,
+            )
+            if not isinstance(calendar, CalendarDay):
+                calendar = CalendarDay.unavailable(f"unexpected:{type(calendar).__name__}")
+            if not isinstance(tasks, TaskList):
+                tasks = TaskList.unavailable(f"unexpected:{type(tasks).__name__}")
+            for name, source in (("calendar", calendar), ("tasks", tasks)):
+                if not source.available:
+                    logger.info("plan check without %s (%s)", name, source.unavailable_reason)
+            ctx.run.day_sources = (calendar, tasks)
+        return ctx.run.day_sources
+
+    async def hour_rules(entries: list[dict[str, Any]], read: list[TodoistTask]) -> None:
+        """The hard rules of the plan that are a count of hours (decision 1.16-e) and the days of
+        the habits (F2-a), refused to the agent with their reasons: `jimic.plan.rules`."""
+        calendar, tasks = await day_sources()
+        # What earlier calls moved keeps its duration, even if it is not among today's tasks.
+        ctx.run.read_tasks |= {task.id: task for task in read}
+        known = {task.id: task for task in (tasks.tasks if tasks.available else [])}
+        known |= ctx.run.read_tasks
+        intentions = read_valid(ctx.config_dir, INTENTIONS_FILE)
+        habits = intentions.habits if isinstance(intentions, Intentions) else []
+        problems = refusals(
+            [*ctx.run.items, *entries],
+            len(ctx.run.items),
+            list(known.values()),
+            calendar.events if calendar.available else [],
+            habits,
+            ctx.clock.now().astimezone(ctx.timezone),
+        )
+        if problems:
+            logger.info("plan refused by the code: %d items", len(problems))
+            raise AgentInputError(
+                ". ".join(problems)
+                + ". No se ha añadido nada: corrígelo y vuelve a llamar a propose_plan."
+            )
+
     async def propose_plan(args: dict[str, Any]) -> Result:
         run = ctx.run
         if run.mode == "close":
@@ -314,6 +388,7 @@ def build_tools(ctx: ToolContext) -> list[SdkMcpTool[Any]]:
             )
         already = {entry["task_id"] for entry in run.items if "task_id" in entry}
         entries = []
+        read: list[TodoistTask] = []
         counts = {"create": 0, "move": 0, "delete": 0}
         for number, item in enumerate(proposal.items, start=1):
             entry = item.model_dump() | {"follow_up": proposal.follow_up}
@@ -332,8 +407,11 @@ def build_tools(ctx: ToolContext) -> list[SdkMcpTool[Any]]:
                     if refused is not None:
                         raise AgentInputError(f"El elemento {number}: {FOR_THE_AGENT[refused]}")
                 entry["snapshot"] = TaskSnapshot.of(task).model_dump()
+                read.append(task)
             entries.append(entry)
             counts[item.action] += 1
+        if run.mode == "plan":
+            await hour_rules(entries, read)
         run.items.extend(entries)
         run.requested_by_pedro = run.requested_by_pedro and proposal.requested_by_pedro
         run.proposed_plan = True
@@ -373,7 +451,7 @@ def build_tools(ctx: ToolContext) -> list[SdkMcpTool[Any]]:
         except ChangeRefused as refused:
             logger.info("memory proposal refused (%s)", refused.code)
             if refused.code == "relaxes" and refused.relaxed:
-                ctx.run.manual.append(ManualChange(refused.relaxed, proposed.after))
+                ctx.run.manual.append(ManualChange(refused.relaxed, proposed.after, proposed.file))
             raise AgentInputError(refused.for_agent) from None
         try:
             memory_message([*ctx.run.memory, entry])

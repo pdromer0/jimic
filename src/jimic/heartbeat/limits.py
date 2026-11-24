@@ -23,7 +23,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from jimic.channel.message import TELEGRAM_TEXT_LIMIT, telegram_length
 from jimic.heartbeat.key_tasks import KeyTaskStatus
 from jimic.memory.notices import SentToday
-from jimic.memory.schemas import Intention, Intentions, Limits, Notice, Window
+from jimic.memory.schemas import Intention, Intentions, Limits, Notice, Window, on_days
 from jimic.tools.calendar import CalendarDay
 
 logger = logging.getLogger(__name__)
@@ -39,8 +39,6 @@ and 1.16)."""
 SEPARATOR = "\n\n"
 """Between the blocks of one message: a blank line (decision 1.8-d)."""
 
-WEEKDAYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
-"""`date.weekday()` order, as `Notice.days` writes them."""
 
 type StopReason = Literal["quiet_hours", "daily_cap", "in_event"]
 type Action = Literal["send", "wait", "block", "handover"]
@@ -183,7 +181,7 @@ def applies_on(intention: Intention, day: date) -> bool:
     """Enabled, and a `notice` only on its days."""
     if not intention.enabled:
         return False
-    return not isinstance(intention, Notice) or WEEKDAYS[day.weekday()] in intention.days
+    return not isinstance(intention, Notice) or on_days(intention.days, day)
 
 
 # --- The queue of the group window --------------------------------------------------------------

@@ -29,7 +29,7 @@ from jimic.plan import minimal
 GYM = {
     "action": "create",
     "title": "Gimnasio",
-    "due": "2030-01-07T12:30",
+    "due": "2030-01-07T13:00",
     "duration_minutes": 75,
     "icon": "🏋️",
     "reason": "toca empuje",
@@ -69,7 +69,7 @@ def test_el_plan_se_lanza_en_la_sesion_del_dia_y_sale_pintado_y_anotado(conn, tm
     assert isinstance(plan, InteractiveMessage)
     text = text_of(plan)
     assert text.startswith("¡Pedro! Lunes de empuje")
-    assert "🏋️ Gimnasio · 12:30–13:45 (toca empuje)" in text
+    assert "🏋️ Gimnasio · 13:00–14:15 (toca empuje)" in text
     assert FREE_TEXT not in text
     assert w.notices() == [("plan_del_dia", 901)]
     assert w.writes() == []
@@ -117,7 +117,7 @@ def test_en_el_plan_un_cambio_de_memoria_se_rechaza_y_no_sale(conn, tmp_path):
 
 
 def test_una_quinta_tarea_nueva_se_rechaza_al_agente_y_el_plan_lleva_cuatro(conn, tmp_path):
-    five = [GYM | {"title": f"Tarea {n}", "reason": "toca"} for n in range(5)]
+    five = [GYM | {"title": f"Tarea {n}", "reason": "toca", "due": "2030-01-07"} for n in range(5)]
     four = five[:4]
     w = PlanWorld(
         conn,
@@ -198,6 +198,21 @@ def test_el_minimo_propone_los_altos_que_faltan_y_nunca_los_de_media(conn, tmp_p
     assert item.data is not None
     assert (item.data["due"], item.data["duration_minutes"]) == ("2030-01-07", 30)
     assert [o.key for o in item.options] == ["ok", "edit", "no"]
+
+
+@pytest.mark.parametrize(("days", "titles"), [(["sat", "sun"], []), (["mon"], ["Revisar ofertas"])])
+def test_el_minimo_solo_propone_un_habito_el_dia_que_le_toca(conn, tmp_path, days, titles):
+    """Pilla el mínimo que ignora `days` (versión incorrecta 3): el 7-ene-2030 es lunes."""
+    w = PlanWorld(
+        conn,
+        tmp_path,
+        FakeAgent([result_message(None, api_status=529, is_error=True)]),
+        habits=[OFFERS_HABIT | {"days": days}],
+    )
+    built = w.build()
+    assert built.code == "minimal:agent:api:529"
+    items = built.plan.items if isinstance(built.plan, InteractiveMessage) else []
+    assert [item.data and item.data["title"] for item in items] == titles
 
 
 def test_con_todoist_y_el_agente_caidos_el_minimo_no_propone_nada(conn, tmp_path):

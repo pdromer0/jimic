@@ -34,7 +34,7 @@ from typing import Literal
 from jimic.clock import Clock, to_db
 from jimic.files import write_private
 from jimic.memory.database import transaction
-from jimic.memory.discreet import judge, relaxed_spacing
+from jimic.memory.discreet import judge, relaxed_days, relaxed_spacing
 from jimic.memory.edits import EditError, Operation, Patch, patch_for
 from jimic.memory.personal import (
     INTENTIONS_FILE,
@@ -192,18 +192,22 @@ def validate(name: str, old_text: str, new_text: str) -> None:
         raise _invalid(name, problems)
     if name == INTENTIONS_FILE:
         before = _intentions(old_text)
-        relaxed = (
-            ()
-            if before is None
-            else relaxed_spacing(before, Intentions.model_validate(_yaml_doc(name, new_text)))
-        )
-        if relaxed:
+        if before is None:
+            return
+        after = Intentions.model_validate(_yaml_doc(name, new_text))
+        spacing, days = relaxed_spacing(before, after), relaxed_days(before, after)
+        if spacing or days:
+            what = []
+            if spacing:
+                what.append(f"baja el espacio entre avisos ({', '.join(spacing)})")
+            if days:
+                what.append(f"añade días en que insiste una tarea clave ({', '.join(days)})")
             raise ChangeRefused(
                 "relaxes",
-                f"Eso baja el espacio entre avisos ({', '.join(relaxed)}) en intenciones.yaml:"
-                " conversando solo puedo hacer a JimiC más discreto. Si Pedro lo quiere, lo edita"
-                " él a mano.",
-                relaxed,
+                f"Eso {' y '.join(what)} en intenciones.yaml: conversando solo puedo hacer a JimiC"
+                " más discreto (subir el espacio o quitar días, sí). Si Pedro lo quiere, lo edita"
+                " él a mano o con /configurar-jimic.",
+                spacing + days,
             )
         return
     if old is None:

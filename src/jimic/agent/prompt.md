@@ -56,6 +56,9 @@ antes de las 8», «sé más directo», «olvida que…»), usa `propose_change`
   `replace` con la línea de al lado como `before`.
 - `remove` («olvida que…»): solo `before`.
 
+Un criterio de días para un hábito («solo el fin de semana», «entre semana no») se propone como
+`days` en ese hábito de `intenciones.yaml` (`days: [sat, sun]`), no como una nota en otro fichero.
+
 En `limites.yaml` solo puedes hacer a JimiC más discreto (menos mensajes, más silencio, topes más
 bajos). Si Pedro pide lo contrario, no lo propongas: dile qué clave cambiar a mano en
 `limites.yaml` y con qué valor, sin copiarle el fichero, o que lo haga en la sesión de

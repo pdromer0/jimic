@@ -20,10 +20,12 @@ from agent_data import (
     listed_tools,
 )
 from calendar_data import SECRET_TITLE
-from heartbeat_data import madrid, task
+from heartbeat_data import CountingCalendar, calendar_with, event, madrid, sources, task
+from heartbeat_data import limits as limits_of
 from memory_data import QUIET_LINE, shas, write_personal
 
 from jimic.agent.tools import RunState, build_server, model_name
+from jimic.heartbeat.sources import Sources
 from jimic.memory.conversations import read_external
 from jimic.memory.database import open_database
 from jimic.memory.schemas import TOOL_NAMES
@@ -511,7 +513,11 @@ def test_leer_marca_la_ejecucion_que_lee(conn, config_dir, name, contaminates):
 
 
 def creates(count: int, reason: str = "toca hoy") -> list[dict]:
-    return [CREATE | {"title": f"Tarea {n}", "reason": reason} for n in range(count)]
+    """Sin hora: varias a la misma hora se pisarían (decisión 1.16-e)."""
+    return [
+        CREATE | {"title": f"Tarea {n}", "reason": reason, "due": "2030-01-07"}
+        for n in range(count)
+    ]
 
 
 def plan_run() -> RunState:
@@ -624,3 +630,161 @@ def test_en_el_cierre_propose_plan_se_rechaza_y_no_anota_nada(conn, config_dir):
     assert run.items == [] and not run.proposed_plan
     _, is_error = call(conn, config_dir, "read_apex_today", {}, run=run)
     assert not is_error
+
+
+# --- Las reglas duras del plan, en el código (decisiones 1.16-e, F2-a y F2-b) -----------------
+
+ON_THE_APPOINTMENT = {
+    "action": "create",
+    "title": "Revisar ofertas",
+    "due": "2030-01-07T10:30",
+    "duration_minutes": 30,
+    "reason": "r",
+}
+STRETCH_HABIT = """\
+intentions: []
+habits:
+  - {id: estiramientos, name: "Estiramientos", priority: medium, duration: 15m,
+     moment: evening, todoist_task: "Estiramientos", days: [sat, sun]}
+"""
+
+
+def test_en_el_plan_lo_que_pisa_un_evento_se_rechaza_con_su_motivo_y_lo_contiguo_no(
+    conn, config_dir
+):
+    run = plan_run()
+    text, is_error = call(
+        conn, config_dir, "propose_plan", {"items": [ON_THE_APPOINTMENT]}, run=run
+    )
+    assert is_error and run.items == []
+    assert text == (
+        f"El elemento 1: pisa «{SECRET_TITLE}» 10:00–11:00. No se ha añadido nada: corrígelo y"
+        " vuelve a llamar a propose_plan."
+    )
+    after = ON_THE_APPOINTMENT | {"due": "2030-01-07T11:00"}
+    _, is_error = call(conn, config_dir, "propose_plan", {"items": [after]}, run=run)
+    assert not is_error and len(run.items) == 1
+
+
+@pytest.mark.parametrize("mode", ["message", "follow_up"])
+def test_fuera_del_plan_la_conversacion_no_cambia(conn, config_dir, mode):
+    """Pilla la regla aplicada en todos los modos (versión incorrecta 7): «crea X a las 10:30»
+    encima de una cita se sigue proponiendo, y propose_plan no lee ni contamina."""
+    run = RunState(origin="crea" if mode == "message" else None, mode=mode)
+    _, is_error = call(conn, config_dir, "propose_plan", {"items": [ON_THE_APPOINTMENT]}, run=run)
+    assert not is_error and len(run.items) == 1
+    assert not run.contaminated and run.day_sources is None
+
+
+def test_en_el_plan_las_fuentes_se_leen_una_vez_por_ejecucion_y_contaminan(conn, config_dir):
+    base = agent_sources()
+    counting = CountingCalendar(calendar_with(event(madrid("2030-01-07T10:00"))))
+    srcs = Sources(todoist=base.todoist, calendar=counting, apex=base.apex)
+    run = plan_run()
+    srv = server(conn, config_dir, srcs=srcs, run=run)
+    for _ in range(2):
+        asyncio.run(call_tool(srv, "propose_plan", {"items": [ON_THE_APPOINTMENT]}))
+    assert counting.reads == 1 and run.contaminated
+
+
+def test_con_el_calendario_caido_no_se_puede_saber_y_se_acepta(conn, config_dir):
+    base = agent_sources()
+    down = sources(CalendarDay.unavailable("timeout"))
+    srcs = Sources(todoist=base.todoist, calendar=down.calendar, apex=base.apex)
+    run = plan_run()
+    _, is_error = call(
+        conn, config_dir, "propose_plan", {"items": [ON_THE_APPOINTMENT]}, srcs=srcs, run=run
+    )
+    assert not is_error and len(run.items) == 1
+
+
+def test_un_calendario_que_lanza_cuenta_como_caido_y_no_sale_en_el_log(conn, config_dir, caplog):
+    srcs = agent_sources()
+
+    async def broken(day):
+        raise KeyError(SECRET_ARG)
+
+    srcs.calendar.read_day = broken
+    run = plan_run()
+    with caplog.at_level(logging.INFO):
+        _, is_error = call(
+            conn, config_dir, "propose_plan", {"items": [ON_THE_APPOINTMENT]}, srcs=srcs, run=run
+        )
+    assert not is_error and len(run.items) == 1
+    assert "plan check without calendar (unexpected:KeyError)" in caplog.text
+    assert SECRET_ARG not in caplog.text
+
+
+def test_en_el_plan_una_tarea_de_esta_manana_que_no_es_de_un_habito_no_se_toca(conn, config_dir):
+    webinar = task("t-web", "Webinar inventado", madrid("2030-01-07T09:00"))
+    srcs = agent_sources(TaskList(available=True, tasks=[webinar]))
+    run = plan_run()
+    item = {"action": "move", "task_id": "t-web", "due": "2030-01-07T16:00", "reason": "r"}
+    text, is_error = call(conn, config_dir, "propose_plan", {"items": [item]}, srcs=srcs, run=run)
+    assert is_error and "era hoy a las 9:00 y ya pasó: lo ve el cierre" in text
+    assert run.items == []
+
+
+def test_en_el_plan_el_habito_de_un_dia_que_no_le_toca_se_rechaza(conn, config_dir):
+    """El 7-ene-2030 es lunes; con `intenciones.yaml` inválido no hay regla de días."""
+    stretch = CREATE | {"title": "Estiramientos", "due": "2030-01-07T20:00"}
+    (config_dir / "intenciones.yaml").write_text(STRETCH_HABIT, encoding="utf-8")
+    text, is_error = call(conn, config_dir, "propose_plan", {"items": [stretch]}, run=plan_run())
+    assert is_error and "«Estiramientos» no toca el lunes (sus días: sábado, domingo)" in text
+    (config_dir / "intenciones.yaml").write_text("habits: [", encoding="utf-8")
+    _, is_error = call(conn, config_dir, "propose_plan", {"items": [stretch]}, run=plan_run())
+    assert not is_error
+
+
+def test_lo_movido_en_una_llamada_anterior_conserva_su_duracion(conn, config_dir):
+    """Revisión propia: una tarea que no sale entre las de hoy, movida en la primera llamada,
+    ocupa sus 60 minutos en la segunda (sin su duración, sería un instante a las 15:00)."""
+    far = task("t-lejos", "Tarea inventada", madrid("2030-01-20T09:00")).model_copy(
+        update={"duration_minutes": 60}
+    )
+    srcs = agent_sources(TaskList(available=True, tasks=[far]))
+
+    async def nothing_today() -> TaskList:
+        return TaskList(available=True, tasks=[])
+
+    setattr(srcs.todoist.reader, "read_today", nothing_today)  # noqa: B010 - un doble de un método
+    run = plan_run()
+    srv = server(conn, config_dir, srcs=srcs, run=run)
+    to_today = {"action": "move", "task_id": "t-lejos", "due": "2030-01-07T15:00", "reason": "r"}
+    _, is_error = asyncio.run(call_tool(srv, "propose_plan", {"items": [to_today]}))
+    assert not is_error
+    on_it = ON_THE_APPOINTMENT | {"due": "2030-01-07T15:30"}
+    text, is_error = asyncio.run(call_tool(srv, "propose_plan", {"items": [on_it]}))
+    assert is_error and "pisa «Tarea inventada» 15:00–16:00" in text
+
+
+def test_con_read_calendar_bloqueado_no_se_lee_el_calendario(conn, config_dir):
+    """Revisión propia: el rechazo no le enseña al agente un calendario que no puede leer."""
+    counting = CountingCalendar(calendar_with(event(madrid("2030-01-07T10:00"))))
+    base = agent_sources()
+    srcs = Sources(todoist=base.todoist, calendar=counting, apex=base.apex)
+    blocked = limits_of()
+    blocked = blocked.model_copy(
+        update={"tool_levels": {**blocked.tool_levels, "read_calendar": "blocked"}}
+    )
+    run = plan_run()
+    _, is_error = call(
+        conn,
+        config_dir,
+        "propose_plan",
+        {"items": [ON_THE_APPOINTMENT]},
+        srcs=srcs,
+        run=run,
+        limits=blocked,
+    )
+    assert not is_error and counting.reads == 0
+    _, is_error = call(
+        conn,
+        config_dir,
+        "propose_plan",
+        {"items": [ON_THE_APPOINTMENT]},
+        srcs=srcs,
+        run=plan_run(),
+        limits=limits_of(),
+    )
+    assert is_error and counting.reads == 1

@@ -4,8 +4,9 @@ The code works out the hours, so the model never compares them: it gets `due_now
 code, `why`, for each active intention, and picks among those that are due. The first rule that
 applies decides:
 
-- **Not due:** a key task that is done, no longer today's, «hoy no», paused or before it may
-  insist (`KeyTaskStatus.refusal`, without its `key_`); one that waits in the group window
+- **Not due:** a key task whose habit does not apply today (`off_day`, decision F2-a), that is
+  done, no longer today's, «hoy no», paused or before it may insist (`KeyTaskStatus.refusal`,
+  without its `key_`); one that waits in the group window
   (`waiting`); one that may not go out again today (`insist_cap` for a key task, `sent_today` for
   the rest); a key task less than its `spacing` (or `grace`) after its last notice of today
   (`too_soon`, decision 149); the plan or the close before their window (`before_window`), a
@@ -33,6 +34,7 @@ SLOT = timedelta(minutes=15)
 """A heartbeat's slot: a notice is `on_time` while `default_time <= now < default_time + SLOT`."""
 
 type DueWhy = Literal[
+    "off_day",
     "done",
     "rescheduled",
     "not_today",
@@ -51,6 +53,7 @@ type DueWhy = Literal[
     "can_insist",
 ]
 KEY_WHY: dict[str, DueWhy] = {
+    "key_off_day": "off_day",
     "key_done": "done",
     "key_rescheduled": "rescheduled",
     "key_not_today": "not_today",

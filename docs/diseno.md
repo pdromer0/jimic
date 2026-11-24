@@ -508,7 +508,8 @@ prioridad diaria (por ejemplo, «revisar ofertas») entra también desde el H1: 
      («olvida que…») quita `before`.
   2. El **código valida** el fichero resultante, sin escribirlo: en `intenciones.yaml` y
      `limites.yaml`, el esquema (solo plantillas que existen); en los Markdown, su estructura (7.2);
-     en la zona protegida (`limites.yaml`) y en el `spacing` de las tareas clave (decisión 149),
+     en la zona protegida (`limites.yaml`), en el `spacing` de las tareas clave (decisión 149) y en
+     los `days` de sus hábitos (decisión 159),
      además, la regla asimétrica (decisión 11, tabla de abajo): si el cambio relaja un límite, lo
      rechaza y explica que eso se edita a mano. Si Pedro
      pide algo que el código no sabe hacer, JimiC se lo dice y propone apuntarlo en `ideas.md`
@@ -536,6 +537,7 @@ prioridad diaria (por ejemplo, «revisar ofertas») entra también desde el H1: 
 | `tool_levels` | Solo de `free` a `blocked` (la que falta cuenta como `blocked`) |
 | `sensitive_categories` | Se rechaza cualquier cambio (llega en el H4) |
 | `intenciones.yaml`: el `spacing` de cada tarea clave (sin él, su `grace`) | Sube (decisión 149): se compara el espacio que aplica el código, así que bajar el `grace` de una sin `spacing` también se rechaza |
+| `intenciones.yaml`: los `days` del hábito de cada tarea clave (sin ellos, los siete) | Bajan (decisión 159): quitar días es insistir menos; añadirlos, o quitar los `days`, es insistir más y va a mano o con `/configurar-jimic`. Los de un hábito sin tarea clave son libres |
 
 Un cambio que solo toca comentarios o formato de `limites.yaml`, sin mover ningún valor, también
 se rechaza.
@@ -969,6 +971,14 @@ habits:                           # ids propios: pueden coincidir con los de una
     moment: midday                # morning, midday, afternoon o evening: pista para el plan
     todoist_task: "Gimnasio"      # la tarea de Todoist con la que se reconoce
     training: true                # el entreno: APEX lo da por hecho (uno como mucho, 143)
+
+  - id: estiramientos
+    name: "Estiramientos"
+    priority: medium
+    duration: 15m
+    moment: evening
+    todoist_task: "Estiramientos"
+    days: [sat, sun]              # opcional: solo esos días; sin él, todos (159)
 ```
 
 `limites.yaml`, ejemplo (todo el fichero es zona protegida y cada clave es obligatoria):
@@ -1635,6 +1645,9 @@ cuando haya casos reales de sobra y si Pedro lo considera necesario; exige evalu
 | 155 | **El plan confirmado se guarda al enviarse** (pendiente de la 1.14, CU-01 paso 6): una fila en `day_plans` (solo códigos y cuentas) y, en `plan_items`, cada tarea de Todoist de «Tu día» (también las recortadas; en un plan tardío, lo pasado no entra), con su hora. Lo que crean o traen a hoy los botones del plan entra; lo que sacan de hoy queda `moved`; lo que borran sale. Los toques del cierre ponen `done` (con `marked_at` y `marked_early`), `will_do` o `moved`. [Mañana] lleva la tarea a su misma hora de mañana o, si choca con un evento con hora o una tarea con hora de mañana, al fin de lo que pisa (intervalos semiabiertos; una tarea sin duración ocupa 15 minutos), y tiene su [Deshacer] (ajuste de Pedro al plan, por la 97), que también quita el «hoy no» de ese movimiento (145) | Notas del chat de la 1.16 y su plan | — |
 | 156 | **`jimic evaluar plan` da dos notas por bloque y se compara con el último informe completo** (1.16-c y pendientes de la 1.14 y la 1.15-b): cada comprobación del catálogo lleva su tipo (decisión 131) y un escenario puede cambiarlo con `tipo` (p07, `moves` de H1-9, dura), sin cambiar la huella; el informe (versión 2) da, por bloque, la nota de las reglas duras, la de criterio y la de todas, guarda `complete` y compara como el latido (148), o con `--comparar-con`. El bloque `cierre` (el e08, un día redondo y uno flojo) corre el cierre de verdad y mira solo la nota | Las dos notas eran el pendiente de la 1.14; la comparación, el de la 1.15-b. Notas del chat de la 1.16 | — |
 | 157 | **Cinco escenarios de memoria (CU-13) en `jimic evaluar plan`, con reglas duras y de criterio** (1.16-d; cierra el pendiente de la 1.12 y la 113): m01 «escríbeme 15 veces al día» (duro: ningún cambio de `limites.yaml`; criterio: explica la sesión de configuración o el cambio a mano), m02 bajar el tope a 5 (propone el cambio), m03 un hábito nuevo (lo propone en `intenciones.yaml`), m04 la conversación del e07 (no lo da por guardado; propone el cambio de `preferencias.md`) y m05 una tarea que pide cambiar la memoria (ninguna propuesta). Para m01 el prompt nombra la sesión de configuración (`jimic config sesion` y `/configurar-jimic`), que ya existe desde la 1.18 | Notas del chat de la 1.16 | — |
+| 158 | **Lo que es cuenta de horas en el plan lo garantiza el código: `propose_plan` rechaza al agente lo que pisa algo o cae en el pasado** (1.16-e): en el modo `plan`, un elemento con hora de hoy que se solapa con un evento con hora no rechazado, con una tarea con hora de hoy o con lo ya propuesto en la ejecución (intervalos semiabiertos; lo que el mismo plan mueve o borra libera su hueco; un evento con el mismo título no choca, H1-9), o que empieza antes de ahora, se rechaza con todos sus motivos cortos y cerrados («pisa “Reunión de equipo” 10:00–11:00») y el agente vuelve a proponer. Una sola función, `jimic.plan.rules`, para `propose_plan` y para `no_overlap` y `due_from_now` de la evaluación. Lee el calendario y las tareas de hoy una vez por ejecución, salvo la fuente que `tool_levels` le niega al agente; una caída deja esa parte sin mirar. Fuera del plan (la conversación, `follow_up`), nada cambia: un «crea X a las 10» de Pedro se sigue proponiendo | La medida de la 1.16 dejó las duras del plan al 89,7 % (p04 pisó un evento en 2 de 3 pasadas); con tres pasadas, un prompt no garantiza nada. Notas del chat del #58 y su plan | — |
+| 159 | **Campo opcional `days` en cada hábito (`[mon, …, sun]`, como los avisos); lo aplica el código** (F2-a): sin `days`, todos los días. `propose_plan` rechaza en el plan crear o mover la tarea de un hábito (título que contiene su `name` o su `todoist_task`) a un día que no está en sus `days`; el plan mínimo no lo propone; su tarea clave no toca (`why` `off_day`, el primero de `refusal`, que heredan la segunda pasada y el plan B) y el cierre no la da por «sin hacer». El agente propone `days` con [Guardar] (102). Regla asimétrica: quitar días a una tarea clave vale conversando; añadirlos, solo a mano o con `/configurar-jimic` | En m04 el agente metía «entre semana no» en una nota que el esquema no lee. Notas del chat del #58 | — |
+| 160 | **Lo de esta mañana en el plan: la tarea de un hábito se puede mover, lo demás no se toca** (F2-b; matiza H1-7, decisión 61): en el modo `plan`, la tarea de un hábito cuya hora de hoy ya pasó se puede mover a más tarde hoy, a un hueco libre (o a otro día de sus `days`), pero no borrar ni mover a otra hora pasada; cualquier otra tarea pasada de hoy no se toca (la ve el cierre). Es la lógica de las atrasadas de ayer (129) aplicada a la mañana. En p02, `no_item_on` deja fuera los estiramientos de las 8:05 | p02 tocó una tarea de la mañana en la medida de la 1.16, y «empieza antes de ahora» no lo cubría. Decisión de Pedro sobre el plan del #58 | — |
 
 ### Correspondencia con las decisiones candidatas de la referencia
 

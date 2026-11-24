@@ -194,6 +194,8 @@ class DayCloseRunner:
             habit = habits.get(intention.habit) if intention is not None else None
             if habit is None:
                 continue
+            if status.off_day and status.done_by is None:
+                continue  # its habit does not apply today (decision F2-a): nothing to say
             states.append((habit.name, _key_state(status)))
             if status.done_by in ("button", "apex"):
                 ids = set(closed.get(status.intent, ()))

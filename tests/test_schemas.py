@@ -1,6 +1,6 @@
 """Esquemas de `intenciones.yaml` y `limites.yaml`: estrictos, con horas y duraciones propias."""
 
-from datetime import time, timedelta
+from datetime import date, time, timedelta
 from typing import Any
 
 import pytest
@@ -10,6 +10,7 @@ from jimic.memory.schemas import (
     TOOL_NAMES,
     DailyPlan,
     DayClose,
+    Habit,
     Intentions,
     Limits,
     cross_check,
@@ -290,6 +291,43 @@ def test_los_ids_repetidos_se_rechazan_en_la_segunda_aparicion():
         (("habits", 1, "id"), "duplicate_id"),
         (("intentions", 2, "id"), "duplicate_id"),
         (("intentions", 2, "days"), "repeated_days"),
+    ]
+
+
+# --- Los días de un hábito (decisión F2-a) -----------------------------------------------------
+
+
+def test_un_habito_sin_days_toca_todos_los_dias():
+    """Sin `days`, todo igual que antes: los ficheros de hoy siguen valiendo."""
+    lectura = Habit.model_validate(habit())
+    assert lectura.days is None
+    assert all(lectura.on(date(2030, 1, day)) for day in range(7, 14))
+
+
+def test_un_habito_con_days_solo_toca_esos_dias():
+    """Pilla un desfase de `weekday()`: el 10-ene-2030 es jueves, el 12 sábado y el 13 domingo."""
+    finde = Habit.model_validate(habit(days=["sat", "sun"]))
+    assert not finde.on(date(2030, 1, 10))
+    assert finde.on(date(2030, 1, 12)) and finde.on(date(2030, 1, 13))
+    assert not finde.on(date(2030, 1, 14))
+
+
+@pytest.mark.parametrize(
+    ("days", "expected"),
+    [
+        ([], [(("habits", 0, "days"), "too_short")]),
+        (["sab"], [(("habits", 0, "days", 0), "literal_error")]),
+        ("sat", [(("habits", 0, "days"), "list_type")]),
+    ],
+)
+def test_los_days_del_habito_tienen_su_formato(days, expected):
+    assert errors(Intentions, intentions_with(habits=[habit(days=days)])) == expected
+
+
+def test_los_dias_repetidos_de_un_habito_se_rechazan():
+    data = intentions_with(habits=[habit(days=["sat", "sun", "sat"])])
+    assert cross_check(Intentions.model_validate(data)) == [
+        (("habits", 0, "days"), "repeated_days")
     ]
 
 

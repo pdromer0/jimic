@@ -203,7 +203,8 @@ pasadas cada uno, con un informe de porcentajes. Nunca en el CI.
   `medium`, `low`), duración típica, momento del día y la tarea de Todoist con la que se reconoce.
   Una intención `key_task` apunta a un hábito con `habit: <id>`, y el nombre de Todoist sale del
   hábito (1.3-c). Un hábito, como mucho, lleva `training: true`: el entreno, que APEX da por hecho
-  (tarea 1.15).
+  (tarea 1.15). Un hábito puede llevar `days` (`[mon, …, sun]`, como los avisos): solo esos días;
+  sin él, todos (Fix #58, decisión 159 del diseño).
 - `preferencias.md` gana una tabla corta de iconos para las tareas habituales.
 - `limites.yaml` gana `max_deletions_per_day: 5` (zona protegida: conversando, solo baja).
 
@@ -224,6 +225,7 @@ habits:
     duration: 15m
     moment: evening
     todoist_task: "Estiramientos"
+    days: [sat, sun]             # opcional: solo esos días
 ```
 
 ### SQLite (H1-16)
@@ -249,7 +251,7 @@ función de purga con cortes absolutos en UTC (`jimic.memory.retention.purge`); 
 | `read_calendar` | Eventos de un día de los calendarios visibles: título, horas, `all_day`, si Pedro organiza y `declined` (si lo rechazó); sin descripción | Libre; contamina |
 | `read_tasks` | Tareas de hoy, vencidas y por proyecto | Libre; contamina (los títulos pueden venir de terceros) |
 | `read_apex_today` | Entreno previsto y hecho; objetivos de APEX; resumen de biométricos | Libre |
-| `propose_plan` | Propone crear, mover y borrar tareas, con su motivo; en el plan del día, también lo que el código pinta (saludo, hábitos que quedan fuera, línea del entreno e iconos; decisión 122, de la 1.14) | Libre (solo propone) |
+| `propose_plan` | Propone crear, mover y borrar tareas, con su motivo; en el plan del día, también lo que el código pinta (saludo, hábitos que quedan fuera, línea del entreno e iconos; decisión 122, de la 1.14). En el plan, el código le rechaza lo que pisa algo, empieza antes de ahora, toca lo pasado de esta mañana o lleva un hábito a un día que no le toca (decisiones 158 a 160, Fix #58) | Libre (solo propone) |
 | `propose_change` | Propone un cambio de memoria; lo escribe el código tras [Guardar] | Libre (solo propone); solo en una ejecución que no leyó el calendario ni las tareas (decisión 102, de la 1.12) |
 | `log_idea` | Propone apuntar una idea en `ideas.md`; la escribe el código tras [📝 Apuntar] | Libre (solo propone); la misma regla (decisión 103, que revisa la 100) |
 
@@ -311,7 +313,9 @@ Un solo mensaje de unas 25 líneas como máximo:
   tope de 4 propuestas; los de baja, nunca solos. Si uno de prioridad alta no cabe o tiene «hoy
   no», una línea con humor.
 - **Plan tardío (H1-7):** después de la ventana, solo el resto del día; lo pasado sin marcar se
-  menciona en una línea y se ve en el cierre.
+  menciona en una línea y se ve en el cierre. Matiz de la F2-b (Fix #58): la tarea de un hábito que
+  se pasó esta mañana sí se puede mover a más tarde, a un hueco libre (o a otro de sus días), nunca
+  borrar; lo demás de esta mañana no se toca. El código lo garantiza (decisión 160 del diseño).
 - **Incoherencias (H1-9):** solo si el evento aún no ha pasado; manda el calendario.
 - **APEX (H1-10):** solo lectura; «pasar el entreno a mañana» mueve la tarea de Todoist.
 - **Tono (H1-11):** cercano y algo gamberro; sube el humor y el reto cuando una prioridad alta
@@ -468,7 +472,7 @@ informe de `revisor-plan` (desde la P3); en las tareas de Telegram, una captura 
 | H1-4 | Un solo mensaje con una fila de botones numerada por elemento y una fila global; [Elegir] desaparece; igual en el cierre. Se confirma en el móvil durante las pruebas | Los botones de Telegram van debajo del mensaje; un mensaje por propuesta gastaría el tope de 8 |
 | H1-5 | Formato del plan de esta especificación, de unas 25 líneas; iconos de una tabla de `preferencias.md` para las tareas habituales y del modelo para el resto | Validado en el piloto; los iconos fijos se reconocen de un vistazo. Descartado: que los elija siempre el modelo |
 | H1-6 | Hábitos ausentes: alta siempre, media si queda sitio en el tope de 4, baja nunca sola | En el piloto el plan dejó fuera una prioridad diaria solo porque no se mencionó. Descartado: proponer todos hasta el tope |
-| H1-7 | Plan tardío: solo el resto del día; lo pasado sin marcar se menciona y se ve en el cierre | Plan más corto (decisión de Pedro). Descartado: preguntarlo en el plan con dos botones |
+| H1-7 | Plan tardío: solo el resto del día; lo pasado sin marcar se menciona y se ve en el cierre; la tarea de un hábito de esta mañana se puede mover a más tarde (F2-b, Fix #58) | Plan más corto (decisión de Pedro). Descartado: preguntarlo en el plan con dos botones |
 | H1-8 | Cierre en un solo mensaje que se actualiza: lo hecho (marcado en Todoist), «la haré» (nunca se mueve ni se marca solo) y lo pendiente, con [Hecha] [La haré] [Mañana] por elemento; lo marcado antes de su hora solo se anota | Un solo cierre al día. Descartados: una pregunta previa aparte (gasta el tope) y una categoría «declarada hecha» (si Pedro dice que está hecha, se marca) |
 | H1-9 | Incoherencias entre una tarea y un evento aún por llegar: una línea y una propuesta de ajuste con botón; manda el calendario | Se arregla con un toque. Descartado: solo avisar |
 | H1-10 | APEX, solo lectura en el H1 y el H2, garantizado por el lector; se revisa en el H3 | Decisión de Pedro del 18-nov-2026 |
@@ -3468,3 +3472,121 @@ medida). Todo inventado; no toca Todoist, Calendar ni Telegram: no hay restos qu
 
 **Captura del móvil:** `JIMIC_ENTORNO=dev uv run jimic telegram demo` (la lanza Pedro); el último
 mensaje es el cierre del e08.
+
+### Fix #58: las reglas duras del plan
+
+**Qué se hizo.** Issue #58, rama `fix/h1-plan-reglas-duras`, aprobada a las 10:52 del 24-nov-2026.
+Durante la implementación, Pedro matizó el plan con la decisión F2-b: la tarea de un hábito que se
+pasó esta mañana sí se puede mover a más tarde. Commits:
+- `refactor(plan)`: las cuentas de horas del catálogo, en `jimic.plan.rules` (e5c571c);
+- `feat(memoria)`: `days` en cada hábito (3590bfc) y la regla asimétrica de sus días (dffd38b);
+- `feat(agente)`: el rechazo en `propose_plan` (e4662f4) y las líneas del prompt (9706484);
+- `feat(latido)`: `days` en el plan mínimo y en la tarea clave (f5e143a);
+- `feat(evals)`: m04 y p02 (695b649);
+- `fix(memoria)`: lo que va a mano dice su fichero (13c0a5d);
+- las correcciones de la revisión propia, `fix(cierre)` (42d9ba9), `fix(agente)` (c992c64),
+  `fix(memoria)` (b70a01a) y `refactor(evals)` (3744640);
+- `docs(diseno)` y `docs(hito-1)`.
+
+**Decisiones:** 1.16-e, F2-a y F2-b son las decisiones 158, 159 y 160 del diseño. Sin ADR: la
+guardia no cambia (en el plan, `propose_plan` se restringe; ninguna herramienta se amplía).
+
+**Decisiones del diff** (lo que el plan interpretaba, y lo que salió al implementar):
+- **Solo en el modo `plan`.** En la conversación y en `follow_up`, nada cambia: un «crea X a las
+  10» de Pedro encima de una reunión se sigue proponiendo, y leer el calendario dentro de
+  `propose_plan` contaminaría una ejecución que propone memoria.
+- **Una sola función:** `jimic.plan.rules` (`clashes`, `starts_before`, `mentions`) es la de
+  `no_overlap` y `due_from_now` del catálogo y la de `refusals`, lo que `propose_plan` le dice al
+  agente: todos los motivos de la llamada a la vez («El elemento 2: pisa «Reunión de equipo»
+  10:00–11:00»), y la llamada entera no se anota.
+- **Fuentes:** el calendario y las tareas de hoy, una vez por ejecución (`RunState.day_sources`),
+  y no la fuente que `tool_levels` le niega al agente. Una fuente caída o que lanza deja esa parte
+  sin mirar. Solapes solo de hoy, como el catálogo.
+- **Días, a cualquier fecha:** crear o mover la tarea de un hábito a un día que no está en sus
+  `days` se rechaza («“Estiramientos” no toca el jueves (sus días: sábado, domingo)»). «La tarea
+  de un hábito» es la que contiene su `name` o su `todoist_task`, como `includes_habit`.
+- **Tarea clave:** `off_day` va el primero en `refusal` (hoy no toca, aunque esté hecha). El cierre
+  no la da por «sin hacer» (revisión propia).
+- **Regla asimétrica:** por id de tarea clave, los días de **su** hábito en cada versión (sin
+  `days`, los siete), que solo pueden bajar. La nota de lo que va a mano nombra su fichero: decía
+  `limites.yaml` también para el `spacing`, desde la 1.15-b.
+- **Lo de esta mañana (F2-b):** mover o borrar una tarea de hoy cuya hora ya pasó se rechaza si
+  no es de un hábito; la de un hábito se puede mover (no a otra hora pasada) pero no borrar.
+- **Tests que cambian por la regla:** los del plan que proponían encima de la reunión inventada o
+  varias tareas sin duración a la misma hora pasan a una hora libre (eran fixtures que la violaban),
+  y el de la pasada que pisaba la reunión pasa a comprobar el rechazo, con otro para el suspenso
+  por una comprobación.
+
+**Cambios de comprobación** (por decisión de diseño, no para cuadrar con el modelo):
+- **m04:** `proposes_change(intenciones.yaml, estiramientos, days, sat, sun)`, en vez de
+  `preferencias.md`: el criterio de días vive en el hábito (F2-a). `proposes_change` admite uno o
+  más textos, todos en el texto nuevo. p06 no cambia.
+- **p02:** `no_item_on` deja fuera los estiramientos de las 8:05, la tarea de un hábito (F2-b);
+  meditación y webinar siguen intocables.
+
+**Valores a mano** (código independiente, antes de implementar): jueves 10-ene-2030 (`thu`; el 12
+y el 13, `sat` y `sun`). Con la reunión de 10:00 a 11:00: 11:00 (30 min) no la pisa; 10:30 sí;
+9:30 no; 9:45 sí; un instante a las 10:59 la pisa y a las 11:00 no. Contra una tarea sin duración a
+las 10:00, 10:00 (30 min) pisa y 9:30 no; dos instantes a las 18:00 se pisan. Con la comida de 14:00
+a 15:00 y el gimnasio de 12:00 a 13:15: ofertas a las 13:30 cabe; a las 13:45 (hasta las 14:15)
+pisa la comida, y con la comida movida a las 15:00, cabe. A las 12:30, 12:00 es pasado y 12:30 no.
+Días: ninguno → `[sat, sun]` acepta; `[sat, sun]` → `[fri, sat, sun]`, ninguno o `[mon]` relaja;
+`[sat, sun]` → `[sun]` acepta.
+
+**Medida** (24-nov-2026, 11:12, `jimic-dev`, `claude-sonnet-5-5`, 3 pasadas, 21 escenarios; antes
+de las correcciones de la revisión propia, que no cambian lo que ven los escenarios):
+**98,4 % (62/63)** ❌, en 1,14 $ (72 ejecuciones del agente, 0,016 $ cada una).
+
+| Bloque | Duras | Criterio | Todas |
+| --- | --- | --- | --- |
+| Plan (13) | **100 % (39/39)** ✅ | 97,4 % (38/39) ❌ | 97,4 % ❌ |
+| Cierre (3) | **100 % (9/9)** ✅ | 100 % (9/9) ✅ | 100 % ✅ |
+| Memoria (5) | **100 % (15/15)** ✅ | 100 % (15/15) ✅ | 100 % ✅ |
+
+- Comparada con `plan-20261124-1019` (la de la 1.16), sobre los 19 escenarios comunes: 93,0 % →
+  98,2 %; cambiados, p02 y m04.
+- Las duras del plan, al 100 %: el criterio de aceptación del issue. p05 `creates` (en la
+  conversación, que el código no toca) no falló esta vez.
+- Falla p04 ×1 `includes_habit(cena)`, de criterio: lo que la 1.16 dejó para la 1.17.
+- m04, 3 de 3: propone `days` en el hábito con [Guardar].
+Informe: `plan-20261124-1112.json` y `.md` en la copia `dev`.
+
+**Versiones incorrectas** (aplicadas y deshechas con un script; el árbol quedó limpio):
+
+| # | Versión incorrecta | Predicción | Observado |
+| --- | --- | --- | --- |
+| 1 | El rechazo usa intervalos cerrados | Rojo «contiguo no pisa»; verde «encima de un evento, sí» | Como se predijo, más el `no_overlap` del catálogo (la misma función) |
+| 2 | Lo que el plan mueve no libera su hueco | Rojo «mover libera el hueco»; verde el del evento | Como se predijo |
+| 3 | El plan mínimo ignora `days` | Rojo «el mínimo no lo propone un jueves»; verde el del agente | Como se predijo |
+| 4 | Añadir días a una tarea clave se acepta conversando | Rojo el de la regla asimétrica; verde «quitar días, sí» | Como se predijo (6 rojos: los de añadir y el de quitar los `days`) |
+| 5 | (F2-b) La regla deja tocar cualquier tarea pasada | Rojo el del webinar; verde mover el gimnasio de la mañana | Como se predijo, también en `propose_plan` |
+| 6 | `refusal` sin `off_day` | Rojo «su tarea clave no toca un jueves»; verde «sí el día que le toca» | Como se predijo, más el `why` y «manda sobre lo hecho» |
+| 7 | La regla en todos los modos | Rojo «en la conversación se propone igual»; verde los del plan | Como se predijo, más dos de la conversación que proponían a la misma hora |
+
+**Revisión propia** (`/code-review medium`, 9 hallazgos: 7 corregidos y 2 explicados):
+
+| Hallazgo | Qué se hizo |
+| --- | --- |
+| El cierre daba «sin hacer» la tarea clave de un día que no le toca | Corregido (42d9ba9) |
+| `mentions` busca subcadenas, no el título exacto | Explicado: es la interpretación aprobada («como `includes_habit`», F2-b); va a «Pendiente» |
+| Una tarea movida en una llamada anterior que no es de hoy perdía su duración | Corregido (c992c64): `RunState.read_tasks` |
+| `propose_plan` leía el calendario con `read_calendar` en `blocked` | Corregido (c992c64): `ToolContext` lleva los límites de la guardia |
+| `spacing` y `days` relajados a la vez: solo se decía el `spacing` | Corregido (b70a01a) |
+| El docstring de `manual_note` decía «nunca el fichero» | Corregido (b70a01a) |
+| Se lee el calendario dos veces (herramienta y runner) | Explicado: la herramienta lee una vez por ejecución, antes de que el runner pinte; compartirlo ataría la herramienta al runner |
+| La comprobación del día de la semana, repetida | Corregida (3744640): `on_days` |
+| Envoltorios de una línea en el catálogo | Corregido (3744640) |
+
+Cada corrección lleva su test, que falla con el código de antes (los refactors, sin tocar tests).
+
+**Medidas.** La N3, tras la revisión: en verde en 2:17, 2064 tests y 13 de contrato saltados (eran 1995 tras la 1.16); pre-commit 0:15, pytest 2:01 y gitleaks de la historia 0:01. La documentación se escribió mientras corría.
+
+**Pendiente:**
+- **«La tarea de un hábito» por subcadena:** «Leer contrato» cuenta como el hábito «Leer». Si
+  molesta con días reales, pasar al título exacto (`_named` de las tareas clave).
+- **p04 `includes_habit(cena)`** (criterio): el prompt del plan con los 10 planes de Pedro, en la
+  1.17.
+- **El disparador del módulo `xdist`** (1.17).
+
+**Pruebas contra servicios reales:** solo la API de Anthropic con la clave de `jimic-dev` (la
+medida). Todo inventado; no toca Todoist, Calendar ni Telegram: no hay restos que comprobar.

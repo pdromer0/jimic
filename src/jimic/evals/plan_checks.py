@@ -19,14 +19,9 @@ Rules shared by the checks:
 
 - Titles are compared without case and with their spaces joined (`normalized`); «contains» is a
   substring of the normalized title.
-- Times are local. An interval is half-open, `[start, end)`: a meeting of 10:00 to 11:00 and a
-  task at 11:00 do not overlap. A task or a proposal with a time and no duration is an instant,
-  which overlaps an interval that contains it (`start <= t < end`) or the same instant.
-- `no_overlap` compares what the run proposes with a time today (to create, or to move) with the
-  events of today with a time that Pedro did not decline, with the tasks of today with a time, and
-  with each other. A task that the run moves or deletes leaves its slot free, and an event with
-  the same title as what is proposed is that same thing, not a clash (a task moved to the time of
-  its event, H1-9).
+- `no_overlap` and `due_from_now` are the functions of `jimic.plan.rules`, the same ones
+  `propose_plan` refuses to the agent in the plan (decision 1.16-e): half-open intervals, what the
+  run moves or deletes frees its slot, an event with the same title is no clash (H1-9).
 - `no_duplicates` compares **titles only** (with the open tasks that stay, the events and the
   other creations): «by intention» («Andar 5 km» and «Paseo 5 km») is no function of the data, so
   the scenarios that test it say so with `deletes_exactly` or `no_create_title`.
@@ -39,9 +34,18 @@ from datetime import date, datetime, time, timedelta
 from typing import Any, Literal
 from zoneinfo import ZoneInfo
 
-from jimic.agent.proposals import parse_due
 from jimic.memory.schemas import Habit
 from jimic.plan.day import normalized
+from jimic.plan.rules import (
+    clashes,
+    day_of,
+    due_of,
+    find_task,
+    mentions,
+    span_of,
+    starts_before,
+    touched,
+)
 from jimic.tools.calendar import CalendarEvent
 from jimic.tools.todoist import TodoistTask
 
@@ -96,12 +100,6 @@ class CheckInput:
         return self.now.date()
 
 
-type Span = tuple[datetime, datetime]
-"""`[start, end)`; an instant has `start == end`."""
-type Titled = tuple[Span, str]
-"""A span and the normalized title of what fills it."""
-
-
 def _creates(data: CheckInput) -> list[dict[str, Any]]:
     return [item for item in data.items if item["action"] == "create"]
 
@@ -110,88 +108,11 @@ def _of(data: CheckInput, action: str) -> list[dict[str, Any]]:
     return [item for item in data.items if item["action"] == action]
 
 
-def _due(item: dict[str, Any], timezone: ZoneInfo) -> date | datetime:
-    value = parse_due(str(item["due"]))
-    return value.replace(tzinfo=timezone) if isinstance(value, datetime) else value
-
-
-def _day_of(value: date | datetime, timezone: ZoneInfo) -> date:
-    return value.astimezone(timezone).date() if isinstance(value, datetime) else value
-
-
-def _span(start: datetime, minutes: int | None) -> Span:
-    return start, start + timedelta(minutes=minutes or 0)
-
-
-def _overlap(a: Span, b: Span) -> bool:
-    (a1, a2), (b1, b2) = a, b
-    if a1 == a2 and b1 == b2:
-        return a1 == b1
-    if a1 == a2:
-        return b1 <= a1 < b2
-    if b1 == b2:
-        return a1 <= b1 < a2
-    return a1 < b2 and b1 < a2
-
-
-def _task(data: CheckInput, task_id: str) -> TodoistTask | None:
-    return next((task for task in data.tasks if task.id == task_id), None)
-
-
-def _touched(data: CheckInput) -> set[str]:
-    return {str(item["task_id"]) for item in data.items if item["action"] in ("move", "delete")}
-
-
-def _proposed_spans(data: CheckInput) -> list[Titled]:
-    spans = []
-    for item in data.items:
-        if item["action"] not in ("create", "move"):
-            continue
-        due = _due(item, data.timezone)
-        if not isinstance(due, datetime) or due.date() != data.today:
-            continue
-        if item["action"] == "create":
-            minutes, title = item.get("duration_minutes"), str(item["title"])
-        else:
-            task = _task(data, str(item["task_id"]))
-            minutes = task.duration_minutes if task is not None else None
-            title = task.title if task is not None else str(item["snapshot"]["title"])
-        spans.append((_span(due, minutes), normalized(title)))
-    return spans
-
-
-def _fixed_spans(data: CheckInput) -> list[Titled]:
-    spans = []
-    for event in data.events:
-        if event.declined or event.all_day or not isinstance(event.start, datetime):
-            continue
-        assert isinstance(event.end, datetime)
-        span = (event.start.astimezone(data.timezone), event.end.astimezone(data.timezone))
-        spans.append((span, normalized(event.title)))
-    touched = _touched(data)
-    for task in data.tasks:
-        if task.id in touched or not isinstance(task.due, datetime):
-            continue
-        start = task.due.astimezone(data.timezone)
-        if start.date() == data.today:
-            spans.append((_span(start, task.duration_minutes), normalized(task.title)))
-    return spans
-
-
 def _habit(data: CheckInput, habit_id: str) -> Habit:
     found = next((habit for habit in data.habits if habit.id == habit_id), None)
     if found is None:
         raise CheckError(f"el hábito {habit_id} no está en intenciones.yaml")
     return found
-
-
-def _names(habit: Habit) -> tuple[str, str]:
-    return normalized(habit.name), normalized(habit.todoist_task)
-
-
-def _mentions(title: str, habit: Habit) -> bool:
-    text = normalized(title)
-    return any(name in text for name in _names(habit))
 
 
 def _hhmm(text: str) -> time:
@@ -204,14 +125,14 @@ def _hhmm(text: str) -> time:
 def includes_habit(data: CheckInput, habit_id: str) -> bool:
     """A creation whose title contains the habit, or a move to today of a task that does."""
     habit = _habit(data, habit_id)
-    if any(_mentions(str(item["title"]), habit) for item in _creates(data)):
+    if any(mentions(str(item["title"]), habit) for item in _creates(data)):
         return True
     for item in _of(data, "move"):
-        task = _task(data, str(item["task_id"]))
+        task = find_task(data.tasks, str(item["task_id"]))
         title = task.title if task is not None else str(item["snapshot"]["title"])
         if (
-            _mentions(title, habit)
-            and _day_of(_due(item, data.timezone), data.timezone) == data.today
+            mentions(title, habit)
+            and day_of(due_of(item, data.timezone), data.timezone) == data.today
         ):
             return True
     return False
@@ -236,13 +157,8 @@ def max_new(data: CheckInput, count: str) -> bool:
 
 
 def no_overlap(data: CheckInput) -> bool:
-    proposed, fixed = _proposed_spans(data), _fixed_spans(data)
-    for index, (span, title) in enumerate(proposed):
-        if any(_overlap(span, other) for other, name in fixed if name != title):
-            return False
-        if any(_overlap(span, other) for other, _ in proposed[index + 1 :]):
-            return False
-    return True
+    """Nothing proposed with a time today steps on anything (`jimic.plan.rules.clashes`)."""
+    return not clashes(data.items, data.tasks, data.events, data.now)
 
 
 def no_duplicates(data: CheckInput) -> bool:
@@ -259,16 +175,8 @@ def no_duplicates(data: CheckInput) -> bool:
 
 def due_from_now(data: CheckInput) -> bool:
     """What is created or moved goes from now on: a time not before now, a day not before
-    today."""
-    for item in data.items:
-        if item["action"] not in ("create", "move"):
-            continue
-        due = _due(item, data.timezone)
-        if isinstance(due, datetime) and due < data.now:
-            return False
-        if _day_of(due, data.timezone) < data.today:
-            return False
-    return True
+    today (`jimic.plan.rules.starts_before`)."""
+    return not any(starts_before(item, data.now) for item in data.items)
 
 
 def no_move(data: CheckInput, task_id: str) -> bool:
@@ -276,7 +184,7 @@ def no_move(data: CheckInput, task_id: str) -> bool:
 
 
 def no_item_on(data: CheckInput, *task_ids: str) -> bool:
-    return not (_touched(data) & set(task_ids))
+    return not (touched(data.items) & set(task_ids))
 
 
 def deletes_exactly(data: CheckInput, *task_ids: str) -> bool:
@@ -296,8 +204,8 @@ def moves(data: CheckInput, task_id: str, target: str) -> bool:
     for item in _of(data, "move"):
         if str(item["task_id"]) != task_id:
             continue
-        due = _due(item, data.timezone)
-        day = _day_of(due, data.timezone)
+        due = due_of(item, data.timezone)
+        day = day_of(due, data.timezone)
         if target == "hoy" and day == data.today:
             return True
         if target == "mañana" and day == data.today + timedelta(days=1):
@@ -320,10 +228,10 @@ def creates(data: CheckInput, title: str, at: str, ends_by: str) -> bool:
     for item in _creates(data):
         if normalized(title) not in normalized(str(item["title"])):
             continue
-        due = _due(item, data.timezone)
+        due = due_of(item, data.timezone)
         if not isinstance(due, datetime) or due.date() != data.today:
             continue
-        start, end = _span(due, item.get("duration_minutes"))
+        start, end = span_of(due, item.get("duration_minutes"))
         if start.time() == _hhmm(at) and end <= datetime.combine(
             data.today, _hhmm(ends_by), tzinfo=data.timezone
         ):
@@ -402,13 +310,14 @@ def no_change_to(data: CheckInput, file: str) -> bool:
     return not any(entry.get("file") == file for entry in data.memory)
 
 
-def proposes_change(data: CheckInput, file: str, text: str) -> bool:
-    """A change of `file` whose new text contains `text` (normalized)."""
-    wanted = normalized(text)
+def proposes_change(data: CheckInput, file: str, *texts: str) -> bool:
+    """A change of `file` whose new text contains every one of `texts` (normalized): m04 asks for
+    the habit and its `days` (decision F2-a)."""
+    wanted = [normalized(text) for text in texts]
     return any(
         entry.get("action") == "change"
         and entry.get("file") == file
-        and wanted in normalized(str(entry.get("after") or ""))
+        and all(word in normalized(str(entry.get("after") or "")) for word in wanted)
         for entry in data.memory
     )
 
@@ -443,10 +352,12 @@ CATALOG: dict[str, tuple[Callable[..., bool], int | None, Kind]] = {
     "no_action_claim": (no_action_claim, 0, "dura"),
     "no_saved_claim": (no_saved_claim, 0, "dura"),
     "no_change_to": (no_change_to, 1, "dura"),
-    "proposes_change": (proposes_change, 2, "criterio"),
+    "proposes_change": (proposes_change, None, "criterio"),
     "explains_config": (explains_config, 0, "criterio"),
 }
 """Name → (function, number of arguments, `None` for one or more; its kind, decision 131)."""
+MIN_ARGS = {"proposes_change": 2}
+"""The least arguments of a check with `None`, when it is more than one: a file and a text."""
 PLAN_ONLY = frozenset({"learned_line", "training_line"})
 """They look at the painted plan: only in the checks of the plan."""
 KIND_KEY = "tipo"
@@ -473,7 +384,9 @@ def parse_check(raw: object) -> Check:
     if name not in CATALOG:
         raise CheckError(f"comprobación desconocida: {name}")
     _, arity, default = CATALOG[name]
-    if (arity is None and not args) or (arity is not None and len(args) != arity):
+    if (arity is None and len(args) < MIN_ARGS.get(name, 1)) or (
+        arity is not None and len(args) != arity
+    ):
         raise CheckError(f"{name} no lleva {len(args)} argumentos")
     if kind is not None and kind not in KINDS:
         raise CheckError(f"{name}: tipo {kind} desconocido (dura o criterio)")

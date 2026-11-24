@@ -13,10 +13,14 @@ if some value moves and every value that moves goes the discreet way:
 | `tool_levels` | Only from `free` to `blocked` |
 | `sensitive_categories` | Any change is refused (it comes in hito 4) |
 | `intenciones.yaml`: the `spacing` of each key task (its `grace` without it) | Up |
+| `intenciones.yaml`: the `days` of the habit of each key task (without them, all seven) | Fewer |
 
-In `intenciones.yaml` only `spacing` is protected (decision 149, task 1.15-b): what is compared is
-the gap the code applies (`KeyTask.gap`), so lowering `grace` of a key task without `spacing`
-also lowers it and is refused too. A key task that is new, or removed, has nothing to compare.
+In `intenciones.yaml` only `spacing` and the `days` of a key task's habit are protected (decisions
+149 and F2-a): what is compared is what the code applies, the gap (`KeyTask.gap`), so lowering
+`grace` of a key task without `spacing` also lowers it and is refused too, and the days on which
+it insists, which must stay a subset (removing days is insisting less; adding them, insisting
+more). The days are those of the habit each version of the key task points to. A key task that is
+new, or removed, has nothing to compare; the days of a habit without a key task are free.
 
 A window is the set of minutes `[from, to)` of the day, crossing midnight when `from > to`;
 `from == to` is the whole day (decision 80). A tool missing from `tool_levels` counts as
@@ -26,7 +30,15 @@ A window is the set of minutes `[from, to)` of the day, crossing midnight when `
 from dataclasses import dataclass
 from datetime import time
 
-from jimic.memory.schemas import TOOL_NAMES, Intentions, KeyTask, Limits, Window, is_free
+from jimic.memory.schemas import (
+    TOOL_NAMES,
+    WEEKDAYS,
+    Intentions,
+    KeyTask,
+    Limits,
+    Window,
+    is_free,
+)
 
 MINUTES_PER_DAY = 24 * 60
 
@@ -162,4 +174,25 @@ def relaxed_spacing(old: Intentions, new: Intentions) -> tuple[str, ...]:
         f"{i.id}.spacing"
         for i in new.intentions
         if isinstance(i, KeyTask) and i.id in before and i.gap < before[i.id]
+    )
+
+
+def _key_days(intentions: Intentions) -> dict[str, frozenset[str]]:
+    """The days on which each key task may insist: those of its habit, all seven without them."""
+    habits = {habit.id: habit for habit in intentions.habits}
+    days = {}
+    for intention in intentions.intentions:
+        if isinstance(intention, KeyTask) and intention.habit in habits:
+            chosen = habits[intention.habit].days
+            days[intention.id] = frozenset(WEEKDAYS if chosen is None else chosen)
+    return days
+
+
+def relaxed_days(old: Intentions, new: Intentions) -> tuple[str, ...]:
+    """The key tasks, by id, that would insist on a day they did not: `<id>.days`."""
+    before = _key_days(old)
+    return tuple(
+        f"{intent}.days"
+        for intent, days in _key_days(new).items()
+        if intent in before and not days <= before[intent]
     )

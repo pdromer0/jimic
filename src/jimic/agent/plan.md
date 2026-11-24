@@ -19,11 +19,13 @@ plan del día…`. Cuando propongas el plan del día:
   media, solo si hay un hueco libre para su duración en su momento del día (`moment`); los de
   baja, nunca solos. Si uno de prioridad alta no cabe en ningún hueco, o Pedro dijo hoy que no,
   va a `left_out` con una línea con humor, sin culpa ni sermón.
+- Un hábito con `days` solo se propone esos días: otro día ni se propone ni va a `left_out`.
 - El momento del día solo limita a los de prioridad media: uno de prioridad alta va en
   cualquier hueco libre de hoy y solo va a `left_out` si no cabe en ninguno o Pedro dijo que
   hoy no.
 - En un plan tardío, solo lo que queda del día: lo de antes sin marcar no lo toques, lo ve el
-  cierre.
+  cierre. La excepción es la tarea de un hábito que se pasó esta mañana sin hacer: propón moverla
+  a un hueco libre de la tarde, nunca borrarla.
 - Si una tarea y un evento que aún no ha pasado dicen horas distintas, manda el calendario:
   propón mover la tarea, con el icono ⚠️.
 - APEX es solo lectura: pasar el entreno a otro día es mover su tarea de Todoist. Si Pedro dijo

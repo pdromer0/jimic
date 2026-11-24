@@ -25,7 +25,7 @@ TOMORROW = todoist_task("t-manana", "Dentista", due="2030-01-08T09:00:00")
 GYM = {
     "action": "create",
     "title": "Gimnasio",
-    "due": "2030-01-07T12:30",
+    "due": "2030-01-07T15:00",
     "duration_minutes": 75,
     "icon": "🏋️",
     "reason": "toca empuje",
@@ -98,7 +98,7 @@ def test_lo_que_crea_el_plan_con_su_boton_entra_en_el_plan(conn, tmp_path):
     w.tap(approval_id, 1, "ok")
     created = [i for i in day_plans.items(conn, MONDAY) if i.task_id != "t-comida"]
     assert [(i.status, i.scheduled_at) for i in created] == [
-        ("pending", madrid("2030-01-07T12:30"))
+        ("pending", madrid("2030-01-07T15:00"))
     ]
     assert w.api.find(created[0].task_id) is not None
 

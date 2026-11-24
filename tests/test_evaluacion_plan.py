@@ -324,23 +324,24 @@ GOOD_PLAN = {
 }
 
 
-def agent(plan: dict) -> FakeAgent:
+def agent(*plans: dict) -> FakeAgent:
+    """Lee las tres fuentes y llama a `propose_plan` con cada plan, en orden."""
     return FakeAgent(
         [
             ToolCall("read_calendar", {}),
             ToolCall("read_tasks", {}),
             ToolCall("read_apex_today", {}),
-            ToolCall("propose_plan", plan),
+            *(ToolCall("propose_plan", plan) for plan in plans),
             result_message("Listo"),
         ]
     )
 
 
-def one_pass(plan: dict, scenario_id: str = "p01"):
+def one_pass(*plans: dict, scenario_id: str = "p01"):
     suite = load_plan_suite(REAL_FILE)
     (scenario,) = suite.select([scenario_id])
     settings = Settings.model_validate(VALID_ENV)
-    fake = agent(plan)
+    fake = agent(*plans)
     return asyncio.run(run_pass(settings, suite, scenario, fake)), fake
 
 
@@ -355,11 +356,28 @@ def test_una_pasada_buena_cumple_todo_y_pinta_el_plan():
     assert "/jimic-plan-" in options.env["CLAUDE_CONFIG_DIR"]
 
 
-def test_una_pasada_que_pisa_la_reunion_falla_por_esa_comprobacion():
-    bad = {**GOOD_PLAN, "items": [{**GOOD_PLAN["items"][0], "due": "2030-01-10T10:30"}]}
-    result, _ = one_pass(bad)
-    assert not result.ok
-    assert set(result.failed) == {"includes_habit(ofertas)", "no_overlap"}
+def test_una_pasada_sin_un_habito_falla_por_esa_comprobacion():
+    """Una comprobación que falla suspende la pasada, y solo esa sale en `failed`."""
+    result, _ = one_pass({**GOOD_PLAN, "items": [GOOD_PLAN["items"][0]]})
+    assert result.code == "agent" and not result.ok
+    assert set(result.failed) == {"includes_habit(ofertas)"}
+
+
+STEPS_ON_MEETING = {**GOOD_PLAN, "items": [{**GOOD_PLAN["items"][0], "due": "2030-01-10T10:30"}]}
+
+
+def test_una_pasada_que_pisa_la_reunion_se_rechaza_al_agente_y_si_no_corrige_sale_el_minimo():
+    """Decisión 1.16-e: el código no deja pasar el solape (antes salía con `no_overlap` en
+    rojo); sin otra propuesta, el plan es el mínimo y la pasada falla."""
+    result, fake = one_pass(STEPS_ON_MEETING)
+    assert [o.is_error for o in fake.tool_outcomes][-1]
+    assert result.code == "minimal:no_proposal" and not result.ok
+
+
+def test_si_el_agente_corrige_tras_el_rechazo_la_pasada_cumple():
+    result, fake = one_pass(STEPS_ON_MEETING, GOOD_PLAN)
+    assert [o.is_error for o in fake.tool_outcomes][-2:] == [True, False]
+    assert result.code == "agent" and result.ok, result.failed
 
 
 def test_si_sale_el_plan_minimo_la_pasada_falla_aunque_cumpla():
@@ -402,7 +420,7 @@ def test_el_gasto_de_una_pasada_de_dos_turnos_es_el_de_sus_tokens_y_no_el_acumul
 
 def test_la_pasada_escribe_los_cambios_de_ayer_y_sale_la_linea_aprendida():
     plan = {**GOOD_PLAN, "items": [GOOD_PLAN["items"][0]]}
-    result, _ = one_pass(plan, "p06")
+    result, _ = one_pass(plan, scenario_id="p06")
     assert "🧠 Desde ayer he aprendido: preferencias.md · cambiado" in result.painted
     assert result.ok, result.failed
 
@@ -621,6 +639,22 @@ def test_propone_el_cambio_en_su_fichero_y_no_en_otro():
     assert not holds({"proposes_change": ["intenciones.yaml", "max_messages_per_day"]}, data)
     assert not holds({"no_change_to": "limites.yaml"}, data)
     assert holds({"no_change_to": "preferencias.md"}, data)
+
+
+def test_propone_days_en_el_habito_con_todos_sus_textos():
+    """m04 (decisión F2-a): el hábito y sus `days`, todo en el texto nuevo; un argumento solo, el
+    fichero, no es una comprobación."""
+    after = (
+        '- {id: estiramientos, name: "Estiramientos", priority: medium, duration: 15m,\n'
+        '   moment: evening, todoist_task: "Estiramientos", days: [sat, sun]}'
+    )
+    days = {"action": "change", "file": "intenciones.yaml", "after": after}
+    m04 = {"proposes_change": ["intenciones.yaml", "estiramientos", "days", "sat", "sun"]}
+    assert holds(m04, on_text("x", [days]))
+    note = {"action": "change", "file": "intenciones.yaml", "after": "# estiramientos: sat y sun"}
+    assert not holds(m04, on_text("x", [note]))
+    with pytest.raises(CheckError, match="no lleva 1 argumentos"):
+        parse_check({"proposes_change": ["intenciones.yaml"]})
 
 
 @pytest.mark.parametrize(

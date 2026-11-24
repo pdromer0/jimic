@@ -81,8 +81,8 @@ NO_SKELETONS = (
     " otra vez."
 )
 MANUAL_TEXT = (
-    "Eso no te lo puedo guardar: en limites.yaml solo puedo hacerme más discreto. Si lo quieres,"
-    " cámbialo tú a mano en limites.yaml, sin reiniciar nada: {changes}. Más adelante, la sesión"
+    "Eso no te lo puedo guardar: en {files} solo puedo hacerme más discreto. Si lo quieres,"
+    " cámbialo tú a mano en {files}, sin reiniciar nada: {changes}. Más adelante, la sesión"
     " de configuración te ayudará con estos cambios."
 )
 MAX_MANUAL_LINE = 200
@@ -90,8 +90,8 @@ MAX_MANUAL_LINE = 200
 
 
 def manual_note(manual: list[ManualChange]) -> str | None:
-    """The text for what the asymmetric rule refused (1.13-a): the key and the line Pedro would
-    write, never the file."""
+    """The text for what the asymmetric rule refused (1.13-a): the file, the key and the line
+    Pedro would write, never the whole file."""
     parts = []
     for change in manual:
         keys = ", ".join(change.keys)
@@ -102,7 +102,10 @@ def manual_note(manual: list[ManualChange]) -> str | None:
             part = keys
         if part not in parts:
             parts.append(part)
-    return MANUAL_TEXT.format(changes="; ".join(parts)) if parts else None
+    if not parts:
+        return None
+    files = " y ".join(dict.fromkeys(change.file for change in manual))
+    return MANUAL_TEXT.format(files=files, changes="; ".join(parts))
 
 
 class Assistant:
