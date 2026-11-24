@@ -56,6 +56,13 @@ Moment = Literal["morning", "midday", "afternoon", "evening"]
 Weekday = Literal["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
 WEEKDAYS: tuple[Weekday, ...] = get_args(Weekday)
 """In the order of `date.weekday()`."""
+
+
+def on_days(days: list[Weekday] | None, day: date) -> bool:
+    """Whether `day` is one of `days` (of a habit or a notice); `None` is every day."""
+    return days is None or WEEKDAYS[day.weekday()] in days
+
+
 Count = Annotated[int, Field(ge=0)]
 Usd = Annotated[float, Field(ge=0, allow_inf_nan=False)]
 
@@ -102,7 +109,7 @@ class Habit(_Strict):
 
     def on(self, day: date) -> bool:
         """Whether the habit applies on `day`."""
-        return self.days is None or WEEKDAYS[day.weekday()] in self.days
+        return on_days(self.days, day)
 
 
 class _Intention(_Strict):

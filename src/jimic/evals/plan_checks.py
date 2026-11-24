@@ -108,31 +108,11 @@ def _of(data: CheckInput, action: str) -> list[dict[str, Any]]:
     return [item for item in data.items if item["action"] == action]
 
 
-def _due(item: dict[str, Any], timezone: ZoneInfo) -> date | datetime:
-    return due_of(item, timezone)
-
-
-def _day_of(value: date | datetime, timezone: ZoneInfo) -> date:
-    return day_of(value, timezone)
-
-
-def _task(data: CheckInput, task_id: str) -> TodoistTask | None:
-    return find_task(data.tasks, task_id)
-
-
-def _touched(data: CheckInput) -> set[str]:
-    return touched(data.items)
-
-
 def _habit(data: CheckInput, habit_id: str) -> Habit:
     found = next((habit for habit in data.habits if habit.id == habit_id), None)
     if found is None:
         raise CheckError(f"el hábito {habit_id} no está en intenciones.yaml")
     return found
-
-
-def _mentions(title: str, habit: Habit) -> bool:
-    return mentions(title, habit)
 
 
 def _hhmm(text: str) -> time:
@@ -145,14 +125,14 @@ def _hhmm(text: str) -> time:
 def includes_habit(data: CheckInput, habit_id: str) -> bool:
     """A creation whose title contains the habit, or a move to today of a task that does."""
     habit = _habit(data, habit_id)
-    if any(_mentions(str(item["title"]), habit) for item in _creates(data)):
+    if any(mentions(str(item["title"]), habit) for item in _creates(data)):
         return True
     for item in _of(data, "move"):
-        task = _task(data, str(item["task_id"]))
+        task = find_task(data.tasks, str(item["task_id"]))
         title = task.title if task is not None else str(item["snapshot"]["title"])
         if (
-            _mentions(title, habit)
-            and _day_of(_due(item, data.timezone), data.timezone) == data.today
+            mentions(title, habit)
+            and day_of(due_of(item, data.timezone), data.timezone) == data.today
         ):
             return True
     return False
@@ -204,7 +184,7 @@ def no_move(data: CheckInput, task_id: str) -> bool:
 
 
 def no_item_on(data: CheckInput, *task_ids: str) -> bool:
-    return not (_touched(data) & set(task_ids))
+    return not (touched(data.items) & set(task_ids))
 
 
 def deletes_exactly(data: CheckInput, *task_ids: str) -> bool:
@@ -224,8 +204,8 @@ def moves(data: CheckInput, task_id: str, target: str) -> bool:
     for item in _of(data, "move"):
         if str(item["task_id"]) != task_id:
             continue
-        due = _due(item, data.timezone)
-        day = _day_of(due, data.timezone)
+        due = due_of(item, data.timezone)
+        day = day_of(due, data.timezone)
         if target == "hoy" and day == data.today:
             return True
         if target == "mañana" and day == data.today + timedelta(days=1):
@@ -248,7 +228,7 @@ def creates(data: CheckInput, title: str, at: str, ends_by: str) -> bool:
     for item in _creates(data):
         if normalized(title) not in normalized(str(item["title"])):
             continue
-        due = _due(item, data.timezone)
+        due = due_of(item, data.timezone)
         if not isinstance(due, datetime) or due.date() != data.today:
             continue
         start, end = span_of(due, item.get("duration_minutes"))
