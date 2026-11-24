@@ -162,7 +162,13 @@ def paint(
         elif len(view.pending) > MAX_PENDING:
             header += MORE_PENDING.format(count=len(view.pending) - MAX_PENDING)
     items = [_task_item(task, day, content, table, timezone) for task in pending]
-    rating = Item(title=QUESTION, options=RATINGS, question=True, expired_text=NO_RATING)
+    rating = Item(
+        title=QUESTION,
+        options=RATINGS,
+        question=True,
+        expired_text=NO_RATING,
+        data={"day": day.isoformat()},
+    )
     tally = None
     if content.plan:
         tally = Tally(

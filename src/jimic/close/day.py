@@ -23,6 +23,7 @@ from zoneinfo import ZoneInfo
 
 from jimic.clock import local_day_bounds
 from jimic.execution.rules import due_day
+from jimic.memory.schemas import Window
 from jimic.plan.day import clip, hour, normalized
 from jimic.tools.apex_schema import ApexSnapshot
 from jimic.tools.calendar import CalendarDay
@@ -94,6 +95,13 @@ def close_view(
     )
     marked = {t.id: t.completed_at for t in done_tasks if t.completed_at is not None}
     return CloseView(tuple(titles), pending, done_ids, marked)
+
+
+def morning_after(day: date, quiet: Window, timezone: ZoneInfo) -> datetime:
+    """«La mañana siguiente» of the close of `day` (decision 1.16-b, as task 1.16 reads it): the
+    end of the quiet hours of the next day. Its buttons and its rating last until then, and the
+    definitive figure of «plan cumplido» is worked out from then on."""
+    return datetime.combine(day + timedelta(days=1), quiet.end, tzinfo=timezone)
 
 
 # --- [➡️ Mañana] ---------------------------------------------------------------------------------
