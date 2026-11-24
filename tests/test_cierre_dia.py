@@ -234,3 +234,12 @@ def test_una_tarea_clave_cuya_tarea_se_llama_distinto_no_se_repite():
     assert close_view(open_today(), completed, [by_id], THURSDAY).done == ("Entrenar fuerza",)
     by_title = KeyDone("Gimnasio", frozenset(), "Entrenar fuerza")
     assert close_view(open_today(), completed, [by_title], THURSDAY).done == ("Entrenar fuerza",)
+
+
+def test_un_evento_nocturno_que_empezo_hoy_no_es_el_de_manana():
+    """Revisión propia: el vuelo de las 22:00 de hoy que acaba mañana no sale como primer evento
+    de mañana. Pilla la lista de reserva con eventos con hora de otro día."""
+    overnight = event(at("2030-01-10T22:00"), minutes=180, title="Vuelo inventado")
+    assert tomorrow_line(calendar_with(overnight), apex_e08(), FRIDAY, MADRID).startswith(
+        "🔮 Mañana: calendario libre ·"
+    )

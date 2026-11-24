@@ -189,10 +189,13 @@ def _first_event(calendar: CalendarDay, tomorrow: date, timezone: ZoneInfo) -> s
     if timed:
         moment, title = timed[0]
         return f"{hour(moment)} {clip(title, TOMORROW_TITLE)}"
-    others = sorted(normalized(event.title) for event in events)
-    if others:
-        first = next(e.title for e in events if normalized(e.title) == others[0])
-        return clip(first, TOMORROW_TITLE)
+    # Only the all-day ones: a timed event that began today (overnight) is not tomorrow's.
+    all_day = sorted(
+        (e for e in events if e.all_day or not isinstance(e.start, datetime)),
+        key=lambda e: normalized(e.title),
+    )
+    if all_day:
+        return clip(all_day[0].title, TOMORROW_TITLE)
     return FREE_DAY
 
 
