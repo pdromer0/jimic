@@ -24,6 +24,7 @@ habits: []                                  # tus hábitos; los rellena la puest
 #     moment: evening                       # morning, midday, afternoon o evening (pista)
 #     todoist_task: "Leer"                  # la tarea de Todoist con la que se reconoce
 #     training: false                       # true en el entreno (uno): cuenta lo de APEX
+#     days: [mon, tue, wed, thu, fri]       # opcional: solo esos días (sin él, todos)
 #
 # Ejemplo inventado de tarea clave, un hábito que además insiste. Va en `intentions`:
 #   - id: insistir_lectura                  # identificador, único entre las intenciones

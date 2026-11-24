@@ -68,6 +68,10 @@ intentions:
     priority: high
 """
 """`habit:` en la línea 12."""
+REPEATED_HABIT_DAYS = UNKNOWN_HABIT.replace(
+    '    todoist_task: "Leer"\n', '    todoist_task: "Leer"\n    days: [sat, sun, sat]\n'
+).replace("habit: habito_inventado", "habit: lectura")
+"""`days` repetidos del hábito en la línea 8."""
 
 
 @pytest.fixture
@@ -193,6 +197,14 @@ def test_una_key_task_con_un_habito_que_no_existe_da_su_linea(config_dir):
     write(config_dir, "intenciones.yaml", UNKNOWN_HABIT)
     assert report_of(config_dir, "intenciones.yaml").problems == (
         Problem(12, "intentions[0].habit: no apunta a ningún hábito"),
+    )
+
+
+def test_unos_dias_repetidos_de_un_habito_dan_su_linea(config_dir):
+    """`jimic config check` también mira los `days` del hábito (decisión F2-a)."""
+    write(config_dir, "intenciones.yaml", REPEATED_HABIT_DAYS)
+    assert report_of(config_dir, "intenciones.yaml").problems == (
+        Problem(8, "habits[0].days: días repetidos"),
     )
 
 
