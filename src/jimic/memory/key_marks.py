@@ -91,6 +91,18 @@ def note_moved(conn: sqlite3.Connection, day: date, task_id: str, moment: dateti
     )
 
 
+def note_jimic_move(
+    conn: sqlite3.Connection, day: date, task_id: str, moment: datetime, to_day: date | None
+) -> int:
+    """JimiC moved `task_id` on the local `day` to `to_day` (`None`: no date): a move of JimiC is
+    not the jump of a key task (decision 1.15-j), and one out of `day` is «hoy no» for the key
+    tasks that saw it as theirs (decision 145). Returns how many «hoy no» it wrote."""
+    note_moved(conn, day, task_id, moment)
+    if to_day == day:
+        return 0
+    return moved_off_today(conn, day, task_id, moment)
+
+
 def of_day(conn: sqlite3.Connection, day: date) -> DayMarks:
     """Every mark of the local `day`, by intention, and the tasks JimiC moved."""
     rows = conn.execute(

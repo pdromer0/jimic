@@ -49,6 +49,7 @@ from jimic.plan.message import (
     learned_line,
     paint,
 )
+from jimic.plan.tries import DailyTries
 
 logger = logging.getLogger(__name__)
 
@@ -127,8 +128,7 @@ class DailyPlanRunner:
         self._timezone = timezone
         self._config_dir = config_dir
         self._sender = sender
-        self._tries: dict[tuple[date, str], int] = {}
-        """Tries of each plan intention today; only today's are kept."""
+        self._tries = DailyTries()
 
     def _now(self) -> datetime:
         return self._clock.now().astimezone(self._timezone)
@@ -148,13 +148,10 @@ class DailyPlanRunner:
             return
         if self._sender is None:
             raise RuntimeError("the plan has nowhere to go")
-        day = self._now().date()
-        key = (day, intent)
-        tries = self._tries.get(key, 0)
+        tries = self._tries.take(self._now().date(), intent)
         if tries >= MAX_TRIES:
             logger.warning("plan: given up today after %d tries", tries)
             return
-        self._tries = {k: v for k, v in self._tries.items() if k[0] == day} | {key: tries + 1}
         built = await self.build(intention, use_agent=tries < MAX_AGENT_TRIES)
         logger.info("plan: %s (try %d)", built.code, tries + 1)
         message_id = await self._sender.deliver(

@@ -141,10 +141,9 @@ class Executor:
         """A move of JimiC is not the jump of a key task (decision 1.15-j); one out of today
         stops the insistence of today with «hoy no» (decision 145)."""
         now = self._clock.now().astimezone(self._timezone)
-        key_marks.note_moved(self._conn, now.date(), task_id, now)
-        if due is None or due_day(due) != now.date():
-            if key_marks.moved_off_today(self._conn, now.date(), task_id, now):
-                logger.info("key task moved off today: not today")
+        to_day = None if due is None else due_day(due)
+        if key_marks.note_jimic_move(self._conn, now.date(), task_id, now, to_day):
+            logger.info("key task moved off today: not today")
 
     # --- At once ----------------------------------------------------------------------------
 
