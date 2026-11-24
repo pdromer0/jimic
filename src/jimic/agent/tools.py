@@ -67,12 +67,16 @@ from jimic.execution.rules import FOR_THE_AGENT, refusal
 from jimic.heartbeat.sources import Sources
 from jimic.memory import changes, conversations
 from jimic.memory.changes import IDEAS_FILE, ChangeRefused, Proposed
+from jimic.memory.live import read_valid
 from jimic.memory.onboarding import OBJECTIVES_FILE, copied_goal
+from jimic.memory.personal import INTENTIONS_FILE
+from jimic.memory.schemas import Intentions
+from jimic.plan.rules import refusals
 from jimic.tools.apex import ApexReader
 from jimic.tools.apex_schema import ApexSnapshot
 from jimic.tools.calendar import CalendarDay, CalendarReader
 from jimic.tools.failures import ToolFailure
-from jimic.tools.todoist import TaskList, TodoistReader
+from jimic.tools.todoist import TaskList, TodoistReader, TodoistTask
 
 logger = logging.getLogger(__name__)
 
@@ -143,6 +147,9 @@ class RunState:
     """The run read after proposing: what it proposed for the memory was dropped."""
     manual: list[ManualChange] = field(default_factory=list)
     """What the asymmetric rule refused in `limites.yaml`: Pedro may do it by hand (1.13-a)."""
+    day_sources: tuple[CalendarDay, TaskList] | None = None
+    """The calendar and the tasks of today that `propose_plan` read to check the plan of the day
+    (decision 1.16-e): once per run."""
 
     def close(self) -> None:
         """At the end of the run: a run that read external content proposes nothing for the
@@ -297,6 +304,47 @@ def build_tools(ctx: ToolContext) -> list[SdkMcpTool[Any]]:
                     " palabras como mucho"
                 )
 
+    async def day_sources() -> tuple[CalendarDay, TaskList]:
+        """Today's calendar and tasks, read once per run. A source that fails counts as down:
+        that part of the check is skipped, since nothing can be known (decision 1.16-e)."""
+        if ctx.run.day_sources is None:
+            contaminated()
+            calendar, tasks = await asyncio.gather(
+                ctx.calendar.read_day(today()), ctx.tasks.read_today(), return_exceptions=True
+            )
+            if not isinstance(calendar, CalendarDay):
+                calendar = CalendarDay.unavailable(f"unexpected:{type(calendar).__name__}")
+            if not isinstance(tasks, TaskList):
+                tasks = TaskList.unavailable(f"unexpected:{type(tasks).__name__}")
+            for name, source in (("calendar", calendar), ("tasks", tasks)):
+                if not source.available:
+                    logger.info("plan check without %s (%s)", name, source.unavailable_reason)
+            ctx.run.day_sources = (calendar, tasks)
+        return ctx.run.day_sources
+
+    async def hour_rules(entries: list[dict[str, Any]], read: list[TodoistTask]) -> None:
+        """The hard rules of the plan that are a count of hours (decision 1.16-e) and the days of
+        the habits (F2-a), refused to the agent with their reasons: `jimic.plan.rules`."""
+        calendar, tasks = await day_sources()
+        known = {task.id: task for task in (tasks.tasks if tasks.available else [])}
+        known |= {task.id: task for task in read}
+        intentions = read_valid(ctx.config_dir, INTENTIONS_FILE)
+        habits = intentions.habits if isinstance(intentions, Intentions) else []
+        problems = refusals(
+            [*ctx.run.items, *entries],
+            len(ctx.run.items),
+            list(known.values()),
+            calendar.events if calendar.available else [],
+            habits,
+            ctx.clock.now().astimezone(ctx.timezone),
+        )
+        if problems:
+            logger.info("plan refused by the code: %d items", len(problems))
+            raise AgentInputError(
+                ". ".join(problems)
+                + ". No se ha añadido nada: corrígelo y vuelve a llamar a propose_plan."
+            )
+
     async def propose_plan(args: dict[str, Any]) -> Result:
         run = ctx.run
         if run.mode == "close":
@@ -314,6 +362,7 @@ def build_tools(ctx: ToolContext) -> list[SdkMcpTool[Any]]:
             )
         already = {entry["task_id"] for entry in run.items if "task_id" in entry}
         entries = []
+        read: list[TodoistTask] = []
         counts = {"create": 0, "move": 0, "delete": 0}
         for number, item in enumerate(proposal.items, start=1):
             entry = item.model_dump() | {"follow_up": proposal.follow_up}
@@ -332,8 +381,11 @@ def build_tools(ctx: ToolContext) -> list[SdkMcpTool[Any]]:
                     if refused is not None:
                         raise AgentInputError(f"El elemento {number}: {FOR_THE_AGENT[refused]}")
                 entry["snapshot"] = TaskSnapshot.of(task).model_dump()
+                read.append(task)
             entries.append(entry)
             counts[item.action] += 1
+        if run.mode == "plan":
+            await hour_rules(entries, read)
         run.items.extend(entries)
         run.requested_by_pedro = run.requested_by_pedro and proposal.requested_by_pedro
         run.proposed_plan = True

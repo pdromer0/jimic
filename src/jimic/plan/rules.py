@@ -14,6 +14,13 @@ The items are those of `propose_plan` as data (`action`, `due`, `title`, `durati
   title as what is proposed is that same thing, not a clash (a task moved to the time of its event,
   H1-9).
 - An item starts before now when its time is before now, or its day before today.
+
+`refusals` is what `propose_plan` tells the agent in the plan of the day: besides a clash and the
+past, the task of a habit taken to a day not in its `days` (decision F2-a) and what touches a task
+of today whose time has passed. That one, H1-7 as decision F2-b refines it: a task that is not a
+habit's is the close's, untouched; the task of a habit may be moved, later today (to a free slot,
+since the past and the clashes still apply) or to another of its days, never deleted (as the
+overdue ones of 1.14-g). Titles reach only the agent, never a log.
 """
 
 from collections.abc import Iterable, Sequence
@@ -22,8 +29,8 @@ from datetime import date, datetime, timedelta, tzinfo
 from typing import Any
 
 from jimic.agent.proposals import parse_due
-from jimic.memory.schemas import Habit
-from jimic.plan.day import normalized
+from jimic.memory.schemas import WEEKDAYS, Habit
+from jimic.plan.day import clip, hour, normalized
 from jimic.tools.calendar import CalendarEvent
 from jimic.tools.todoist import TodoistTask
 
@@ -179,6 +186,75 @@ def mentions(title: str, habit: Habit) -> bool:
     """Whether `title` is the task of `habit`: it contains its name or its `todoist_task`."""
     text = normalized(title)
     return any(name in text for name in (normalized(habit.name), normalized(habit.todoist_task)))
+
+
+DAY_NAMES = ("lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo")
+NAME_OF = dict(zip(WEEKDAYS, DAY_NAMES, strict=True))
+
+
+def _when(span: Span) -> str:
+    start, end = span
+    return f"a las {hour(start)}" if start == end else f"{hour(start)}–{hour(end)}"
+
+
+def _title_of(item: dict[str, Any], tasks: Sequence[TodoistTask]) -> str:
+    if item["action"] == "create":
+        return str(item["title"])
+    task = find_task(tasks, str(item["task_id"]))
+    return task.title if task is not None else str(item["snapshot"]["title"])
+
+
+def _passed_today(task: TodoistTask | None, now: datetime) -> bool:
+    """A task of today with a time before now."""
+    if task is None or not isinstance(task.due, datetime):
+        return False
+    due = task.due.astimezone(_zone(now))
+    return due.date() == now.date() and due < now
+
+
+def refusals(
+    items: Sequence[dict[str, Any]],
+    start: int,
+    tasks: Sequence[TodoistTask],
+    events: Sequence[CalendarEvent],
+    habits: Sequence[Habit],
+    now: datetime,
+) -> list[str]:
+    """Why the items from `start` on (those of this call; the earlier ones were accepted) may not
+    go in the plan of the day, one text per item, numbered from 1 at `start`. `tasks` are those of
+    today and the ones the items move or delete; `now` is aware and local."""
+    timezone = _zone(now)
+    found: dict[int, list[str]] = {}
+    for index in range(start, len(items)):
+        item = items[index]
+        why = found.setdefault(index, [])
+        if item["action"] in ("move", "delete"):
+            task = find_task(tasks, str(item["task_id"]))
+            if task is not None and _passed_today(task, now):
+                assert isinstance(task.due, datetime)
+                was = f"«{clip(task.title)}» era hoy a las {hour(task.due.astimezone(timezone))}"
+                if not any(mentions(task.title, habit) for habit in habits):
+                    why.append(f"{was} y ya pasó: lo ve el cierre, no la toques")
+                elif item["action"] == "delete":
+                    why.append(f"{was}: no la borres, muévela a un hueco libre de más tarde")
+        if starts_before(item, now):
+            why.append(f"empieza antes de ahora ({hour(now)})")
+        if item["action"] in ("create", "move"):
+            title = _title_of(item, tasks)
+            day = day_of(due_of(item, timezone), timezone)
+            for habit in habits:
+                if habit.days is not None and mentions(title, habit) and not habit.on(day):
+                    names = ", ".join(NAME_OF[name] for name in habit.days)
+                    why.append(
+                        f"«{clip(habit.name)}» no toca el {DAY_NAMES[day.weekday()]} (sus días:"
+                        f" {names})"
+                    )
+    for clash in clashes(items, tasks, events, now):
+        if clash.index >= start:
+            found[clash.index].append(f"pisa «{clip(clash.other.title)}» {_when(clash.other.span)}")
+    return [
+        f"El elemento {index - start + 1}: {'; '.join(why)}" for index, why in found.items() if why
+    ]
 
 
 def _zone(now: datetime) -> tzinfo:

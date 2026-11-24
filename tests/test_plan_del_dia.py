@@ -29,7 +29,7 @@ from jimic.plan import minimal
 GYM = {
     "action": "create",
     "title": "Gimnasio",
-    "due": "2030-01-07T12:30",
+    "due": "2030-01-07T13:00",
     "duration_minutes": 75,
     "icon": "🏋️",
     "reason": "toca empuje",
@@ -69,7 +69,7 @@ def test_el_plan_se_lanza_en_la_sesion_del_dia_y_sale_pintado_y_anotado(conn, tm
     assert isinstance(plan, InteractiveMessage)
     text = text_of(plan)
     assert text.startswith("¡Pedro! Lunes de empuje")
-    assert "🏋️ Gimnasio · 12:30–13:45 (toca empuje)" in text
+    assert "🏋️ Gimnasio · 13:00–14:15 (toca empuje)" in text
     assert FREE_TEXT not in text
     assert w.notices() == [("plan_del_dia", 901)]
     assert w.writes() == []
@@ -117,7 +117,7 @@ def test_en_el_plan_un_cambio_de_memoria_se_rechaza_y_no_sale(conn, tmp_path):
 
 
 def test_una_quinta_tarea_nueva_se_rechaza_al_agente_y_el_plan_lleva_cuatro(conn, tmp_path):
-    five = [GYM | {"title": f"Tarea {n}", "reason": "toca"} for n in range(5)]
+    five = [GYM | {"title": f"Tarea {n}", "reason": "toca", "due": "2030-01-07"} for n in range(5)]
     four = five[:4]
     w = PlanWorld(
         conn,
