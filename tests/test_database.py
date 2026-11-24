@@ -29,8 +29,8 @@ TABLES = {
     "key_task_marks",
     "task_moves",
 }
-LATEST = 9
-"""La última migración del paquete (0009, la de las tareas clave)."""
+LATEST = 10
+"""La última migración del paquete (0010, la del cierre del día)."""
 
 
 def table_names(conn: sqlite3.Connection) -> set[str]:
@@ -280,5 +280,42 @@ def test_la_0007_admite_un_dia_sin_mensaje_de_pedro_sin_perder_las_conversacione
                 "UPDATE conversations SET last_message_at = '2030-01-08 09:00'"
                 " WHERE day = '2030-01-08'"
             )
+    finally:
+        conn.close()
+
+
+def test_la_0010_guarda_la_cifra_y_no_repite_una_tarea_del_plan(tmp_path):
+    """Pilla una 0010 que pierde los planes que ya había, que deja repetir una tarea en el plan
+    del mismo día o que admite más cumplidas que planeadas."""
+    from jimic.memory.database import load_migrations, migrate
+
+    conn = sqlite3.connect(tmp_path / "jimic.db", autocommit=True)
+    try:
+        migrate(conn, load_migrations()[:9])
+        conn.execute(
+            "INSERT INTO day_plans (day, confirmed_at, plan)"
+            " VALUES ('2030-01-07', '2030-01-07T07:00:00+00:00', '{}')"
+        )
+        conn.execute(
+            "INSERT INTO plan_items (day, todoist_task_id, status)"
+            " VALUES ('2030-01-07', 'tarea-falsa-1', 'pending')"
+        )
+        migrate(conn, load_migrations())
+        assert conn.execute(
+            "SELECT day, planned, fulfilled, settled_at FROM day_plans"
+        ).fetchall() == [("2030-01-07", None, None, None)]
+        with pytest.raises(sqlite3.IntegrityError, match="UNIQUE"):
+            conn.execute(
+                "INSERT INTO plan_items (day, todoist_task_id, status)"
+                " VALUES ('2030-01-07', 'tarea-falsa-1', 'done')"
+            )
+        conn.execute(
+            "INSERT INTO plan_items (day, todoist_task_id, status)"
+            " VALUES ('2030-01-07', 'tarea-falsa-2', 'pending')"
+        )
+        with pytest.raises(sqlite3.IntegrityError, match="CHECK"):
+            conn.execute("UPDATE day_plans SET planned = 2, fulfilled = 3")
+        with pytest.raises(sqlite3.IntegrityError, match="CHECK"):
+            conn.execute("UPDATE day_plans SET settled_at = '2030-01-08 06:00'")
     finally:
         conn.close()
