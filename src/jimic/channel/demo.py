@@ -6,8 +6,9 @@ sends six messages, as the assistant would: the plan of the day as the code pain
 create, a move and a delete under an answer, with the global row `[✅ Créalo todo] [⏭ Nada]`;
 what was done at once with its [Deshacer] (task 1.11); a step of the onboarding, the meals of the
 routine with [Guardar] (task 1.13); a change of memory with [Guardar] [Cambiar] [No] and an idea
-with [📝 Apuntar]; a list of `/deshacer` (task 1.12); and two notices of key tasks (task 1.15),
-one alone and two in one message with a notice, with their buttons and their answers. The taps
+with [📝 Apuntar]; a list of `/deshacer` (task 1.12); two notices of key tasks (task 1.15),
+one alone and two in one message with a notice, with their buttons and their answers; and the
+close of the day of the e08 (task 1.16), with its rows, its global row and the rating. The taps
 edit the messages and touch nothing in Todoist or in the files: the handlers only say what would
 have happened. A text from
 Pedro gets the fixed phrase. It is a process that does not end (stop it with Ctrl+C): **Pedro
@@ -25,7 +26,13 @@ from jimic.channel.bot import TelegramChannel, build_channel
 from jimic.channel.message import InteractiveMessage, Item
 from jimic.channel.taps import Answer, Followup, HandlerOutcome, Show, TapHandler
 from jimic.clock import Clock, SystemClock
+from jimic.close.day import close_view
+from jimic.close.message import CLOSE_KIND, CloseContent
+from jimic.close.message import paint as paint_close
 from jimic.config import Settings, load_settings
+from jimic.execution.close import DONE as CLOSE_DONE_TEXT
+from jimic.execution.close import RATED
+from jimic.execution.close import WILL_DO as CLOSE_WILL_DO
 from jimic.execution.commands import UNDO, UNDO_HEADER, UNDO_LIST_KIND
 from jimic.execution.key_tasks import (
     DONE,
@@ -245,6 +252,62 @@ KEY_TWO = InteractiveMessage(
 )
 
 
+CLOSE_DONE = (
+    ("c-meditacion", "Meditación", time(7, 10), time(9, 30)),
+    ("c-comida", "Comida", time(14, 0), time(13, 20)),
+    ("c-trabajo", "Trabajo en el proyecto", time(15, 30), time(16, 45)),
+)
+CLOSE_OPEN = (
+    ("c-ofertas", "Revisar ofertas", time(14, 30)),
+    ("c-proyecto", "Proyecto personal", time(17, 15)),
+    ("c-paseo", "Paseo 5 km", time(19, 0)),
+    ("c-cena", "Cena", time(21, 30)),
+)
+CLOSE_ICONS = {
+    "meditación": "🧘",
+    "comida": "🍽️",
+    "trabajo en el proyecto": "🤖",
+    "revisar ofertas": "🛒",
+    "proyecto personal": "🛠️",
+    "paseo 5 km": "🚶",
+    "cena": "🍽️",
+}
+"""As the table of `## Iconos` of an invented `preferencias.md`."""
+CLOSE_NOTE = "Tres de siete y la comida antes de hora: ¡qué ansia! 😄 Mañana, pierna (inventado)."
+
+
+def demo_close_message(settings: Settings) -> InteractiveMessage:
+    """The close of the e08 (task 1.16), invented, as the code paints it."""
+    zone = settings.timezone
+
+    def task(task_id: str, title: str, at: time, done: time | None = None) -> TodoistTask:
+        return TodoistTask(
+            id=task_id,
+            title=title,
+            project_id="demo",
+            due=datetime.combine(DAY, at, tzinfo=zone),
+            is_recurring=False,
+            has_subtasks=False,
+            duration_minutes=None,
+            completed=done is not None,
+            completed_at=None if done is None else datetime.combine(DAY, done, tzinfo=zone),
+        )
+
+    done = [task(i, title, at, marked) for i, title, at, marked in CLOSE_DONE]
+    pending = [task(i, title, at) for i, title, at in CLOSE_OPEN]
+    view = close_view(
+        TaskList(available=True, tasks=pending), TaskList(available=True, tasks=done), [], DAY
+    )
+    content = CloseContent(
+        view=view,
+        note=CLOSE_NOTE,
+        tomorrow="🔮 Mañana: calendario libre · 🏋️ Pierna · fuerza",
+        plan=frozenset(t.id for t in [*done, *pending]),
+        keys={},
+    )
+    return paint_close(content, DAY, zone, CLOSE_ICONS)
+
+
 def demo_messages(settings: Settings) -> list[tuple[str, InteractiveMessage]]:
     """The invented plan of the day (task 1.14), the invented proposal, the invented [Deshacer],
     a step of the onboarding with [Guardar] (task 1.13), a change of memory with [Guardar] and a
@@ -264,6 +327,7 @@ def demo_messages(settings: Settings) -> list[tuple[str, InteractiveMessage]]:
         (UNDO_LIST_KIND, undo_list),
         (KEY_KIND, KEY_ONE),
         (KEY_KIND, KEY_TWO),
+        (CLOSE_KIND, demo_close_message(settings)),
     ]
 
 
@@ -310,6 +374,32 @@ def key_handler(clock: Clock) -> TapHandler:
     return demo_key
 
 
+def close_handler(clock: Clock) -> TapHandler:
+    """The answers of the buttons of the close (task 1.16), touching nothing; [Hecha], [Mañana]
+    and the global row leave their [Deshacer], the global one for all."""
+
+    def join(followups):
+        if len(followups) == 1:
+            return followups[0]
+        title = f"➡️ {len(followups)} tareas a mañana"
+        return Followup(UNDO_KIND, undo_message(title, {}), clock.now() + TTL, title)
+
+    async def demo_close(item: Item, option: str, approval_id: int) -> HandlerOutcome:
+        if item.question:
+            return RATED.format(rating=option[1:])
+        if option == "will":
+            return CLOSE_WILL_DO
+        if option == "done":
+            undo = undo_message(f"✅ {item.title}", {})
+            return Answer(CLOSE_DONE_TEXT, Followup(UNDO_KIND, undo, clock.now() + TTL, item.title))
+        due = str((item.data or {}).get("due", ""))
+        result = f"➡️ mañana {due[11:16]}" if len(due) >= 16 else "➡️ mañana"
+        undo = undo_message(f"{result}: {item.title}", {})
+        return Answer(result, Followup(UNDO_KIND, undo, clock.now() + TTL, item.title, join))
+
+    return demo_close
+
+
 HANDLERS: dict[str, TapHandler] = {
     PLAN_KIND: demo_plan,
     UNDO_KIND: demo_undo,
@@ -340,7 +430,7 @@ def demo_factory(settings: Settings, clock: Clock) -> ChannelFactory:
             settings,
             conn,
             clock,
-            handlers=HANDLERS | {KEY_KIND: key_handler(clock)},
+            handlers=HANDLERS | {KEY_KIND: key_handler(clock), CLOSE_KIND: close_handler(clock)},
             on_started=send_demo,
         )
 
