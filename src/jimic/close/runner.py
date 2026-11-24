@@ -199,7 +199,7 @@ class DayCloseRunner:
                 ids = set(closed.get(status.intent, ()))
                 if status.task is not None:
                     ids.add(status.task.id)
-                done.append(KeyDone(habit.name, frozenset(ids)))
+                done.append(KeyDone(habit.name, frozenset(ids), habit.todoist_task))
         names = {
             normalized(habits[i.habit].todoist_task): i.id
             for i in by_id.values()

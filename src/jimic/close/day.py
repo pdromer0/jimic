@@ -48,6 +48,8 @@ class KeyDone:
     """The habit's name, as «✅ Hecho» shows it."""
     task_ids: frozenset[str] = frozenset()
     """The tasks of today it covers: its open task (done by APEX) or the one the button closed."""
+    task: str = ""
+    """The title of the habit's task in Todoist (`todoist_task`), which may not be its name."""
 
 
 @dataclass(frozen=True)
@@ -84,10 +86,13 @@ def close_view(
     done_ids = frozenset(t.id for t in done_tasks) | covered
     titles = [t.title for t in done_tasks]
     listed = {normalized(title) for title in titles}
+    completed_ids = {t.id for t in done_tasks}
     for key in keys:
-        if normalized(key.name) not in listed:
-            titles.append(key.name)
-            listed.add(normalized(key.name))
+        # Already among the completed: by one of its tasks, by its habit's name or by its task's.
+        if key.task_ids & completed_ids or {normalized(key.name), normalized(key.task)} & listed:
+            continue
+        titles.append(key.name)
+        listed.add(normalized(key.name))
     pending = tuple(
         task
         for task in open_tasks.tasks

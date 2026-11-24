@@ -223,3 +223,14 @@ def test_un_titulo_largo_no_rompe_la_linea():
     calendar = calendar_with(event(at("2030-01-11T09:00"), title="Reunión " * 30))
     line = tomorrow_line(calendar, apex_e08(), FRIDAY, MADRID)
     assert "\n" not in line and len(line) < 100
+
+
+def test_una_tarea_clave_cuya_tarea_se_llama_distinto_no_se_repite():
+    """Revisión propia: el hábito «Gimnasio» con la tarea «Entrenar fuerza», cerrada por el botón,
+    sale una vez. Pilla la comparación solo por el nombre del hábito."""
+    done = todo("t-fuerza", "Entrenar fuerza", "2030-01-10T12:00", done_at="2030-01-10T13:30")
+    completed = TaskList(available=True, tasks=[done])
+    by_id = KeyDone("Gimnasio", frozenset({"t-fuerza"}), "Entrenar fuerza")
+    assert close_view(open_today(), completed, [by_id], THURSDAY).done == ("Entrenar fuerza",)
+    by_title = KeyDone("Gimnasio", frozenset(), "Entrenar fuerza")
+    assert close_view(open_today(), completed, [by_title], THURSDAY).done == ("Entrenar fuerza",)
