@@ -426,6 +426,47 @@ def test_bajar_el_spacing_conversando_se_rechaza_y_subirlo_se_ofrece(config_dir)
     assert "a mano" in raised.value.for_agent
 
 
+# --- Los `days` del hábito de una tarea clave (decisión F2-a) -----------------------------------
+
+WEEKEND_KEY = KEY_INTENTIONS.replace(
+    '    todoist_task: "Leer"\n', '    todoist_task: "Leer"\n    days: [sat, sun]\n'
+)
+
+
+def test_quitar_dias_a_una_tarea_clave_conversando_se_ofrece(config_dir):
+    """Insistir menos: de todos los días al fin de semana, o del fin de semana al domingo."""
+    (config_dir / "intenciones.yaml").write_text(KEY_INTENTIONS, encoding="utf-8")
+    changes.check(
+        config_dir,
+        replace("intenciones.yaml", '"Leer"\n', '"Leer"\n    days: [sat, sun]\n'),
+    )
+    (config_dir / "intenciones.yaml").write_text(WEEKEND_KEY, encoding="utf-8")
+    changes.check(config_dir, replace("intenciones.yaml", "days: [sat, sun]", "days: [sun]"))
+
+
+@pytest.mark.parametrize("after", ["days: [fri, sat, sun]", "days: [mon]"])
+def test_anadir_dias_a_una_tarea_clave_conversando_se_rechaza(config_dir, after):
+    """Pilla la regla asimétrica sin los `days` (versión incorrecta 4)."""
+    (config_dir / "intenciones.yaml").write_text(WEEKEND_KEY, encoding="utf-8")
+    with pytest.raises(ChangeRefused) as raised:
+        changes.check(config_dir, replace("intenciones.yaml", "days: [sat, sun]", after))
+    assert raised.value.code == "relaxes"
+    assert raised.value.relaxed == ("insistir_lectura.days",)
+    assert "/configurar-jimic" in raised.value.for_agent
+
+
+def test_quitar_los_days_de_una_tarea_clave_es_volver_a_todos_y_se_rechaza(config_dir):
+    (config_dir / "intenciones.yaml").write_text(WEEKEND_KEY, encoding="utf-8")
+    with pytest.raises(ChangeRefused):
+        changes.check(config_dir, replace("intenciones.yaml", "    days: [sat, sun]\n", ""))
+
+
+def test_los_dias_de_un_habito_sin_tarea_clave_son_libres(config_dir):
+    free = "intentions: []\nhabits:" + WEEKEND_KEY.split("habits:", 1)[1]
+    (config_dir / "intenciones.yaml").write_text(free, encoding="utf-8")
+    changes.check(config_dir, replace("intenciones.yaml", "days: [sat, sun]", "days: [mon, sun]"))
+
+
 def test_con_intenciones_invalidas_ahora_no_hay_spacing_con_que_comparar(config_dir):
     """Un cambio puede ser el que arregla el fichero: sin valores de ahora, solo el esquema."""
     broken = KEY_INTENTIONS.replace("priority: medium\nhabits:", "priority: alta\nhabits:")

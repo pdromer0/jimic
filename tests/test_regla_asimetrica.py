@@ -9,7 +9,7 @@ from typing import Any
 import pytest
 from heartbeat_data import LIMITS, limits
 
-from jimic.memory.discreet import holds, judge, minutes, relaxed_spacing
+from jimic.memory.discreet import holds, judge, minutes, relaxed_days, relaxed_spacing
 from jimic.memory.schemas import Budget, Intentions, Window
 
 BUDGET = LIMITS["budget"]
@@ -190,6 +190,10 @@ def test_la_tabla_cubre_todos_los_campos_de_limites():
 
 
 def key_tasks(**changes: Any) -> Intentions:
+    return Intentions.model_validate(key_tasks_doc(**changes))
+
+
+def key_tasks_doc(**changes: Any) -> dict[str, Any]:
     gym = {
         "id": "insistir_gimnasio",
         "type": "key_task",
@@ -208,7 +212,7 @@ def key_tasks(**changes: Any) -> Intentions:
         "moment": "midday",
         "todoist_task": "Gimnasio",
     }
-    return Intentions.model_validate({"intentions": [{**gym, **changes}], "habits": [habit]})
+    return {"intentions": [{**gym, **changes}], "habits": [habit]}
 
 
 @pytest.mark.parametrize(
@@ -230,3 +234,35 @@ def test_el_spacing_conversando_solo_sube(old, new, relaxed):
 def test_una_tarea_clave_nueva_no_tiene_con_que_compararse():
     empty = Intentions.model_validate({"intentions": [], "habits": []})
     assert relaxed_spacing(empty, key_tasks(spacing="15m")) == ()
+
+
+# --- Los `days` del hábito de una tarea clave (decisión F2-a) -----------------------------------
+
+
+def with_days(days: list[str] | None) -> Intentions:
+    """`key_tasks()` con los `days` de su hábito (sin ellos, todos los días)."""
+    doc = key_tasks_doc()
+    if days is not None:
+        doc["habits"][0]["days"] = days
+    return Intentions.model_validate(doc)
+
+
+@pytest.mark.parametrize(
+    ("old", "new", "relaxed"),
+    [
+        (None, ["sat", "sun"], ()),
+        (["sat", "sun"], ["sun"], ()),
+        (["sat", "sun"], ["sat", "sun"], ()),
+        (["sat", "sun"], ["fri", "sat", "sun"], ("insistir_gimnasio.days",)),
+        (["sat", "sun"], None, ("insistir_gimnasio.days",)),
+        (["sat", "sun"], ["mon"], ("insistir_gimnasio.days",)),
+    ],
+)
+def test_los_dias_de_una_tarea_clave_conversando_solo_bajan(old, new, relaxed):
+    """Los valores a mano del plan: quitar días es insistir menos; añadirlos, insistir más."""
+    assert relaxed_days(with_days(old), with_days(new)) == relaxed
+
+
+def test_una_tarea_clave_nueva_no_tiene_dias_con_que_compararse():
+    empty = Intentions.model_validate({"intentions": [], "habits": []})
+    assert relaxed_days(empty, with_days(["mon"])) == ()
