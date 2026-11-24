@@ -136,6 +136,15 @@ class CloseActions:
             marked = current.completed_at or now
             day_plans.set_status(self._conn, day, current.id, "done", marked)
             return ALREADY_DONE
+        if self._jumped(current, day):
+            # A recurring task completed in the app jumps to its next day and never shows as
+            # completed (contract of 23-nov-2026): Pedro says it is done, so it counts.
+            intent = data.get("intent")
+            if intent is not None:
+                key_marks.record(self._conn, day, str(intent), "done", now, current.id)
+            day_plans.set_status(self._conn, day, current.id, "done", now)
+            logger.info("close: done (recurring, already in the app)")
+            return ALREADY_DONE
         if current.due is None or due_day(current.due) != day:
             return Declined(CHANGED, "will")
         try:
@@ -161,6 +170,15 @@ class CloseActions:
         day_plans.set_status(self._conn, day, current.id, "done", now)
         logger.info("close: done")
         return Answer(DONE, self._followup(f"✅ {item.title}", day, undo))
+
+    def _jumped(self, task: TodoistTask, day: date) -> bool:
+        """A recurring task now on a later day that JimiC did not move: completed in the app."""
+        return (
+            task.is_recurring
+            and task.due is not None
+            and due_day(task.due) > day
+            and task.id not in key_marks.of_day(self._conn, day).moved
+        )
 
     async def _tomorrow(
         self, item: Item, data: dict[str, Any], day: date, current: TodoistTask

@@ -299,3 +299,50 @@ def test_la_valoracion_vale_hasta_la_manana_siguiente(conn):
     w.clock.moment = at("2030-01-11T06:45")
     w.tap(approval, len(w.message(approval).items), "r3")
     assert conn.execute("SELECT rating FROM day_ratings").fetchall() == [(3,)]
+
+
+def test_hecha_de_una_recurrente_ya_completada_en_la_app_cuenta_y_marca_la_tarea_clave(conn):
+    """Revisión propia: completada en la app, la recurrente pasa a mañana y no sale completada.
+    [Hecha] la da por hecha (sin tocar Todoist) y anota la marca de la tarea clave. Pilla el
+    «ha cambiado» de antes; una que movió JimiC sigue siendo un cambio."""
+    tasks = raw_e08()
+    tasks.append(
+        raw_task(
+            "t-gimnasio",
+            "Gimnasio",
+            project_id="proyecto-inventado",
+            due="2030-01-10T20:00:00",
+            recurring=True,
+        )
+    )
+    w = CloseWorld(conn, tasks)
+    with_plan(conn)
+    day_plans.add_item(conn, THURSDAY, "t-gimnasio", at("2030-01-10T20:00"))
+    approval = w.show(w.paint(keys={"gimnasio": "insistir_gimnasio"}))
+    number = next(n for n, i in enumerate(w.message(approval).items, 1) if "Gimnasio" in i.title)
+    raw(w, "t-gimnasio")["due"]["date"] = "2030-01-11T20:00:00"  # completada en la app
+    w.tap(approval, number, "done")
+    assert w.touched("t-gimnasio") == []
+    assert key_marks.of_day(conn, THURSDAY).of("insistir_gimnasio").done
+    (item,) = [i for i in day_plans.items(conn, THURSDAY) if i.task_id == "t-gimnasio"]
+    assert item.status == "done"
+
+
+def test_hecha_de_una_recurrente_que_movio_jimic_es_un_cambio(conn):
+    tasks = raw_e08()
+    tasks.append(
+        raw_task(
+            "t-gimnasio",
+            "Gimnasio",
+            project_id="proyecto-inventado",
+            due="2030-01-10T20:00:00",
+            recurring=True,
+        )
+    )
+    w = CloseWorld(conn, tasks)
+    approval = w.show(w.paint())
+    number = next(n for n, i in enumerate(w.message(approval).items, 1) if "Gimnasio" in i.title)
+    raw(w, "t-gimnasio")["due"]["date"] = "2030-01-11T20:00:00"
+    key_marks.note_moved(conn, THURSDAY, "t-gimnasio", at("2030-01-10T21:00"))
+    w.tap(approval, number, "done")
+    assert "ha cambiado" in render(w.message(approval), approval).text
