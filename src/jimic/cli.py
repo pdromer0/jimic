@@ -96,6 +96,12 @@ def build_parser() -> argparse.ArgumentParser:
     plan.add_argument(
         "--pasadas", type=int, default=evals.DEFAULT_PASSES, dest="passes", help="por escenario"
     )
+    plan.add_argument(
+        "--comparar-con",
+        dest="compare_to",
+        metavar="INFORME",
+        help="el informe con el que comparar (sin él, el último completo)",
+    )
     return parser
 
 
@@ -158,7 +164,11 @@ def main(argv: list[str] | None = None) -> int:
     elif args.command == "evaluar":
         if args.eval_command == "plan":
             return setup_errors_as_exit(
-                lambda: print(evals.run_plan(os.environ, args.scenarios, args.passes).text)
+                lambda: print(
+                    evals.run_plan(
+                        os.environ, args.scenarios, args.passes, compare_to=args.compare_to
+                    ).text
+                )
             )
         return setup_errors_as_exit(
             lambda: print(
