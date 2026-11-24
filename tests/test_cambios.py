@@ -455,6 +455,16 @@ def test_anadir_dias_a_una_tarea_clave_conversando_se_rechaza(config_dir, after)
     assert "/configurar-jimic" in raised.value.for_agent
 
 
+def test_bajar_el_spacing_y_anadir_dias_a_la_vez_dice_las_dos_claves(config_dir):
+    """Revisión propia: la nota de lo que va a mano no se deja los días."""
+    (config_dir / "intenciones.yaml").write_text(WEEKEND_KEY, encoding="utf-8")
+    text = WEEKEND_KEY.replace("spacing: 1h", "spacing: 15m").replace("[sat, sun]", "[fri, sat]")
+    whole = replace("intenciones.yaml", WEEKEND_KEY, text)
+    with pytest.raises(ChangeRefused) as raised:
+        changes.check(config_dir, whole)
+    assert raised.value.relaxed == ("insistir_lectura.spacing", "insistir_lectura.days")
+
+
 def test_quitar_los_days_de_una_tarea_clave_es_volver_a_todos_y_se_rechaza(config_dir):
     (config_dir / "intenciones.yaml").write_text(WEEKEND_KEY, encoding="utf-8")
     with pytest.raises(ChangeRefused):

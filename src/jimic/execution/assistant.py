@@ -90,8 +90,8 @@ MAX_MANUAL_LINE = 200
 
 
 def manual_note(manual: list[ManualChange]) -> str | None:
-    """The text for what the asymmetric rule refused (1.13-a): the key and the line Pedro would
-    write, never the file."""
+    """The text for what the asymmetric rule refused (1.13-a): the file, the key and the line
+    Pedro would write, never the whole file."""
     parts = []
     for change in manual:
         keys = ", ".join(change.keys)

@@ -195,23 +195,19 @@ def validate(name: str, old_text: str, new_text: str) -> None:
         if before is None:
             return
         after = Intentions.model_validate(_yaml_doc(name, new_text))
-        spacing = relaxed_spacing(before, after)
-        if spacing:
+        spacing, days = relaxed_spacing(before, after), relaxed_days(before, after)
+        if spacing or days:
+            what = []
+            if spacing:
+                what.append(f"baja el espacio entre avisos ({', '.join(spacing)})")
+            if days:
+                what.append(f"añade días en que insiste una tarea clave ({', '.join(days)})")
             raise ChangeRefused(
                 "relaxes",
-                f"Eso baja el espacio entre avisos ({', '.join(spacing)}) en intenciones.yaml:"
-                " conversando solo puedo hacer a JimiC más discreto. Si Pedro lo quiere, lo edita"
-                " él a mano.",
-                spacing,
-            )
-        days = relaxed_days(before, after)
-        if days:
-            raise ChangeRefused(
-                "relaxes",
-                f"Eso añade días en que insiste una tarea clave ({', '.join(days)}) en"
-                " intenciones.yaml: conversando solo puedo hacer a JimiC más discreto (quitar"
-                " días sí). Si Pedro lo quiere, lo edita él a mano o con /configurar-jimic.",
-                days,
+                f"Eso {' y '.join(what)} en intenciones.yaml: conversando solo puedo hacer a JimiC"
+                " más discreto (subir el espacio o quitar días, sí). Si Pedro lo quiere, lo edita"
+                " él a mano o con /configurar-jimic.",
+                spacing + days,
             )
         return
     if old is None:
