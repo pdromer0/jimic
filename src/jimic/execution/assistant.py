@@ -81,8 +81,8 @@ NO_SKELETONS = (
     " otra vez."
 )
 MANUAL_TEXT = (
-    "Eso no te lo puedo guardar: en limites.yaml solo puedo hacerme más discreto. Si lo quieres,"
-    " cámbialo tú a mano en limites.yaml, sin reiniciar nada: {changes}. Más adelante, la sesión"
+    "Eso no te lo puedo guardar: en {files} solo puedo hacerme más discreto. Si lo quieres,"
+    " cámbialo tú a mano en {files}, sin reiniciar nada: {changes}. Más adelante, la sesión"
     " de configuración te ayudará con estos cambios."
 )
 MAX_MANUAL_LINE = 200
@@ -102,7 +102,10 @@ def manual_note(manual: list[ManualChange]) -> str | None:
             part = keys
         if part not in parts:
             parts.append(part)
-    return MANUAL_TEXT.format(changes="; ".join(parts)) if parts else None
+    if not parts:
+        return None
+    files = " y ".join(dict.fromkeys(change.file for change in manual))
+    return MANUAL_TEXT.format(files=files, changes="; ".join(parts))
 
 
 class Assistant:

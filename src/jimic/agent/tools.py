@@ -105,11 +105,13 @@ def model_name(name: str) -> str:
 
 @dataclass(frozen=True)
 class ManualChange:
-    """A change of `limites.yaml` that relaxes a limit (decision 1.13-a): the keys it relaxes
-    and the fragment the agent proposed, which is what Pedro would write by hand."""
+    """A change that the asymmetric rule refused (decision 1.13-a): the keys it relaxes, the
+    fragment the agent proposed, which is what Pedro would write by hand, and its file."""
 
     keys: tuple[str, ...]
     after: str | None
+    file: str = "limites.yaml"
+    """Where Pedro would write it: `limites.yaml`, or `intenciones.yaml` (`spacing`, `days`)."""
 
 
 type RunMode = Literal["message", "plan", "follow_up", "close"]
@@ -425,7 +427,7 @@ def build_tools(ctx: ToolContext) -> list[SdkMcpTool[Any]]:
         except ChangeRefused as refused:
             logger.info("memory proposal refused (%s)", refused.code)
             if refused.code == "relaxes" and refused.relaxed:
-                ctx.run.manual.append(ManualChange(refused.relaxed, proposed.after))
+                ctx.run.manual.append(ManualChange(refused.relaxed, proposed.after, proposed.file))
             raise AgentInputError(refused.for_agent) from None
         try:
             memory_message([*ctx.run.memory, entry])

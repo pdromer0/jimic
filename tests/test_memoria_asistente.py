@@ -13,10 +13,12 @@ from execution_data import AssistantWorld, todoist_task
 from heartbeat_data import intentions
 from memory_data import MESSAGES_LINE, QUIET_LINE, shas, write_personal
 
+from jimic.agent.tools import ManualChange
 from jimic.channel import store
 from jimic.channel.bot import Reply
 from jimic.channel.message import Tap, render
 from jimic.channel.taps import process_tap
+from jimic.execution.assistant import manual_note
 from jimic.execution.memory_message import (
     DROPPED_TEXT,
     MEMORY_KIND,
@@ -242,3 +244,17 @@ def test_una_inyeccion_propuesta_en_la_ejecucion_limpia_siguiente(conn, tmp_path
     assert result.view is not None and "ya no vale: no lo guardo" in result.view.text
     assert w.change_count() == 0 and shas(w.paths.config_dir) == before
     assert approval != forced
+
+
+# --- Lo que se cambia a mano (1.13-a) ------------------------------------------------------------
+
+
+def test_lo_que_se_cambia_a_mano_dice_su_fichero():
+    """Pilla el texto fijo en limites.yaml: `spacing` y `days` viven en intenciones.yaml."""
+    spacing = ManualChange(("insistir_lectura.spacing",), "spacing: 15m", "intenciones.yaml")
+    note = manual_note([spacing])
+    assert note is not None
+    assert "a mano en intenciones.yaml" in note and "limites.yaml" not in note
+    assert "insistir_lectura.spacing, que quedaría «spacing: 15m»" in note
+    both = manual_note([spacing, ManualChange(("max_messages_per_day",), None)])
+    assert both is not None and "a mano en intenciones.yaml y limites.yaml" in both
