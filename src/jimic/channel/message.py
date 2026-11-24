@@ -15,6 +15,12 @@ Rules of the format (task 1.4):
   body alone (the model's), and an item shows a line only once it has a status (`🏋️ Gimnasio —
   🏃 a por ello`). Its buttons go `KEY_ROW` to a row, without numbers; with more than one item,
   each label starts with the item's `icon`.
+- A `question` item (task 1.16: «¿Cómo ha ido el día?» of the close) is not a numbered element:
+  it goes last, its line after the footer (`title — result`) and its buttons, up to
+  `MAX_QUESTION_OPTIONS`, in a row of their own above the numbered ones, without a number.
+- A `tally` (task 1.16: «📈 Por ahora: 4 de 7 del plan») is a line before the footer that counts
+  as it is painted: its `base` plus its items resolved with its option, so it goes up with each
+  tap in the same message.
 - At most `MAX_ITEMS` items, and the text always fits in `TELEGRAM_TEXT_LIMIT`: if it cannot,
   `ensure_fits` raises `MessageTooLong` instead of cutting; `fit_titles` shortens the titles
   shown (never what an item does) until it fits.
@@ -26,11 +32,13 @@ from collections.abc import Collection, Mapping
 from dataclasses import dataclass
 from typing import Annotated, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, JsonValue, StringConstraints, model_validator
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, StringConstraints, model_validator
 
 MAX_ITEMS = 8
 MAX_OPTIONS = 4
 """Options per item: they share one row, and four labels fit in a phone's width."""
+MAX_QUESTION_OPTIONS = 5
+"""Options of a question: short labels (`1` to `5`), so five fit in one row."""
 MAX_RESULT_CHARS = 40
 MAX_LABEL_CHARS = 32
 TELEGRAM_TEXT_LIMIT = 4096
@@ -112,11 +120,16 @@ class Item(BaseModel):
     """What the handler of its kind needs (ids, the snapshot); never shown."""
     icon: str | None = None
     """In the `key` style with several items, what goes before each of its buttons."""
+    question: bool = False
+    """Not a numbered element but the question at the end of the message (task 1.16)."""
+    expired_text: Short | None = None
+    """What it says once the message expires, instead of the message's `expired_text`."""
 
     @model_validator(mode="after")
     def _check(self) -> Self:
-        if not 1 <= len(self.options) <= MAX_OPTIONS:
-            raise ValueError(f"an item has between 1 and {MAX_OPTIONS} options")
+        most = MAX_QUESTION_OPTIONS if self.question else MAX_OPTIONS
+        if not 1 <= len(self.options) <= most:
+            raise ValueError(f"an item has between 1 and {most} options")
         keys = [option.key for option in self.options]
         if len(set(keys)) != len(keys):
             raise ValueError("the options of an item must have different keys")
@@ -142,6 +155,34 @@ class Item(BaseModel):
 type Style = Literal["list", "plan", "key"]
 
 
+class Tally(BaseModel):
+    """A line that counts (task 1.16): `base` plus the items at `items` (indexes from 0) resolved
+    with `option`, out of `total`. `text` has `{done}` and `{total}`."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    text: Text
+    base: Annotated[int, Field(ge=0)]
+    total: Annotated[int, Field(ge=0)]
+    option: Key
+    items: tuple[Annotated[int, Field(ge=0)], ...] = ()
+
+    @model_validator(mode="after")
+    def _check(self) -> Self:
+        if "{done}" not in self.text or "{total}" not in self.text:
+            raise ValueError("the text of a tally needs {done} and {total}")
+        self.line(0)  # any other placeholder fails here, not when it is painted
+        return self
+
+    def line(self, done: int) -> str:
+        return self.text.format(done=done, total=self.total)
+
+    def done(self, items: tuple[Item, ...]) -> int:
+        return self.base + sum(
+            1 for index in self.items if index < len(items) and items[index].chosen == self.option
+        )
+
+
 class InteractiveMessage(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -160,6 +201,8 @@ class InteractiveMessage(BaseModel):
     expired: bool = False
     expired_text: Short = EXPIRED_RESULT
     """What a pending item says once the message expires."""
+    tally: Tally | None = None
+    """The line that counts, before the footer (task 1.16)."""
 
     @model_validator(mode="after")
     def _check(self) -> Self:
@@ -167,6 +210,13 @@ class InteractiveMessage(BaseModel):
             raise ValueError("a message needs a header or a body")
         if not 1 <= len(self.items) <= MAX_ITEMS:
             raise ValueError(f"a message has between 1 and {MAX_ITEMS} items")
+        questions = [index for index, item in enumerate(self.items) if item.question]
+        if len(questions) > 1 or (questions and questions[0] != len(self.items) - 1):
+            raise ValueError("a message has at most one question, and it goes last")
+        if questions and self.style == "key":
+            raise ValueError("the key style has no question")
+        if self.tally is not None and any(i >= len(self.items) for i in self.tally.items):
+            raise ValueError("the tally counts items the message does not have")
         keys = [option.key for option in self.global_options]
         if len(set(keys)) != len(keys):
             raise ValueError("the global options must have different keys")
@@ -219,7 +269,12 @@ def number_mark(number: int, style: Style) -> str:
     return f"{number}." if style == "list" else f"{number}\ufe0f\u20e3"
 
 
-def _text(message: InteractiveMessage) -> str:
+def _status(item: Item) -> str | None:
+    return item.result or (RUNNING_TEXT if item.running else item.note)
+
+
+def _text(message: InteractiveMessage, worst: bool = False) -> str:
+    """The text; `worst` paints the tally at its largest (for `worst_length`)."""
     lines: list[str] = []
     if message.body is not None:
         lines += [_escape(message.body), ""]
@@ -229,7 +284,9 @@ def _text(message: InteractiveMessage) -> str:
         else:
             lines += [f"<b>{_escape(message.header)}</b>", ""]
     for number, item in enumerate(message.items, start=1):
-        status = item.result or (RUNNING_TEXT if item.running else item.note)
+        if item.question:
+            continue  # after the footer
+        status = _status(item)
         if message.style == "key":
             if status is not None:  # a pending item has no line: its buttons say it
                 lines.append(f"{_escape(item.title)} — {_escape(status)}")
@@ -240,8 +297,20 @@ def _text(message: InteractiveMessage) -> str:
         lines.append(line)
     if message.style == "key" and lines and lines[-1] == "":
         lines.pop()  # nothing with a status yet: the body's blank line goes
+    tail: list[str] = []
+    if message.tally is not None:
+        tally = message.tally
+        done = tally.base + len(tally.items) if worst else tally.done(message.items)
+        tail.append(_escape(tally.line(done)))
     if message.footer is not None:
-        lines += ["", _escape(message.footer)]
+        tail.append(_escape(message.footer))
+    if tail:
+        lines += ["", *tail]
+    for item in message.items:
+        if item.question:
+            status = _status(item)
+            line = _escape(item.title) + ("" if status is None else f" — {_escape(status)}")
+            lines += ["", line]
     return "\n".join(lines)
 
 
@@ -270,13 +339,22 @@ def _keyboard(message: InteractiveMessage, approval_id: int) -> tuple[tuple[Butt
     if message.style == "key":
         rows = _key_rows(message, approval_id)
     else:
+        # The question's row first, right under its line; then one numbered row per element.
         rows = [
+            tuple(
+                Button(option.label, f"{approval_id}:{number}:{option.key}")
+                for option in item.options
+            )
+            for number, item in enumerate(message.items, start=1)
+            if item.pending and item.question
+        ]
+        rows += [
             tuple(
                 Button(f"{number} {option.label}", f"{approval_id}:{number}:{option.key}")
                 for option in item.options
             )
             for number, item in enumerate(message.items, start=1)
-            if item.pending
+            if item.pending and not item.question
         ]
     # A global button is shown only while something pending can take it.
     global_row = tuple(
@@ -316,7 +394,7 @@ def worst_length(message: InteractiveMessage) -> int:
             )
         }
     )
-    return max(telegram_length(_text(message)), telegram_length(_text(worst)))
+    return max(telegram_length(_text(message)), telegram_length(_text(worst, worst=True)))
 
 
 def ensure_fits(message: InteractiveMessage) -> None:
@@ -440,7 +518,9 @@ def expire(message: InteractiveMessage) -> InteractiveMessage:
     items = tuple(
         item.model_copy(
             update={
-                "result": UNCONFIRMED_RESULT if item.running else message.expired_text,
+                "result": UNCONFIRMED_RESULT
+                if item.running
+                else (item.expired_text or message.expired_text),
                 "running": False,
             }
         )

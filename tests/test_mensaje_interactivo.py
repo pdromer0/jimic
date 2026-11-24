@@ -14,6 +14,7 @@ from jimic.channel.message import (
     MessageTooLong,
     Option,
     Outcome,
+    Tally,
     Tap,
     claim,
     clip_result,
@@ -26,6 +27,8 @@ from jimic.channel.message import (
     render,
     resolve,
     targets,
+    telegram_length,
+    worst_length,
 )
 
 YES = Option(key="y", label="Sí")
@@ -500,3 +503,140 @@ def test_el_texto_es_solo_el_cuerpo_hasta_que_un_toque_lo_resuelve():
 
 def test_un_mensaje_de_tareas_clave_cabe_en_todos_sus_estados():
     ensure_fits(key_message("🏋️", "🛒", "📚"))
+
+
+# --- La pregunta y la cifra (tarea 1.16) ---------------------------------------------------------
+
+
+def closing(*, tasks: int = 2, rated: str | None = None) -> InteractiveMessage:
+    """Un cierre de prueba: `tasks` elementos numerados, la cifra y la valoración al final."""
+    rating = Item(
+        title="¿Cómo ha ido el día?",
+        options=tuple(Option(key=f"r{n}", label=str(n)) for n in range(1, 6)),
+        question=True,
+        expired_text="sin valoración",
+        result=rated,
+        chosen=None if rated is None else "r4",
+    )
+    done = Option(key="done", label="✅ Hecha")
+    items = tuple(Item(title=f"Tarea {n}", options=(done, NO)) for n in range(1, tasks + 1))
+    return InteractiveMessage(
+        body="🌙 Cierre",
+        header="⏳ Sin marcar",
+        items=(*items, rating),
+        footer="🎯 Nota inventada",
+        style="plan",
+        tally=Tally(
+            text="📈 Por ahora: {done} de {total} del plan",
+            base=3,
+            total=7,
+            option="done",
+            items=tuple(range(tasks)),
+        ),
+    )
+
+
+def test_la_pregunta_va_al_final_del_texto_y_su_fila_encima_de_las_numeradas():
+    """Pilla la pregunta numerada como un elemento más, su fila debajo de las otras, o los
+    números de las demás corridos por ella."""
+    view = render(closing(), approval_id=7)
+    assert view.text.split("\n") == [
+        "🌙 Cierre",
+        "",
+        "⏳ Sin marcar",
+        "1️⃣ Tarea 1",
+        "2️⃣ Tarea 2",
+        "",
+        "📈 Por ahora: 3 de 7 del plan",
+        "🎯 Nota inventada",
+        "",
+        "¿Cómo ha ido el día?",
+    ]
+    assert labels(view) == [
+        ["1", "2", "3", "4", "5"],
+        ["1 ✅ Hecha", "1 No"],
+        ["2 ✅ Hecha", "2 No"],
+    ]
+    assert [b.data for b in view.keyboard[0]] == [f"7:3:r{n}" for n in range(1, 6)]
+
+
+def test_la_valoracion_tocada_se_resuelve_y_su_fila_desaparece():
+    """Pilla una pregunta que se puede volver a tocar (la valoración se guarda una vez)."""
+    message = closing()
+    assert targets(message, Tap(7, 3, "r4")) == [(2, "r4")]
+    rated = resolve(message, {2: Outcome("r4", "⭐ 4")})
+    view = render(rated, 7)
+    assert view.text.endswith("¿Cómo ha ido el día? — ⭐ 4")
+    assert labels(view)[0] == ["1 ✅ Hecha", "1 No"]
+    assert targets(rated, Tap(7, 3, "r1")) == []
+
+
+def test_la_cifra_sube_con_cada_elemento_resuelto_con_su_opcion_y_no_con_otra():
+    """Pilla una cifra fija (no sube con [Hecha]) o que cuenta cualquier toque."""
+    message = resolve(closing(), {0: Outcome("done", "✓ hecha"), 1: Outcome("n", "no")})
+    assert "📈 Por ahora: 4 de 7 del plan" in render(message, 7).text
+
+
+def test_la_cifra_solo_cuenta_sus_elementos():
+    """Pilla una cifra que cuenta un elemento que no es del plan."""
+    base = closing(tasks=2)
+    assert base.tally is not None
+    message = base.model_copy(update={"tally": base.tally.model_copy(update={"items": (1,)})})
+    message = resolve(message, {0: Outcome("done", "✓ hecha")})
+    assert "📈 Por ahora: 3 de 7 del plan" in render(message, 7).text
+
+
+def test_al_caducar_la_pregunta_dice_su_texto_y_los_demas_el_del_mensaje():
+    """Pilla una valoración caducada que dice «caducado» como las tareas."""
+    view = render(expire(closing()), 7)
+    assert view.keyboard == ()
+    assert view.text.endswith("¿Cómo ha ido el día? — sin valoración")
+    assert "1️⃣ Tarea 1 — caducado" in view.text
+
+
+def test_la_pregunta_admite_cinco_opciones_y_un_elemento_cuatro():
+    """Pilla el tope de cuatro aplicado a la pregunta, o el de cinco a un elemento normal."""
+    five = tuple(Option(key=f"r{n}", label=str(n)) for n in range(1, 6))
+    Item(title="¿Qué tal?", options=five, question=True)
+    with pytest.raises(ValidationError):
+        Item(title="Tarea", options=five)
+
+
+@pytest.mark.parametrize("where", [0, 1])
+def test_la_pregunta_va_la_ultima_y_solo_una(where):
+    """Pilla una pregunta en medio (cambiaría los números de los elementos) o dos."""
+    question = Item(title="¿Qué tal?", options=(YES,), question=True)
+    plain = Item(title="Tarea", options=(YES,))
+    items = (question, plain) if where == 0 else (question, question)
+    with pytest.raises(ValidationError):
+        InteractiveMessage(header="h", items=items)
+
+
+def test_una_cifra_sin_sus_huecos_o_con_elementos_que_no_hay_es_un_error():
+    with pytest.raises(ValidationError):
+        Tally(text="📈 {hecho}", base=0, total=1, option="done")
+    with pytest.raises(ValidationError):
+        InteractiveMessage(
+            header="h",
+            items=(Item(title="Tarea", options=(YES,)),),
+            tally=Tally(text="{done}/{total}", base=0, total=1, option="y", items=(3,)),
+        )
+
+
+def test_el_peor_caso_mide_la_cifra_con_todos_sus_elementos_contados():
+    """Pilla un peor caso que mide la cifra de ahora: de 9 a 10 crece un carácter."""
+    message = InteractiveMessage(
+        header="h",
+        items=(Item(title="T", options=(YES,)),),
+        tally=Tally(text="{done}/{total}", base=9, total=10, option="y", items=(0,)),
+    )
+    worst = message.model_copy(
+        update={"items": (message.items[0].model_copy(update={"result": "&" * 40}),)}
+    )
+    assert worst_length(message) == telegram_length(render(worst, 1).text) + 1
+
+
+def test_la_pregunta_y_la_cifra_van_y_vuelven_por_json():
+    """Pilla un campo nuevo que se pierde al guardar el estado en `approvals`."""
+    message = closing(rated="⭐ 4")
+    assert InteractiveMessage.model_validate_json(message.model_dump_json()) == message
