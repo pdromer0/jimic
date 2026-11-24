@@ -230,7 +230,8 @@ class DayCloseRunner:
             if day_plans.has_plan(self._conn, day)
             else None
         )
-        if plan is None and not view.tasks_down and not view.pending and not completed.tasks:
+        nothing = completed.available and not view.pending and not view.done
+        if plan is None and not view.tasks_down and nothing:
             return BuiltClose(None, "nothing", view=view, day=day)
         agent_text = None
         code = "fixed:no_agent"

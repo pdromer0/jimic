@@ -24,6 +24,7 @@ from jimic.close.message import CLOSE_KIND, FIXED_NOTE
 from jimic.heartbeat.key_tasks import KeyTaskStatus
 from jimic.memory import conversations, day_plans, key_marks
 from jimic.memory.database import open_database
+from jimic.tools.todoist import TaskList
 
 NOTE = "Tres de siete y la comida antes de hora: qué ansia 😄"
 
@@ -343,3 +344,26 @@ def test_una_recurrente_cerrada_por_el_boton_sale_hecha_y_cuenta_en_la_provision
     assert built.message is not None
     text = render(built.message, 1).text
     assert "✅ Hecho\n▫️ Gimnasio" in text and "📈 Por ahora: 1 de 2 del plan" in text
+
+
+def test_sin_plan_con_solo_una_tarea_clave_hecha_por_apex_hay_cierre(conn, tmp_path):
+    """Revisión propia: su tarea sigue abierta pero ya no está «sin marcar»; «Hecho» la enseña.
+    Pilla «nada que cerrar» mirando solo las completadas en Todoist."""
+    gym = raw_task(
+        "t-gimnasio", "Gimnasio", project_id="proyecto-inventado", due="2030-01-10T12:00:00"
+    )
+    w = CloseRunWorld(conn, tmp_path, noting(), tasks=[gym])
+    built = w.build_close([key_status(w, "t-gimnasio", done_by="apex")])
+    assert built.message is not None and "✅ Hecho\n▫️ Gimnasio" in render(built.message, 1).text
+
+
+def test_sin_plan_y_con_las_completadas_caidas_hay_cierre(conn, tmp_path):
+    """No se sabe si hubo algo hecho: más vale el cierre que callar."""
+    w = CloseRunWorld(conn, tmp_path, noting(), tasks=[])
+
+    async def down() -> TaskList:
+        return TaskList.unavailable("timeout")
+
+    setattr(w.todoist.reader, "read_completed_today", down)  # noqa: B010 - un doble de un método
+    built = w.build_close()
+    assert built.message is not None
