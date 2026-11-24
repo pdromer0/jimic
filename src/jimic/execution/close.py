@@ -247,9 +247,12 @@ class CloseActions:
         return MARK_ONLY if untouched else UNDONE
 
     async def _reopen(self, current: TodoistTask, data: dict[str, Any]) -> bool:
+        """Open again what JimiC closed; `False` if there was nothing to undo in Todoist (Pedro
+        reopened it, or it changed)."""
         if not data.get("recurring"):
-            if current.completed:
-                await self._todoist.writer.reopen(current.id)
+            if not current.completed:
+                return False
+            await self._todoist.writer.reopen(current.id)
             return True
         before = due_value(data.get("before"))
         if not where_jimic_left_it(current, data.get("after"), before):

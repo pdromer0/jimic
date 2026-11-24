@@ -346,3 +346,15 @@ def test_hecha_de_una_recurrente_que_movio_jimic_es_un_cambio(conn):
     key_marks.note_moved(conn, THURSDAY, "t-gimnasio", at("2030-01-10T21:00"))
     w.tap(approval, number, "done")
     assert "ha cambiado" in render(w.message(approval), approval).text
+
+
+def test_deshacer_hecha_de_una_que_pedro_ya_reabrio_dice_que_no_toca_todoist(conn):
+    """Revisión propia: si Pedro ya la reabrió en la app, el [Deshacer] no reabre nada y lo dice
+    («deshecho (Todoist, sin tocar)»), en vez de «deshecho»."""
+    w = CloseWorld(conn)
+    approval = w.show(w.paint())
+    result = w.tap(approval, 4, "done")
+    raw(w, "t-cena").update(checked=False, completed_at=None)
+    undo_id = undo(w, result)
+    assert "sin tocar" in render(w.message(undo_id), undo_id).text
+    assert "uncomplete_task" not in w.touched("t-cena")
