@@ -32,10 +32,9 @@ URGENT_TYPES = frozenset({"daily_plan", "day_close", "key_task"})
 """They never wait in the group window. A `notice` is the only kind that does (1.7-b)."""
 
 HANDOVER_TYPES = frozenset({"daily_plan", "day_close"})
-"""They are not sent: the heartbeat hands them over to the agent (decision 1.8-b), and that counts
-as attended today, not as a message (the plan counts as one when it goes out, task 1.14)."""
-PENDING_TASK = {"day_close": "1.16"}
-"""The types handed over whose task has not come yet, and that task: they only go to the log."""
+"""They are not sent: the heartbeat hands them over to their hook (decision 1.8-b), and that
+counts as attended today; the plan and the close count as a message when they go out (tasks 1.14
+and 1.16)."""
 
 SEPARATOR = "\n\n"
 """Between the blocks of one message: a blank line (decision 1.8-d)."""
@@ -102,8 +101,9 @@ def event_in_progress(calendar: CalendarDay, now: datetime) -> bool:
 class Quota:
     """The messages left today, with the last one kept for the day close (decision 1.7-a).
 
-    The slot is kept only while an enabled `day_close` has not gone out today: once it has, or
-    if there is none, the cap is the same for everything.
+    The slot is kept only while an enabled `day_close` has not been attended today: once it went
+    out, or was handed over with nothing to close (task 1.16), or if there is none, the cap is
+    the same for everything.
     """
 
     max_messages: int
@@ -113,9 +113,7 @@ class Quota:
     @classmethod
     def of(cls, limits: Limits, intentions: Intentions, sent: SentToday) -> Quota:
         close_pending = any(
-            intention.type == "day_close"
-            and intention.enabled
-            and sent.sent_count(intention.id) == 0
+            intention.type == "day_close" and intention.enabled and sent.count(intention.id) == 0
             for intention in intentions.intentions
         )
         return cls(limits.max_messages_per_day, sent.message_count, close_pending)
@@ -326,12 +324,13 @@ class _Pass:
             taken.add(item.intent)
             kind = self.by_id[item.intent].type
             if kind in HANDOVER_TYPES:
-                # What the agent will send must fit. The plan goes out (task 1.14): it takes its
-                # message now, so the rest of this batch sees one fewer. The close does not yet.
-                refusal = self.quota.refusal(is_close=kind == "day_close")
+                # What the hook will send must fit. The plan and the close go out (tasks 1.14 and
+                # 1.16): they take their message now, so the rest of this batch sees one fewer.
+                is_close = kind == "day_close"
+                refusal = self.quota.refusal(is_close=is_close)
                 self.decide("block" if refusal else "handover", refusal or "ok", item)
-                if refusal is None and kind not in PENDING_TASK:
-                    self.quota = self.quota.after_sending(is_close=False)
+                if refusal is None:
+                    self.quota = self.quota.after_sending(is_close=is_close)
             else:
                 (urgent if kind in URGENT_TYPES else notices).append(item)
         released: list[Outgoing] = []

@@ -5,9 +5,11 @@ executor of what Pedro approves, the memory (its buttons, `/memoria` and `/desha
 the onboarding (`/puesta_en_marcha`, task 1.13), the Telegram channel (Pedro's text goes to the
 assistant, the taps to their handlers, and a tap that closes a proposal may go on with the
 conversation, 1.13-c) and the plan of the day (task 1.14: the hook of the
-heartbeat for a `daily_plan`), all on one live configuration of the YAML files. Then it
-sweeps what expired while the service was down and schedules the heartbeat every 15 minutes (from
-the next quarter of an hour), the sweep of expired approvals every day at 00:01 (1.11-c) and the
+heartbeat for a `daily_plan`) and the close of the day (task 1.16: the hook for a `day_close`, its
+buttons), all on one live configuration of the YAML files. Then it sweeps what expired while the
+service was down and schedules, every 15 minutes (from the next quarter of an hour), the
+heartbeat, the definitive figure of «plan cumplido» and the sweep (the close expires in the
+morning); the sweep of expired approvals also every day at 00:01 (1.11-c) and the
 purge once a day: the database and the files of the agent older than 7 days. `Runtime.stop` undoes
 it in reverse order, every step even if one fails: the channel stops first, so no heartbeat runs
 while the rest closes. The queue of the group window lives in the `Heartbeat`, as long as the
@@ -17,7 +19,7 @@ service.
 import asyncio
 import logging
 import sqlite3
-from collections.abc import Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from contextlib import AsyncExitStack
 from datetime import time
 from functools import partial
@@ -27,8 +29,10 @@ from jimic.agent.transcripts import purge_agent_files
 from jimic.channel.bot import ClosedHandler, TelegramChannel, TextHandler, build_channel
 from jimic.channel.taps import TapHandler
 from jimic.clock import Clock
+from jimic.close.runner import DayCloseRunner
 from jimic.config import Settings
 from jimic.execution.assistant import Assistant
+from jimic.execution.close import CloseActions
 from jimic.execution.commands import Commands
 from jimic.execution.execute import Executor
 from jimic.execution.key_tasks import KeyTaskActions
@@ -106,6 +110,8 @@ class Runtime:
         self.assistant: Assistant | None = None
         self.executor: Executor | None = None
         self.plan: DailyPlanRunner | None = None
+        self.close: DayCloseRunner | None = None
+        self._ticks: tuple[Callable[[], Awaitable[object]], ...] = ()
 
     async def start(self) -> None:
         """Raises what the channel raises (`ChannelError`), with everything opened closed."""
@@ -165,9 +171,20 @@ class Runtime:
                 timezone=self._settings.timezone,
                 todoist=sources.todoist,
             )
+            close_actions = CloseActions(
+                conn=self._conn,
+                clock=self._clock,
+                timezone=self._settings.timezone,
+                todoist=sources.todoist,
+                calendar=sources.calendar,
+                config=self.config,
+            )
             handlers = (
                 assistant.track(
-                    executor.handlers | key_tasks.handlers | {MEMORY_KIND: memory.memory}
+                    executor.handlers
+                    | key_tasks.handlers
+                    | close_actions.handlers
+                    | {MEMORY_KIND: memory.memory}
                 )
                 | commands.handlers
             )
@@ -179,6 +196,16 @@ class Runtime:
                 handlers,
                 assistant.follow_up,
             )
+            close = DayCloseRunner(
+                conversation=conversation,
+                sources=sources,
+                config=self.config,
+                conn=self._conn,
+                clock=self._clock,
+                timezone=self._settings.timezone,
+                config_dir=self._paths.config_dir,
+                sender=channel,
+            )
             plan = DailyPlanRunner(
                 conversation=conversation,
                 sources=sources,
@@ -188,6 +215,7 @@ class Runtime:
                 timezone=self._settings.timezone,
                 config_dir=self._paths.config_dir,
                 sender=channel,
+                fallback=close.handover,
             )
             heartbeat = Heartbeat(
                 clock=self._clock,
@@ -208,7 +236,8 @@ class Runtime:
             stack.push_async_callback(channel.stop)
             # What expired while the service was down loses its buttons now (1.11-c).
             await channel.sweep()
-            channel.schedule_every(heartbeat.beat, INTERVAL, next_beat(self._clock.now()), "latido")
+            self._ticks = (heartbeat.beat, close.settle, channel.sweep)
+            channel.schedule_every(self._tick, INTERVAL, next_beat(self._clock.now()), "latido")
             channel.schedule_daily(
                 channel.sweep, SWEEP_AT.replace(tzinfo=self._settings.timezone), "caducadas"
             )
@@ -220,9 +249,20 @@ class Runtime:
             self.assistant = assistant
             self.executor = executor
             self.plan = plan
+            self.close = close
         except BaseException:
             await stack.aclose()
             raise
+
+    async def _tick(self) -> None:
+        """Every 15 minutes: the heartbeat, then the definitive figure of the days whose morning
+        came, then the sweep of what expired (the close lasts until the morning, task 1.16). Each
+        one on its own: one that fails does not keep the others from running."""
+        for step in self._ticks:
+            try:
+                await step()
+            except Exception as error:
+                logger.error("tick step failed (%s)", type(error).__name__)
 
     async def _purge(self) -> None:
         """Each purge on its own: one that fails does not keep the other from running."""

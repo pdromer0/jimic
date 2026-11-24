@@ -89,9 +89,17 @@ def test_justo_al_final_de_la_ventana_no_es_tardio(conn, tmp_path):
     assert "tardío" not in w.agent.runs[-1][0]
 
 
-def test_el_cierre_sigue_solo_en_el_log(conn, tmp_path):
+def test_lo_que_no_es_un_plan_va_a_su_enganche_y_el_plan_no_lo_toca(conn, tmp_path):
+    """Tarea 1.16: el cierre lo lleva su runner (`fallback`), no el del plan."""
     w = PlanWorld(conn, tmp_path, proposing(items=[GYM]))
+    handed: list[str] = []
+
+    async def fallback(intent, state) -> None:
+        handed.append(intent)
+
+    w.runner._fallback = fallback
     w.handover("cierre_del_dia")
+    assert handed == ["cierre_del_dia"]
     assert w.agent.runs == [] and w.sender.delivered == []
 
 

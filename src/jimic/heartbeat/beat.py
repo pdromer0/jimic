@@ -28,7 +28,7 @@ from jimic.channel.message import InteractiveMessage, MessageError
 from jimic.clock import Clock, local_day_bounds, to_db
 from jimic.heartbeat.cycle import CycleResult, Decision, run_cycle
 from jimic.heartbeat.key_message import KEY_KIND, key_message
-from jimic.heartbeat.limits import PENDING_TASK, SEPARATOR, Verdict, WaitingNotices, in_window
+from jimic.heartbeat.limits import SEPARATOR, Verdict, WaitingNotices, in_window
 from jimic.heartbeat.sources import Sources
 from jimic.heartbeat.state import DayState
 from jimic.memory import key_marks, system_notices, usage
@@ -75,15 +75,14 @@ class Sender(Protocol):
 
 type OnHandover = Callable[[str, DayState], Awaitable[None]]
 """Called with the id of a plan or a close and the state of the day when the heartbeat hands it
-over to the agent. Task 1.14 fills it in for the plan (`jimic.plan.runner`) and 1.16 will for the
-close; if it raises, the intention is not attended."""
+over. Task 1.14 fills it in for the plan (`jimic.plan.runner`) and 1.16 for the close
+(`jimic.close.runner`); if it raises, the intention is not attended."""
 
 
 async def log_handover(intent: str, state: DayState) -> None:
-    """The hook of task 1.10, and still the close's: a log line with the id and the task that
-    will bring it."""
+    """The hook when there is none for that intention (task 1.10): a log line with its id."""
     kind = next((item.type for item in state.intentions if item.id == intent), "?")
-    logger.info("handover %s (pending %s)", intent, PENDING_TASK.get(kind, "?"))
+    logger.info("handover %s (%s, no hook)", intent, kind)
 
 
 class Decider(Protocol):

@@ -5,7 +5,8 @@ agent **in today's conversation** with a fixed note of the code (decision 1.14-a
 «Pedro conversa», waits for the lock), reads Todoist, the calendar and APEX itself, paints the
 plan (`plan/message.py`) and sends it as one message, which counts in the quota (a row in
 `notices`). If the agent cannot (its run fails, `daily_cap_usd`, or it proposes no plan), the
-minimal plan goes instead (decision 1.14-e). A `day_close` still only goes to the log (task 1.16).
+minimal plan goes instead (decision 1.14-e). Any other intention goes to `fallback` (the close of
+the day, task 1.16).
 
 **Retries (Pedro's review of the plan).** If sending fails, the hook raises and the plan is not
 attended, so a later heartbeat may hand it over again. At most one retry with the agent per day:
@@ -31,7 +32,7 @@ from jimic.agent.tools import RunState
 from jimic.channel.message import InteractiveMessage, MessageTooLong
 from jimic.clock import Clock
 from jimic.execution.plan_message import PLAN_DAY, PLAN_KIND
-from jimic.heartbeat.beat import log_handover
+from jimic.heartbeat.beat import OnHandover, log_handover
 from jimic.heartbeat.sources import Sources
 from jimic.heartbeat.state import DayState
 from jimic.memory import day_plans
@@ -130,8 +131,10 @@ class DailyPlanRunner:
         timezone: ZoneInfo,
         config_dir: Path,
         sender: PlanSender | None = None,
+        fallback: OnHandover = log_handover,
     ) -> None:
-        """Without `sender` it only builds (the evaluation)."""
+        """Without `sender` it only builds (the evaluation). `fallback` takes the intentions that
+        are not a plan (the close, task 1.16)."""
         self._conversation = conversation
         self._sources = sources
         self._config = config
@@ -140,6 +143,7 @@ class DailyPlanRunner:
         self._timezone = timezone
         self._config_dir = config_dir
         self._sender = sender
+        self._fallback = fallback
         self._tries = DailyTries()
 
     def _now(self) -> datetime:
@@ -156,7 +160,7 @@ class DailyPlanRunner:
         """The hook of the heartbeat. Raises `SendError` if the plan could not go out."""
         intention = self.intention(intent)
         if intention is None:
-            await log_handover(intent, state)
+            await self._fallback(intent, state)
             return
         if self._sender is None:
             raise RuntimeError("the plan has nowhere to go")

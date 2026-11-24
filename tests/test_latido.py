@@ -227,20 +227,17 @@ def test_un_envio_rechazado_se_descarta_sin_gastar_y_el_siguiente_latido_puede_e
     assert second["sent_today"] == []
 
 
-@pytest.mark.parametrize(
-    ("intent", "task_id"), [("plan_del_dia", None), ("cierre_del_dia", "1.16")]
-)
-def test_el_plan_y_el_cierre_de_haiku_los_envia_el_enganche_no_el_latido(conn, intent, task_id):
+@pytest.mark.parametrize("intent", ["plan_del_dia", "cierre_del_dia"])
+def test_el_plan_y_el_cierre_de_haiku_los_envia_el_enganche_no_el_latido(conn, intent):
     """Decisión 1.8-b: el latido no envía su texto ni los anota en `notices`; los pasa al
-    enganche (el plan lo envía la 1.14; el cierre, la 1.16)."""
+    enganche (el plan lo envía la 1.14; el cierre, la 1.16), ya sin nota de «pendiente»."""
     world = World(
         conn, FakeMessages(api_message(answer(True, intent, SECRET_TEXT))), items=DUE_EARLY
     )
     world.at("2030-01-07T08:00")
     assert world.sender.texts == []
     assert world.notices() == []
-    note = f" (pendiente: {task_id})" if task_id else ""
-    assert world.rows()[0][1:] == (1, intent, f"{SECRET_REASON}{note} [handover ok]")
+    assert world.rows()[0][1:] == (1, intent, f"{SECRET_REASON} [handover ok]")
     assert world.handovers() == [intent]
     assert world.handed == [intent]
 
@@ -283,12 +280,32 @@ def test_atendido_y_enviado_el_mismo_dia_cuenta_una_vez(conn):
     assert plan_json(world.fake.requests[0])["left_today"] == 0
 
 
-def test_un_cierre_atendido_sin_enviar_guarda_su_hueco(conn):
-    """La 78 al pie de la letra: el hueco del cierre se guarda mientras no se haya enviado."""
+def test_un_cierre_atendido_sin_enviar_libera_su_hueco(conn):
+    """Tarea 1.16: un cierre atendido sin mensaje (no había nada que cerrar) ya no saldrá hoy,
+    así que su hueco (la 78) queda libre. Pilla un hueco guardado para un cierre que no llega."""
+    sent = sent_between(conn, *local_day_bounds(MONDAY, MADRID))
+    assert Quota.of(limits(), intentions(*ALL), sent).close_pending
     record_handover(conn, "cierre_del_dia", madrid("2030-01-07T21:00"))
     sent = sent_between(conn, *local_day_bounds(MONDAY, MADRID))
     assert sent.count("cierre_del_dia") == 1
-    assert Quota.of(limits(), intentions(*ALL), sent).close_pending
+    assert not Quota.of(limits(), intentions(*ALL), sent).close_pending
+
+
+def test_el_cierre_pasado_al_enganche_ocupa_su_mensaje_en_el_lote(conn):
+    """Tarea 1.16: el cierre sale, así que en su lote ocupa su hueco; el último mensaje libre
+    no se lo lleva otro. Con 7 de 8 enviados, el cierre pasa y el aviso del mismo lote no."""
+    for minute in range(7):
+        add_notice(conn, "basura", madrid(f"2030-01-07T1{minute}:00"), 100 + minute)
+    world = World(
+        conn,
+        FakeMessages(api_message(picks(("cierre_del_dia", None), ("ofertas", "Ofertas")))),
+        items=DUE_EARLY,
+    )
+    world.at("2030-01-07T21:30")
+    assert world.handed == ["cierre_del_dia"]
+    assert world.sender.texts == []
+    # Con el cierre ya contado, el aviso lo para el tope del día, no el hueco del cierre.
+    assert world.rows()[0][3].endswith("[handover ok; block daily_cap]")
 
 
 def test_si_el_enganche_falla_el_plan_no_queda_atendido(conn):
@@ -315,7 +332,7 @@ def test_el_enganche_de_serie_solo_escribe_en_el_log(conn, caplog):
         sender=FakeSender(),
     )
     asyncio.run(heartbeat.beat())
-    assert "handover cierre_del_dia (pending 1.16)" in caplog.text
+    assert "handover cierre_del_dia (day_close, no hook)" in caplog.text
     assert [row[0] for row in conn.execute("SELECT intent FROM handovers")] == ["cierre_del_dia"]
 
 

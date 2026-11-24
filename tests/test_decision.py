@@ -41,6 +41,7 @@ from jimic.evals.scenarios import load_suite
 from jimic.heartbeat.decide import (
     API_URL,
     CACHE_TTL,
+    CLOSE_TEMPLATE,
     EFFORT,
     PLAN_TEMPLATE,
     HaikuDecider,
@@ -165,17 +166,16 @@ def test_el_tope_del_mensaje_se_mide_como_telegram(conn):
     assert decision.speak and decision.proposals
 
 
-@pytest.mark.parametrize(("intent", "task"), [("plan_del_dia", None), ("cierre_del_dia", "1.16")])
+@pytest.mark.parametrize("intent", ["plan_del_dia", "cierre_del_dia"])
 @pytest.mark.parametrize("message", [None, SECRET_TEXT])
-def test_el_plan_y_el_cierre_se_deciden_sin_texto_del_latido(conn, intent, task, message):
-    """Decisión 1.8-b: se registran con su intención y sin texto propio: los envía el agente.
-    El cierre sigue «pendiente» hasta la 1.16; el plan ya no (tarea 1.14)."""
+def test_el_plan_y_el_cierre_se_deciden_sin_texto_del_latido(conn, intent, message):
+    """Decisión 1.8-b: se registran con su intención y sin texto propio: los envía su enganche
+    (tareas 1.14 y 1.16), y ya ninguno va «pendiente»."""
     fake = FakeMessages(api_message(answer(True, intent, message)))
     decision, _ = decide(conn, "2030-01-07T08:00", fake)
     assert (decision.speak, decision.intent) == (True, intent)
-    note = f" (pendiente: {task})" if task else ""
-    assert decision.reason == f"{SECRET_REASON}{note}"
-    # Sin texto: la segunda pasada lo pasa al agente.
+    assert decision.reason == SECRET_REASON
+    # Sin texto: la segunda pasada lo pasa a su enganche.
     assert [(p.intent, p.text) for p in decision.proposals] == [(intent, "")]
 
 
@@ -287,10 +287,17 @@ def test_con_la_api_caida_un_plan_ya_pasado_al_agente_no_se_repite(conn):
     assert down(conn, "2030-01-07T08:00").proposals == ()
 
 
-def test_con_la_api_caida_el_cierre_sigue_sin_plantilla(conn):
-    """Decisión 1.8-b: el cierre llega con la 1.16."""
+def test_con_la_api_caida_el_cierre_se_propone_a_su_hora_por_defecto(conn):
+    """Tarea 1.16 (RF-04): con Haiku caído, el cierre va a su enganche a su hora por defecto
+    (22:00), como el plan; lo pinta el código. Pilla un cierre que con la API caída no sale."""
     decision = down(conn, "2030-01-07T22:00")
-    assert (decision.speak, decision.intent, decision.proposals) == (False, None, ())
+    assert [(p.intent, p.text) for p in decision.proposals] == [("cierre_del_dia", CLOSE_TEMPLATE)]
+    assert down(conn, "2030-01-07T22:15").proposals == ()
+
+
+def test_con_la_api_caida_un_cierre_ya_atendido_no_se_repite(conn):
+    record_handover(conn, "cierre_del_dia", madrid("2030-01-07T21:45"))
+    assert down(conn, "2030-01-07T22:00").proposals == ()
 
 
 def test_dos_plantillas_en_el_mismo_tramo_van_las_dos(conn):
