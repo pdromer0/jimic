@@ -359,21 +359,35 @@ Un solo mensaje, que se actualiza con los toques:
 1️⃣ 🧘 Estiramientos (21:30)
 2️⃣ 📞 Llamar al seguro
 
+📈 Por ahora: 4 de 7 del plan
 🎯 <nota sobre las metas, 1–2 líneas, con humor>
 🔮 Mañana: <primer evento o «calendario libre»> · 🏋️ <entreno previsto>
 
-¿Cómo ha ido el día?  [1] [2] [3] [4] [5]
+¿Cómo ha ido el día?
+[1] [2] [3] [4] [5]
 [1 ✅ Hecha] [1 🗣️ La haré] [1 ➡️ Mañana]
 [2 ✅ Hecha] [2 🗣️ La haré] [2 ➡️ Mañana]
 [➡️ Todo lo pendiente a mañana]
 ```
 
-- [Hecha] marca la tarea en Todoist: cuenta como hecha.
+- Lo pinta el código; el agente (Sonnet, en la sesión del día, sin origen) escribe solo la nota 🎯,
+  que el código recorta a 2 líneas; si no puede, una nota fija (decisión 153).
+- **✅ Hecho:** lo completado hoy en Todoist y las tareas clave hechas por el botón o por APEX («ya
+  no es de hoy» no es hecho). **⏳ Sin marcar:** las abiertas de hoy, siete con botones como mucho.
+- [Hecha] marca la tarea en Todoist: cuenta como hecha. Con [Deshacer].
 - [La haré] no la mueve ni la marca.
+- [Mañana] la lleva a la misma hora de mañana o, si choca con un evento o una tarea con hora de
+  mañana, al siguiente hueco libre; la fila global hace lo mismo con lo que sigue sin marcar y no
+  declarado. Los dos con [Deshacer], que también quita el «hoy no» de una tarea clave (decisión
+  155).
 - Lo no tocado se queda como está.
 - Lo marcado antes de su hora solo queda anotado en `plan_items`.
-- **«Plan cumplido» (H1-14):** solo cuenta lo marcado en Todoist. La cifra del día se calcula a
-  la mañana siguiente, así que lo marcado después del cierre sí cuenta.
+- **«Plan cumplido» (H1-14):** solo cuenta lo marcado en Todoist. En el cierre se ve provisional
+  («📈 Por ahora», solo las tareas del plan; sube con cada [Hecha]); la cifra del día se calcula a
+  la mañana siguiente, así que lo marcado después del cierre sí cuenta (decisión 154).
+- **La mañana siguiente** es el fin de las horas de silencio del día siguiente: hasta entonces
+  valen los botones y la valoración, que se guarda una vez y no insiste.
+- Sin plan ni tareas de hoy no hay cierre; un solo cierre al día.
 
 ### Puesta en marcha (CU-12)
 
