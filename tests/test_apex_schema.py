@@ -46,6 +46,31 @@ def test_el_entreno_previsto_sale_del_dia_de_la_semana_y_solo_dentro_del_bloque(
     assert snapshot_of(data, f"{today} 09:00").planned_today == planned
 
 
+@pytest.mark.parametrize(
+    ("today", "tomorrow"),
+    [
+        ("2030-01-07", "Movilidad"),  # lunes: mañana es la clave "1"
+        ("2030-01-13", "Empuje · fuerza"),  # domingo: mañana es lunes, la clave "0"
+        ("2030-02-27", "Cardio suave"),  # mañana es el último día del bloque
+        ("2030-02-28", None),  # mañana ya está fuera del bloque
+    ],
+)
+def test_el_entreno_de_manana_es_el_del_dia_siguiente_y_solo_dentro_del_bloque(today, tomorrow):
+    """Pilla el entreno de mañana tomado de hoy, o un bloque que se acaba un día tarde (tarea
+    1.16: la línea «🔮 Mañana» del cierre)."""
+    data = invented()
+    data["meta"]["ultima_actualizacion"] = f"{today} 07:00:00"
+    assert snapshot_of(data, f"{today} 21:30").planned_tomorrow == tomorrow
+
+
+def test_el_entreno_de_manana_no_llega_al_modelo():
+    """Pilla `planned_tomorrow` en el JSON que ven Haiku y el agente: lo que ven no cambia."""
+    snapshot = snapshot_of(invented(), "2030-01-07 21:30")
+    assert snapshot.planned_tomorrow == "Movilidad"
+    assert "planned_tomorrow" not in snapshot.to_json()
+    assert "Movilidad" not in snapshot.to_json()
+
+
 def test_cada_dia_de_la_semana_toma_su_clave():
     """Pilla un desplazamiento de un día que los dos extremos podrían compensar."""
     expected = list(invented()["plan"]["estructura_semanal"].values())

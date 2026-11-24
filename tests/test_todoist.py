@@ -36,8 +36,16 @@ from jimic.tools.todoist import (
 LOGGER = "jimic.tools.todoist"
 NOW = madrid("2030-01-07 09:00")
 
-READ_MEMBERS = {"read_today", "read_project", "get_task", "get_photo", "read_completed_today"}
-"""`read_completed_today`, de la 1.15: el «hecho» de una tarea clave marcada en la app."""
+READ_MEMBERS = {
+    "read_today",
+    "read_project",
+    "read_day",
+    "get_task",
+    "get_photo",
+    "read_completed_today",
+}
+"""`read_completed_today`, de la 1.15: el «hecho» de una tarea clave marcada en la app;
+`read_day`, de la 1.16: lo que ya hay mañana cuando el cierre mueve una tarea."""
 WRITE_MEMBERS = {"create", "move", "complete", "delete", "recreate", "reopen"}
 """Las cuatro de la 1.5, `recreate` (el /deshacer de un borrado, 1.12) y `reopen` (el [Deshacer]
 de [Ya entrené], 1.15)."""
@@ -719,3 +727,62 @@ def test_si_la_api_dice_que_no_reabrio_es_un_error(monkeypatch):
     with pytest.raises(ToolFailure) as caught:
         run(make_writer(api).reopen("a"))
     assert caught.value.code == "not_reopened"
+
+
+# --- Un día concreto y la hora de completar (tarea 1.16) ---------------------------------------
+
+
+def test_un_dia_concreto_son_sus_abiertas_por_dia_local_y_por_hora():
+    """Mañana = 2030-01-08 en Madrid. Pilla un día en UTC, las de antes (vencidas) colándose, o
+    el orden de `read_today` perdido."""
+    api = FakeTodoistApi(
+        [
+            raw_task("hoy", due="2030-01-07"),
+            raw_task("tarde", due="2030-01-08T19:00:00"),
+            raw_task("dia-entero", due="2030-01-08"),
+            raw_task("utc-aun-es-hoy", due="2030-01-07T22:30:00Z"),  # 23:30 del 7 en Madrid
+            raw_task("utc-ya-es-manana", due="2030-01-07T23:30:00Z"),  # 00:30 del 8
+            raw_task("pasado", due="2030-01-09T09:00:00"),
+            raw_task("sin-fecha"),
+        ]
+    )
+    result = run(make_reader(api).read_day(date(2030, 1, 8)))
+    assert ids(result) == ["dia-entero", "utc-ya-es-manana", "tarde"]
+
+
+def test_un_dia_concreto_si_falla_lo_dice_con_su_codigo_y_no_lanza():
+    api = FakeTodoistApi(error=http_status_error(503))
+    result = run(make_reader(api).read_day(date(2030, 1, 8)))
+    assert not result.available and result.unavailable_reason == "http_503"
+
+
+def test_un_dia_concreto_en_dev_solo_ve_el_proyecto_de_pruebas():
+    """Pilla `read_day` sin la barrera de la copia de pruebas."""
+    api = FakeTodoistApi(
+        [
+            raw_task("mia", project_id=TEST_PROJECT, due="2030-01-08"),
+            raw_task("real", project_id=REAL_PROJECT, due="2030-01-08", title=PRIVATE_TITLE),
+        ]
+    )
+    reader = todoist.GuardedReader(make_reader(api), TEST_PROJECT)
+    assert ids(run(reader.read_day(date(2030, 1, 8)))) == ["mia"]
+    assert not run(reader.read_day(date(2030, 1, 8), REAL_PROJECT)).available
+
+
+def test_la_completada_sabe_cuando_se_completo_en_la_zona_de_la_configuracion():
+    """Pilla `completed_at` perdido o en UTC: lo marcado antes de su hora sale de aquí."""
+    api = FakeTodoistApi([raw_task("a", "Meditación", due="2030-01-07T09:30:00")])
+    api.completed_at = "2030-01-07T07:20:00.000000Z"  # las 8:20 en Madrid; el reloj, las 9:00
+    run(make_writer(api).complete("a"))
+    (task,) = run(make_reader(api).read_completed_today()).tasks
+    assert task.completed_at == datetime(2030, 1, 7, 8, 20, tzinfo=MADRID)
+    assert task.completed_at is not None and str(task.completed_at.tzinfo) == "Europe/Madrid"
+    again = run(make_reader(api).get_task("a"))
+    assert again is not None and again.completed_at == task.completed_at
+
+
+def test_la_hora_de_completar_no_llega_al_modelo():
+    """Pilla `completed_at` en el JSON que ve el modelo (es solo del código, como `completed`)."""
+    api = FakeTodoistApi([raw_task("a", due="2030-01-07")])
+    run(make_writer(api).complete("a"))
+    assert "completed" not in run(make_reader(api).read_completed_today()).to_json()
