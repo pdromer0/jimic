@@ -314,6 +314,7 @@ class Conversation:
             self._paths.config_dir,
             day,
             run,
+            limits,
         )
         options = build_options(
             self._settings,

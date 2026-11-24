@@ -70,7 +70,7 @@ from jimic.memory.changes import IDEAS_FILE, ChangeRefused, Proposed
 from jimic.memory.live import read_valid
 from jimic.memory.onboarding import OBJECTIVES_FILE, copied_goal
 from jimic.memory.personal import INTENTIONS_FILE
-from jimic.memory.schemas import Intentions
+from jimic.memory.schemas import Intentions, Limits, is_free
 from jimic.plan.rules import refusals
 from jimic.tools.apex import ApexReader
 from jimic.tools.apex_schema import ApexSnapshot
@@ -152,6 +152,8 @@ class RunState:
     day_sources: tuple[CalendarDay, TaskList] | None = None
     """The calendar and the tasks of today that `propose_plan` read to check the plan of the day
     (decision 1.16-e): once per run."""
+    read_tasks: dict[str, TodoistTask] = field(default_factory=dict)
+    """The tasks that the plan of the day moves or deletes, as `propose_plan` read them."""
 
     def close(self) -> None:
         """At the end of the run: a run that read external content proposes nothing for the
@@ -178,6 +180,8 @@ class ToolContext:
     config_dir: Path
     day: date
     run: RunState = field(default_factory=RunState)
+    limits: Limits | None = None
+    """The limits the guard applies: `propose_plan` reads no source the agent may not read."""
 
     @classmethod
     def of(
@@ -189,6 +193,7 @@ class ToolContext:
         config_dir: Path,
         day: date,
         run: RunState | None = None,
+        limits: Limits | None = None,
     ) -> ToolContext:
         """Only the reader of Todoist goes in: the writer stays out of the agent's reach."""
         return cls(
@@ -201,6 +206,7 @@ class ToolContext:
             config_dir,
             day,
             run if run is not None else RunState(),
+            limits,
         )
 
 
@@ -259,6 +265,10 @@ def guarded(name: str, run: Callable[[dict[str, Any]], Awaitable[Result]]):
     return handler
 
 
+async def _down[S](source: S) -> S:
+    return source
+
+
 NO_ARGS: dict[str, Any] = {"type": "object", "properties": {}, "additionalProperties": False}
 
 
@@ -306,13 +316,25 @@ def build_tools(ctx: ToolContext) -> list[SdkMcpTool[Any]]:
                     " palabras como mucho"
                 )
 
+    def allowed(name: str) -> bool:
+        """Whether the agent may read this source itself (`tool_levels`, as the guard says);
+        without limits (a test), it may."""
+        return ctx.limits is None or is_free(ctx.limits, name)
+
     async def day_sources() -> tuple[CalendarDay, TaskList]:
-        """Today's calendar and tasks, read once per run. A source that fails counts as down:
-        that part of the check is skipped, since nothing can be known (decision 1.16-e)."""
+        """Today's calendar and tasks, read once per run. A source that fails counts as down, and
+        one the agent may not read (`blocked`) is not read: that part of the check is skipped,
+        since nothing can be known (decision 1.16-e)."""
         if ctx.run.day_sources is None:
             contaminated()
             calendar, tasks = await asyncio.gather(
-                ctx.calendar.read_day(today()), ctx.tasks.read_today(), return_exceptions=True
+                ctx.calendar.read_day(today())
+                if allowed("read_calendar")
+                else _down(CalendarDay.unavailable("blocked")),
+                ctx.tasks.read_today()
+                if allowed("read_tasks")
+                else _down(TaskList.unavailable("blocked")),
+                return_exceptions=True,
             )
             if not isinstance(calendar, CalendarDay):
                 calendar = CalendarDay.unavailable(f"unexpected:{type(calendar).__name__}")
@@ -328,8 +350,10 @@ def build_tools(ctx: ToolContext) -> list[SdkMcpTool[Any]]:
         """The hard rules of the plan that are a count of hours (decision 1.16-e) and the days of
         the habits (F2-a), refused to the agent with their reasons: `jimic.plan.rules`."""
         calendar, tasks = await day_sources()
+        # What earlier calls moved keeps its duration, even if it is not among today's tasks.
+        ctx.run.read_tasks |= {task.id: task for task in read}
         known = {task.id: task for task in (tasks.tasks if tasks.available else [])}
-        known |= {task.id: task for task in read}
+        known |= ctx.run.read_tasks
         intentions = read_valid(ctx.config_dir, INTENTIONS_FILE)
         habits = intentions.habits if isinstance(intentions, Intentions) else []
         problems = refusals(

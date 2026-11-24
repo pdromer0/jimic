@@ -23,6 +23,7 @@ from heartbeat_data import MADRID, calendar_with, event, madrid, sources, task
 from jimic.agent.tools import RunState, ToolContext
 from jimic.heartbeat.sources import Sources
 from jimic.memory.conversations import note_message
+from jimic.memory.schemas import Limits
 from jimic.tools.todoist import TaskList, TodoistTools
 
 SECRET_IDEA = "Idea-secreta-de-Pedro-4417"
@@ -76,6 +77,7 @@ def context(
     srcs: Sources | None = None,
     now: str = "2030-01-07T10:15",
     run: RunState | None = None,
+    limits: Limits | None = None,
 ) -> ToolContext:
     """The tools of Monday's session; the day has its row, as the conversation writes it."""
     moment = madrid(now)
@@ -88,6 +90,7 @@ def context(
         config_dir,
         moment.date(),
         run,
+        limits,
     )
 
 

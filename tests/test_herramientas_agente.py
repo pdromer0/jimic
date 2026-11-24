@@ -21,6 +21,7 @@ from agent_data import (
 )
 from calendar_data import SECRET_TITLE
 from heartbeat_data import CountingCalendar, calendar_with, event, madrid, sources, task
+from heartbeat_data import limits as limits_of
 from memory_data import QUIET_LINE, shas, write_personal
 
 from jimic.agent.tools import RunState, build_server, model_name
@@ -733,3 +734,57 @@ def test_en_el_plan_el_habito_de_un_dia_que_no_le_toca_se_rechaza(conn, config_d
     (config_dir / "intenciones.yaml").write_text("habits: [", encoding="utf-8")
     _, is_error = call(conn, config_dir, "propose_plan", {"items": [stretch]}, run=plan_run())
     assert not is_error
+
+
+def test_lo_movido_en_una_llamada_anterior_conserva_su_duracion(conn, config_dir):
+    """Revisión propia: una tarea que no sale entre las de hoy, movida en la primera llamada,
+    ocupa sus 60 minutos en la segunda (sin su duración, sería un instante a las 15:00)."""
+    far = task("t-lejos", "Tarea inventada", madrid("2030-01-20T09:00")).model_copy(
+        update={"duration_minutes": 60}
+    )
+    srcs = agent_sources(TaskList(available=True, tasks=[far]))
+
+    async def nothing_today() -> TaskList:
+        return TaskList(available=True, tasks=[])
+
+    setattr(srcs.todoist.reader, "read_today", nothing_today)  # noqa: B010 - un doble de un método
+    run = plan_run()
+    srv = server(conn, config_dir, srcs=srcs, run=run)
+    to_today = {"action": "move", "task_id": "t-lejos", "due": "2030-01-07T15:00", "reason": "r"}
+    _, is_error = asyncio.run(call_tool(srv, "propose_plan", {"items": [to_today]}))
+    assert not is_error
+    on_it = ON_THE_APPOINTMENT | {"due": "2030-01-07T15:30"}
+    text, is_error = asyncio.run(call_tool(srv, "propose_plan", {"items": [on_it]}))
+    assert is_error and "pisa «Tarea inventada» 15:00–16:00" in text
+
+
+def test_con_read_calendar_bloqueado_no_se_lee_el_calendario(conn, config_dir):
+    """Revisión propia: el rechazo no le enseña al agente un calendario que no puede leer."""
+    counting = CountingCalendar(calendar_with(event(madrid("2030-01-07T10:00"))))
+    base = agent_sources()
+    srcs = Sources(todoist=base.todoist, calendar=counting, apex=base.apex)
+    blocked = limits_of()
+    blocked = blocked.model_copy(
+        update={"tool_levels": {**blocked.tool_levels, "read_calendar": "blocked"}}
+    )
+    run = plan_run()
+    _, is_error = call(
+        conn,
+        config_dir,
+        "propose_plan",
+        {"items": [ON_THE_APPOINTMENT]},
+        srcs=srcs,
+        run=run,
+        limits=blocked,
+    )
+    assert not is_error and counting.reads == 0
+    _, is_error = call(
+        conn,
+        config_dir,
+        "propose_plan",
+        {"items": [ON_THE_APPOINTMENT]},
+        srcs=srcs,
+        run=plan_run(),
+        limits=limits_of(),
+    )
+    assert is_error and counting.reads == 1
