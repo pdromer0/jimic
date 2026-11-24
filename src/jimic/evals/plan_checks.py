@@ -19,14 +19,9 @@ Rules shared by the checks:
 
 - Titles are compared without case and with their spaces joined (`normalized`); «contains» is a
   substring of the normalized title.
-- Times are local. An interval is half-open, `[start, end)`: a meeting of 10:00 to 11:00 and a
-  task at 11:00 do not overlap. A task or a proposal with a time and no duration is an instant,
-  which overlaps an interval that contains it (`start <= t < end`) or the same instant.
-- `no_overlap` compares what the run proposes with a time today (to create, or to move) with the
-  events of today with a time that Pedro did not decline, with the tasks of today with a time, and
-  with each other. A task that the run moves or deletes leaves its slot free, and an event with
-  the same title as what is proposed is that same thing, not a clash (a task moved to the time of
-  its event, H1-9).
+- `no_overlap` and `due_from_now` are the functions of `jimic.plan.rules`, the same ones
+  `propose_plan` refuses to the agent in the plan (decision 1.16-e): half-open intervals, what the
+  run moves or deletes frees its slot, an event with the same title is no clash (H1-9).
 - `no_duplicates` compares **titles only** (with the open tasks that stay, the events and the
   other creations): «by intention» («Andar 5 km» and «Paseo 5 km») is no function of the data, so
   the scenarios that test it say so with `deletes_exactly` or `no_create_title`.
@@ -39,9 +34,18 @@ from datetime import date, datetime, time, timedelta
 from typing import Any, Literal
 from zoneinfo import ZoneInfo
 
-from jimic.agent.proposals import parse_due
 from jimic.memory.schemas import Habit
 from jimic.plan.day import normalized
+from jimic.plan.rules import (
+    clashes,
+    day_of,
+    due_of,
+    find_task,
+    mentions,
+    span_of,
+    starts_before,
+    touched,
+)
 from jimic.tools.calendar import CalendarEvent
 from jimic.tools.todoist import TodoistTask
 
@@ -96,12 +100,6 @@ class CheckInput:
         return self.now.date()
 
 
-type Span = tuple[datetime, datetime]
-"""`[start, end)`; an instant has `start == end`."""
-type Titled = tuple[Span, str]
-"""A span and the normalized title of what fills it."""
-
-
 def _creates(data: CheckInput) -> list[dict[str, Any]]:
     return [item for item in data.items if item["action"] == "create"]
 
@@ -111,71 +109,19 @@ def _of(data: CheckInput, action: str) -> list[dict[str, Any]]:
 
 
 def _due(item: dict[str, Any], timezone: ZoneInfo) -> date | datetime:
-    value = parse_due(str(item["due"]))
-    return value.replace(tzinfo=timezone) if isinstance(value, datetime) else value
+    return due_of(item, timezone)
 
 
 def _day_of(value: date | datetime, timezone: ZoneInfo) -> date:
-    return value.astimezone(timezone).date() if isinstance(value, datetime) else value
-
-
-def _span(start: datetime, minutes: int | None) -> Span:
-    return start, start + timedelta(minutes=minutes or 0)
-
-
-def _overlap(a: Span, b: Span) -> bool:
-    (a1, a2), (b1, b2) = a, b
-    if a1 == a2 and b1 == b2:
-        return a1 == b1
-    if a1 == a2:
-        return b1 <= a1 < b2
-    if b1 == b2:
-        return a1 <= b1 < a2
-    return a1 < b2 and b1 < a2
+    return day_of(value, timezone)
 
 
 def _task(data: CheckInput, task_id: str) -> TodoistTask | None:
-    return next((task for task in data.tasks if task.id == task_id), None)
+    return find_task(data.tasks, task_id)
 
 
 def _touched(data: CheckInput) -> set[str]:
-    return {str(item["task_id"]) for item in data.items if item["action"] in ("move", "delete")}
-
-
-def _proposed_spans(data: CheckInput) -> list[Titled]:
-    spans = []
-    for item in data.items:
-        if item["action"] not in ("create", "move"):
-            continue
-        due = _due(item, data.timezone)
-        if not isinstance(due, datetime) or due.date() != data.today:
-            continue
-        if item["action"] == "create":
-            minutes, title = item.get("duration_minutes"), str(item["title"])
-        else:
-            task = _task(data, str(item["task_id"]))
-            minutes = task.duration_minutes if task is not None else None
-            title = task.title if task is not None else str(item["snapshot"]["title"])
-        spans.append((_span(due, minutes), normalized(title)))
-    return spans
-
-
-def _fixed_spans(data: CheckInput) -> list[Titled]:
-    spans = []
-    for event in data.events:
-        if event.declined or event.all_day or not isinstance(event.start, datetime):
-            continue
-        assert isinstance(event.end, datetime)
-        span = (event.start.astimezone(data.timezone), event.end.astimezone(data.timezone))
-        spans.append((span, normalized(event.title)))
-    touched = _touched(data)
-    for task in data.tasks:
-        if task.id in touched or not isinstance(task.due, datetime):
-            continue
-        start = task.due.astimezone(data.timezone)
-        if start.date() == data.today:
-            spans.append((_span(start, task.duration_minutes), normalized(task.title)))
-    return spans
+    return touched(data.items)
 
 
 def _habit(data: CheckInput, habit_id: str) -> Habit:
@@ -185,13 +131,8 @@ def _habit(data: CheckInput, habit_id: str) -> Habit:
     return found
 
 
-def _names(habit: Habit) -> tuple[str, str]:
-    return normalized(habit.name), normalized(habit.todoist_task)
-
-
 def _mentions(title: str, habit: Habit) -> bool:
-    text = normalized(title)
-    return any(name in text for name in _names(habit))
+    return mentions(title, habit)
 
 
 def _hhmm(text: str) -> time:
@@ -236,13 +177,8 @@ def max_new(data: CheckInput, count: str) -> bool:
 
 
 def no_overlap(data: CheckInput) -> bool:
-    proposed, fixed = _proposed_spans(data), _fixed_spans(data)
-    for index, (span, title) in enumerate(proposed):
-        if any(_overlap(span, other) for other, name in fixed if name != title):
-            return False
-        if any(_overlap(span, other) for other, _ in proposed[index + 1 :]):
-            return False
-    return True
+    """Nothing proposed with a time today steps on anything (`jimic.plan.rules.clashes`)."""
+    return not clashes(data.items, data.tasks, data.events, data.now)
 
 
 def no_duplicates(data: CheckInput) -> bool:
@@ -259,16 +195,8 @@ def no_duplicates(data: CheckInput) -> bool:
 
 def due_from_now(data: CheckInput) -> bool:
     """What is created or moved goes from now on: a time not before now, a day not before
-    today."""
-    for item in data.items:
-        if item["action"] not in ("create", "move"):
-            continue
-        due = _due(item, data.timezone)
-        if isinstance(due, datetime) and due < data.now:
-            return False
-        if _day_of(due, data.timezone) < data.today:
-            return False
-    return True
+    today (`jimic.plan.rules.starts_before`)."""
+    return not any(starts_before(item, data.now) for item in data.items)
 
 
 def no_move(data: CheckInput, task_id: str) -> bool:
@@ -323,7 +251,7 @@ def creates(data: CheckInput, title: str, at: str, ends_by: str) -> bool:
         due = _due(item, data.timezone)
         if not isinstance(due, datetime) or due.date() != data.today:
             continue
-        start, end = _span(due, item.get("duration_minutes"))
+        start, end = span_of(due, item.get("duration_minutes"))
         if start.time() == _hhmm(at) and end <= datetime.combine(
             data.today, _hhmm(ends_by), tzinfo=data.timezone
         ):
