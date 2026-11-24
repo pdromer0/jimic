@@ -610,3 +610,17 @@ def test_follow_up_queda_en_cada_elemento_de_las_tres_propuestas(conn, tmp_path)
     asyncio.run(call_tool(srv, "log_idea", {"text": "otra idea"}))
     assert [entry["follow_up"] for entry in run.items] == [True, True]
     assert [entry["follow_up"] for entry in run.memory] == [True, True, False]
+
+
+# --- El cierre del día (tarea 1.16) ----------------------------------------------------------
+
+
+def test_en_el_cierre_propose_plan_se_rechaza_y_no_anota_nada(conn, config_dir):
+    """Pilla un cierre en el que el agente propone algo: del cierre, solo la nota es suya
+    (decisión 1.16-a). La lectura sigue libre."""
+    run = RunState(origin=None, mode="close")
+    text, is_error = call(conn, config_dir, "propose_plan", {"items": creates(1)}, run=run)
+    assert is_error and "En el cierre del día no se propone nada" in text
+    assert run.items == [] and not run.proposed_plan
+    _, is_error = call(conn, config_dir, "read_apex_today", {}, run=run)
+    assert not is_error
