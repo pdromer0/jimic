@@ -14,6 +14,8 @@ For each active `key_task` the code works out, without the model:
   to its next day. So does a task Pedro put off in the app. It stops the insistence like done,
   but the day close (1.16) must not count it as done. Known limit: a task completed before any
   heartbeat saw it is never `seen`, so the jump is not noticed.
+- `off_day`: its habit has `days` and today is not one of them (decision F2-a): it does not
+  insist today, whatever else.
 - `not_today` ([Hoy no]), `paused_until` ([Voy ahora] plus the habit's duration), `insist_from`
   (the time of today's task, or `default_time` without one, plus `grace`), `tone_level` (the
   notices of this intention sent today plus one, at most 3) and `sent_today`.
@@ -45,7 +47,7 @@ MAX_TONE = 3
 
 type DoneBy = Literal["button", "todoist", "apex"]
 type KeyRefusal = Literal[
-    "key_done", "key_rescheduled", "key_not_today", "key_paused", "key_too_early"
+    "key_off_day", "key_done", "key_rescheduled", "key_not_today", "key_paused", "key_too_early"
 ]
 
 
@@ -86,6 +88,8 @@ class KeyTaskStatus(BaseModel):
     """Aware, local: it may fall tomorrow (a task late at night), and then it is not today."""
     tone_level: int
     sent_today: int
+    off_day: bool = False
+    """Its habit's `days` leave today out (decision F2-a)."""
     next_from: datetime | None = None
     """Its last notice of today plus its `spacing` (or `grace`), local: before it, it is not due
     (`too_soon`, decision 149). It is `due_now`'s, not `refusal`'s, so the second pass says
@@ -93,6 +97,8 @@ class KeyTaskStatus(BaseModel):
 
     def refusal(self, now: datetime) -> KeyRefusal | None:
         """Why the code does not let it go out now, or `None`. In this order."""
+        if self.off_day:
+            return "key_off_day"
         if self.done_by is not None:
             return "key_done"
         if self.rescheduled:
@@ -183,6 +189,7 @@ def key_task_status(
         insist_from=start + intention.grace,
         tone_level=min(sent_today + 1, MAX_TONE),
         sent_today=sent_today,
+        off_day=habit is not None and not habit.on(today),
         next_from=None
         if last_sent_at is None
         else (last_sent_at + intention.gap).astimezone(now.tzinfo),

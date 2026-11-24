@@ -24,8 +24,8 @@ En el mensaje del usuario, un JSON con el estado del día:
 ha salido), `on_time` (es su hora), `can_insist` (una tarea clave sin hacer a la que ya se puede
 insistir). Cuando no toca: `before_window` o `before_time` (aún no es su momento), `sent_today` (ya
 salió hoy), `waiting` (ya espera), `insist_cap` (ya no quedan avisos), `done`, `rescheduled`,
-`not_today`, `paused` o `too_early` (la tarea clave, como arriba), y `no_room` (no quedan mensajes
-libres).
+`not_today`, `paused` o `too_early` (la tarea clave, como arriba), `off_day` (su hábito no toca
+hoy) y `no_room` (no quedan mensajes libres).
 
 ## Reglas
 

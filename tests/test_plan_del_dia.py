@@ -200,6 +200,21 @@ def test_el_minimo_propone_los_altos_que_faltan_y_nunca_los_de_media(conn, tmp_p
     assert [o.key for o in item.options] == ["ok", "edit", "no"]
 
 
+@pytest.mark.parametrize(("days", "titles"), [(["sat", "sun"], []), (["mon"], ["Revisar ofertas"])])
+def test_el_minimo_solo_propone_un_habito_el_dia_que_le_toca(conn, tmp_path, days, titles):
+    """Pilla el mínimo que ignora `days` (versión incorrecta 3): el 7-ene-2030 es lunes."""
+    w = PlanWorld(
+        conn,
+        tmp_path,
+        FakeAgent([result_message(None, api_status=529, is_error=True)]),
+        habits=[OFFERS_HABIT | {"days": days}],
+    )
+    built = w.build()
+    assert built.code == "minimal:agent:api:529"
+    items = built.plan.items if isinstance(built.plan, InteractiveMessage) else []
+    assert [item.data and item.data["title"] for item in items] == titles
+
+
 def test_con_todoist_y_el_agente_caidos_el_minimo_no_propone_nada(conn, tmp_path):
     w = PlanWorld(conn, tmp_path, FakeAgent([result_message(None, api_status=529, is_error=True)]))
     w.api.error = TimeoutError()

@@ -454,3 +454,36 @@ def test_no_se_relee_lo_completado_hoy_ni_lo_de_una_tarea_hecha_o_con_hoy_no(con
     reader = Reader(tasks(), tasks(gym_task()), {})
     run(conn, at(13), reader, intentions(GYM, OFFERS_KEY, habits=[HABIT, OFFERS_HABIT]))
     assert reader.got == []
+
+
+# --- Los días del hábito (decisión F2-a) -------------------------------------------------------
+
+
+def test_su_tarea_clave_no_toca_un_jueves_si_su_habito_es_de_fin_de_semana():
+    """Pilla `refusal` sin `off_day` (versión incorrecta 6): el 10-ene-2030 es jueves."""
+    weekend = Habit.model_validate({**HABIT, "days": ["sat", "sun"]})
+    assert status(habit=weekend).off_day
+    assert status(habit=weekend).refusal(ONE_PM) == "key_off_day"
+
+
+def test_su_tarea_clave_si_toca_el_dia_que_le_toca_y_sin_days_todos():
+    thursday = Habit.model_validate({**HABIT, "days": ["thu"]})
+    assert status(habit=thursday).refusal(ONE_PM) is None
+    assert status().refusal(ONE_PM) is None
+
+
+def test_el_dia_que_no_toca_manda_sobre_lo_hecho():
+    weekend = Habit.model_validate({**HABIT, "days": ["sat", "sun"]})
+    assert status(habit=weekend, marks=IntentMarks(done=True)).refusal(ONE_PM) == "key_off_day"
+
+
+def test_el_dia_que_no_toca_tiene_su_why_y_la_segunda_pasada_lo_frena(conn):
+    weekend = {**HABIT, "days": ["sat", "sun"]}
+    its = intentions(GYM, OFFERS_KEY, habits=[weekend, OFFERS_HABIT])
+    state = state_at(conn, at(13), its=its)
+    entries = {entry.id: entry for entry in state.intentions}
+    assert (entries["insistir_gimnasio"].due_now, entries["insistir_gimnasio"].why) == (
+        False,
+        "off_day",
+    )
+    assert state.key_tasks["insistir_gimnasio"].refusal(at(13)) == "key_off_day"
