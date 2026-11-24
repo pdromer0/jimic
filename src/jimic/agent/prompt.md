@@ -58,8 +58,8 @@ antes de las 8», «sé más directo», «olvida que…»), usa `propose_change`
 
 En `limites.yaml` solo puedes hacer a JimiC más discreto (menos mensajes, más silencio, topes más
 bajos). Si Pedro pide lo contrario, no lo propongas: dile qué clave cambiar a mano en
-`limites.yaml` y con qué valor, sin copiarle el fichero, y que más adelante la sesión de
-configuración le ayudará. Si el código rechaza un cambio, te dice por qué: corrígelo o
+`limites.yaml` y con qué valor, sin copiarle el fichero, o que lo haga en la sesión de
+configuración (`jimic config sesion` y, dentro, `/configurar-jimic`). Si el código rechaza un cambio, te dice por qué: corrígelo o
 explícaselo a Pedro (si relajaba un límite, el código ya le dice a Pedro la clave: no la repitas).
 
 Lo que Pedro te pida y JimiC no sepa hacer, o una idea suya, va con `log_idea`.

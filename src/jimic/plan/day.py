@@ -50,6 +50,9 @@ class DayEntry:
     start: datetime | None
     """Local; `None` for an all-day event or a task without a time."""
     is_event: bool
+    task_id: str | None = None
+    """The task of Todoist it is (task 1.16: the tasks of «Tu día» make the plan); `None` for an
+    event."""
 
 
 @dataclass(frozen=True)
@@ -102,11 +105,17 @@ def day_view(calendar: CalendarDay, tasks: TaskList, now: datetime, late: bool) 
             if late and start < now:
                 unmarked += 1
                 continue
-            entries.append(DayEntry(task.title, start, False))
+            entries.append(DayEntry(task.title, start, False, task.id))
         elif isinstance(task.due, date) and task.due == today:
-            entries.append(DayEntry(task.title, None, False))
+            entries.append(DayEntry(task.title, None, False, task.id))
     entries.sort(key=_order)
     return DayView(tuple(entries), unmarked, not calendar.available, not tasks.available)
+
+
+def plan_tasks(view: DayView) -> list[tuple[str, datetime | None]]:
+    """The tasks of «Tu día» as the plan keeps them (task 1.16): `(id, its time or None)`, the
+    ones cut as «… y N más» too."""
+    return [(e.task_id, e.start) for e in view.entries if e.task_id is not None]
 
 
 def icon_of(title: str, table: dict[str, str], agent: dict[str, str]) -> str:

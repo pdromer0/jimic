@@ -17,7 +17,7 @@ Todoist is `Failed` with its code: the item stays pending and Pedro can try agai
 import logging
 import sqlite3
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -26,9 +26,9 @@ from jimic.channel.message import Item
 from jimic.channel.taps import Failed, HandlerOutcome, TapHandler
 from jimic.clock import Clock
 from jimic.execution import deletion
-from jimic.execution.plan_message import PLAN_KIND, UNDO_KIND, item_title, proposed_due
+from jimic.execution.plan_message import PLAN_DAY, PLAN_KIND, UNDO_KIND, item_title, proposed_due
 from jimic.execution.rules import due_day
-from jimic.memory import key_marks
+from jimic.memory import day_plans, key_marks
 from jimic.memory.live import LiveConfig
 from jimic.memory.schemas import Limits
 from jimic.tools.failures import ToolFailure
@@ -44,6 +44,11 @@ STAYS = "🆗 se queda"
 UNDONE = "↩️ deshecho"
 CHANGED = "ha cambiado: no lo deshago"
 GONE = deletion.GONE
+
+
+def _plan_day(data: dict[str, Any]) -> date | None:
+    day = data.get(PLAN_DAY)
+    return None if day is None else date.fromisoformat(str(day))
 
 
 @dataclass(frozen=True)
@@ -97,7 +102,7 @@ class Executor:
         if option == "edit" and action == "create":
             return ASK_HOW
         if action == "delete" and option == "del":
-            return await deletion.delete(
+            outcome = await deletion.delete(
                 conn=self._conn,
                 clock=self._clock,
                 timezone=self._timezone,
@@ -106,19 +111,38 @@ class Executor:
                 item=item,
                 approval_id=approval_id,
             )
+            day = _plan_day(data)
+            if outcome in (deletion.DELETED, GONE) and day is not None:
+                day_plans.remove_item(self._conn, day, str(data["task_id"]))
+            return outcome
         if option != "ok" or action not in ("create", "move"):
             logger.warning("plan: option %s does not fit the item", option)
             return Failed("invalid_option")
         try:
             if action == "create":
-                await self._create(data)
+                created = await self._create(data)
+                self._into_the_plan(data, created.id)
                 return CREATED
             await self._move(data)
+            self._into_the_plan(data, str(data["task_id"]))
             return MOVED
         except ToolFailure as error:
             if error.code == TASK_NOT_FOUND:
                 return GONE
             return Failed(error.code)
+
+    def _into_the_plan(self, data: dict[str, Any], task_id: str) -> None:
+        """A proposal of the plan of the day (task 1.16): created or moved to its day, the task is
+        in the plan; moved out of it, it is `moved`."""
+        day = _plan_day(data)
+        if day is None:
+            return
+        due = proposed_due(str(data["due"]), self._timezone)
+        if due_day(due) == day:
+            moment = due if isinstance(due, datetime) else None
+            day_plans.add_item(self._conn, day, task_id, moment)
+        else:
+            day_plans.set_status(self._conn, day, task_id, "moved")
 
     async def _create(self, data: dict[str, Any]) -> TodoistTask:
         """Create in the inbox (in `dev`, the guard sends it to the test project)."""
@@ -141,10 +165,9 @@ class Executor:
         """A move of JimiC is not the jump of a key task (decision 1.15-j); one out of today
         stops the insistence of today with «hoy no» (decision 145)."""
         now = self._clock.now().astimezone(self._timezone)
-        key_marks.note_moved(self._conn, now.date(), task_id, now)
-        if due is None or due_day(due) != now.date():
-            if key_marks.moved_off_today(self._conn, now.date(), task_id, now):
-                logger.info("key task moved off today: not today")
+        to_day = None if due is None else due_day(due)
+        if key_marks.note_jimic_move(self._conn, now.date(), task_id, now, to_day):
+            logger.info("key task moved off today: not today")
 
     # --- At once ----------------------------------------------------------------------------
 

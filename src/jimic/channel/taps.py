@@ -18,8 +18,8 @@ Nothing in the log is content: only codes, ids and counts.
 
 import logging
 import sqlite3
-from collections.abc import Awaitable, Callable, Mapping
-from dataclasses import dataclass
+from collections.abc import Awaitable, Callable, Mapping, Sequence
+from dataclasses import dataclass, field
 from datetime import datetime
 
 from jimic.channel import store
@@ -82,12 +82,31 @@ class Show:
 class Followup:
     """A message with buttons to send after a tap, saved as an approval of `kind` (task 1.15:
     the [Deshacer] of [Ya entrené] or [Hoy no]). If Telegram refuses it, `if_unsent` goes as
-    plain text instead: what it offers is undone only with its button."""
+    plain text instead: what it offers is undone only with its button.
+
+    With `join`, the follow-ups of one tap that share it go out as one message, the one `join`
+    makes of them (task 1.16: [Todo lo pendiente a mañana] has one [Deshacer] for all)."""
 
     kind: str
     message: InteractiveMessage
     expires_at: datetime
     if_unsent: str
+    join: Callable[[Sequence[Followup]], Followup] | None = field(default=None, compare=False)
+
+
+def joined(messages: Sequence[Followup]) -> list[Followup]:
+    """`messages` with those that share a `join` made one, where the first of them was."""
+    groups: dict[Callable[[Sequence[Followup]], Followup], list[Followup]] = {}
+    order: list[Followup] = []
+    for message in messages:
+        if message.join is None:
+            order.append(message)
+            continue
+        if message.join not in groups:
+            groups[message.join] = []
+            order.append(message)
+        groups[message.join].append(message)
+    return [m if m.join is None else m.join(groups[m.join]) for m in order]
 
 
 @dataclass(frozen=True)
@@ -254,7 +273,7 @@ async def process_tap(
         code,
         render(updated, approval.id),
         send=tuple(texts),
-        messages=tuple(messages),
+        messages=tuple(joined(messages)),
         closed=closed,
     )
 

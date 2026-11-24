@@ -130,7 +130,7 @@ def test_los_toques_de_la_demo_solo_marcan_el_resultado(index, option, result):
 def test_la_demo_ensena_un_cambio_con_guardar_y_un_deshacer():
     """La captura de la 1.12: el antes y el después con [Guardar] [Cambiar] [No], la idea con
     [📝 Apuntar], y `/deshacer` con un cambio y un borrado."""
-    *_, (memory_kind, memory), (list_kind, undo_list), _, _ = demo.demo_messages(demo_settings())
+    *_, (memory_kind, memory), (list_kind, undo_list), _, _, _ = demo.demo_messages(demo_settings())
     assert (memory_kind, list_kind) == ("memory", "undo_list")
     view = render(memory, 3)
     assert view.text.startswith(demo.MEMORY_ANSWER)
@@ -164,7 +164,7 @@ def test_la_demo_ensena_un_paso_de_la_puesta_en_marcha_con_guardar():
     [("save", "💾 guardado"), ("edit", "✏️ dime cómo lo quieres"), ("no", "✖️ descartado")],
 )
 def test_los_toques_de_memoria_de_la_demo_solo_marcan_el_resultado(option, result):
-    *_, (_, memory), _, _, _ = demo.demo_messages(demo_settings())
+    *_, (_, memory), _, _, _, _ = demo.demo_messages(demo_settings())
     assert asyncio.run(demo.demo_memory(memory.items[0], option, 1)) == result
 
 
@@ -204,10 +204,11 @@ def test_con_dev_la_demo_arranca_el_canal_manda_el_plan_y_para_con_sigterm(
         "undo_list",
         "key_task",
         "key_task",
+        "close",
     ]
     assert message == demo.demo_messages(demo_settings())[0][1]
     assert channel.stopped
-    assert list(channel.handlers) == ["plan", "undo", "memory", "undo_list", "key_task"]
+    assert list(channel.handlers) == ["plan", "undo", "memory", "undo_list", "key_task", "close"]
     # `expires_at` viene del reloj del sistema: una hora después de enviar, con holgura.
     assert (
         timedelta(minutes=59) < expires_at - datetime.now(expires_at.tzinfo) <= timedelta(hours=1)
@@ -248,7 +249,7 @@ def test_la_demo_ensena_el_plan_del_dia_pintado_con_sus_botones():
 
 def test_los_avisos_de_tareas_clave_de_la_demo_llevan_sus_botones():
     """Tarea 1.15: uno solo, y dos en un mensaje con un aviso, cada botón con su icono."""
-    *_, (one_kind, one), (two_kind, two) = demo.demo_messages(demo_settings())
+    *_, (one_kind, one), (two_kind, two), _ = demo.demo_messages(demo_settings())
     assert one_kind == two_kind == "key_task"
     one_rows = [[b.label for b in row] for row in render(one, 1).keyboard]
     assert one_rows == [["🏃 Voy ahora", "⏰ Más tarde"], ["✅ Ya entrené", "⏭ Hoy no"]]
@@ -265,3 +266,28 @@ def test_los_toques_de_la_demo_contestan_como_los_de_verdad():
     skipped = asyncio.run(demo.key_handler(FixedClock(NOW))(item, "skip", 1))
     assert isinstance(skipped, Answer) and isinstance(skipped.reply, Followup)
     assert skipped.reply.message.body == "Vale, hoy nada de gimnasio. 🛋️"
+
+
+def test_la_demo_ensena_el_cierre_del_e08_con_sus_filas_la_global_y_la_valoracion():
+    """La captura de la 1.16: el cierre como lo pinta el código, inventado."""
+    *_, (kind, close) = demo.demo_messages(demo_settings())
+    assert kind == "close"
+    view = render(close, 1)
+    assert view.text.startswith("🌙 Cierre del día, Pedro\n\n✅ Hecho\n🧘 Meditación")
+    assert "📈 Por ahora: 3 de 7 del plan" in view.text
+    rows = [[b.label for b in row] for row in view.keyboard]
+    assert rows[0] == ["1", "2", "3", "4", "5"]
+    assert rows[1] == ["1 ✅ Hecha", "1 🗣️ La haré", "1 ➡️ Mañana"]
+    assert rows[-1] == ["➡️ Todo lo pendiente a mañana"]
+
+
+def test_los_toques_del_cierre_de_la_demo_no_tocan_nada_y_la_global_deja_un_deshacer():
+    *_, (_, close) = demo.demo_messages(demo_settings())
+    handler = demo.close_handler(FixedClock(NOW))
+    assert asyncio.run(handler(close.items[1], "will", 1)) == "🗣️ la harás"
+    assert asyncio.run(handler(close.items[-1], "r4", 1)) == "⭐ 4"
+    moved = asyncio.run(handler(close.items[2], "tmrw", 1))
+    assert isinstance(moved, Answer) and moved.result == "➡️ mañana 19:00"
+    assert isinstance(moved.reply, Followup) and moved.reply.join is not None
+    joined = moved.reply.join([moved.reply, moved.reply])
+    assert joined.message.items[0].title == "➡️ 2 tareas a mañana"

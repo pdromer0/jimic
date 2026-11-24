@@ -160,6 +160,9 @@ class ApexSnapshot(_Out):
     """When APEX last synced, in the zone of the settings."""
     planned_today: str | None = None
     """The workout planned for today; `None` outside the plan's block (no plan)."""
+    planned_tomorrow: str | None = Field(default=None, exclude=True)
+    """The workout planned for tomorrow (the line «🔮 Mañana» of the close, task 1.16). For the
+    code only: it never goes to the model, so what Haiku and the agent see does not change."""
     today_workout: TodayWorkout | None = None
     recent_workouts: list[RecentWorkout] = Field(default_factory=list, repr=False)
     goals: list[ActiveGoal] = Field(default_factory=list, repr=False)
@@ -174,6 +177,14 @@ class ApexSnapshot(_Out):
         return self.model_dump_json(exclude_none=True)
 
 
+def _planned(plan: Plan, day: date) -> str | None:
+    """The workout of `day` in the plan's block; `None` outside it."""
+    if not plan.inicio <= day <= plan.fin:
+        return None
+    # `weekday()` is 0 for Monday, which is how APEX numbers `estructura_semanal`.
+    return plan.estructura_semanal.get(str(day.weekday()))
+
+
 def build_snapshot(data: ApexData, now: datetime, timezone: ZoneInfo) -> ApexSnapshot:
     """The snapshot of the day of `now` (aware), in `timezone`."""
     today = now.astimezone(timezone).date()
@@ -181,11 +192,7 @@ def build_snapshot(data: ApexData, now: datetime, timezone: ZoneInfo) -> ApexSna
     last_sync = data.meta.ultima_actualizacion.replace(tzinfo=timezone)
     first_day = today - timedelta(days=RECENT_DAYS - 1)
 
-    plan = data.plan
-    planned = None
-    if plan.inicio <= today <= plan.fin:
-        # `weekday()` is 0 for Monday, which is how APEX numbers `estructura_semanal`.
-        planned = plan.estructura_semanal.get(str(today.weekday()))
+    planned = _planned(data.plan, today)
 
     if last_sync < start_of_day:
         today_workout = TodayWorkout.UNKNOWN
@@ -221,6 +228,7 @@ def build_snapshot(data: ApexData, now: datetime, timezone: ZoneInfo) -> ApexSna
         available=True,
         last_sync=last_sync,
         planned_today=planned,
+        planned_tomorrow=_planned(data.plan, today + timedelta(days=1)),
         today_workout=today_workout,
         recent_workouts=[
             RecentWorkout(day=w.fecha, type=w.tipo, name=w.nombre, duration_min=w.duracion_min)

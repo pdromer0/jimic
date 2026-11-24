@@ -174,6 +174,14 @@ def test_el_prompt_manda_al_boton_hoy_no_sin_prometer_nada(conn):
         assert rule in text
 
 
+def test_el_prompt_manda_lo_que_relaja_un_limite_a_mano_o_a_la_sesion_de_configuracion(conn):
+    """Tarea 1.16 (CU-13, m01): la sesión de configuración ya existe (1.18); el prompt ya no la
+    deja para «más adelante». Pilla la línea vieja."""
+    text = " ".join(prompt_text().split())
+    assert "`jimic config sesion` y, dentro, `/configurar-jimic`" in text
+    assert "más adelante la sesión de configuración" not in text
+
+
 def test_la_guarda_impide_arrancar_el_motor_en_un_test_rapido(conn, tmp_path):
     transport = SubprocessCLITransport(prompt="x", options=options(conn, tmp_path))
     with pytest.raises(AssertionError, match="motor del agente"):

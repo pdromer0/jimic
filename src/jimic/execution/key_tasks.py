@@ -208,7 +208,7 @@ class KeyTaskActions:
                 await self._todoist.writer.reopen(task_id)
             return True
         before = due_value(data.get("before"))
-        if not _where_jimic_left_it(current, data.get("after"), before):
+        if not where_jimic_left_it(current, data.get("after"), before):
             logger.info("key task: Todoist changed, left alone")
             return False
         await self._todoist.writer.move(task_id, before)
@@ -217,7 +217,7 @@ class KeyTaskActions:
         return True
 
 
-def _where_jimic_left_it(task: TodoistTask, after: object, before: Due | None) -> bool:
+def where_jimic_left_it(task: TodoistTask, after: object, before: Due | None) -> bool:
     """The task is still where completing it left it; if that was not read, still on a day
     after the one it had."""
     current = None if task.due is None else task.due.isoformat()

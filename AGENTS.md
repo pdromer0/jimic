@@ -35,7 +35,7 @@ uv run jimic --version   # CLI
 uv run jimic config sesion   # Claude Code en la carpeta de configuración (sandbox); lo lanza Pedro
 JIMIC_ENTORNO=dev uv run jimic telegram demo   # plan inventado en el bot de pruebas; lo lanza Pedro
 JIMIC_ENTORNO=dev uv run jimic evaluar latido   # evaluación del latido (API real, unos céntimos; evals/README.md)
-JIMIC_ENTORNO=dev uv run jimic evaluar plan     # evaluación del plan (agente real, ~0,80 $; evals/README.md)
+JIMIC_ENTORNO=dev uv run jimic evaluar plan     # plan, cierre y memoria (agente real, ~1,5 $; evals/README.md)
 scripts/n3.sh                # antes del push: pre-commit, gitleaks de la historia y pytest
 scripts/gh.sh …              # GitHub por REST (issues, PR, checks)
 ```

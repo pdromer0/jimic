@@ -118,12 +118,16 @@ def run_plan(
     eval_file: Path = PLAN_FILE,
     run_agent: RunAgent = sdk_query,
     clock: Clock | None = None,
+    compare_to: str | None = None,
 ) -> EvalRun:
-    """The evaluation of the plan with the real agent (`MODELO_AGENTE`), and its report.
+    """The evaluation of the plan, the close and the memory with the real agent
+    (`MODELO_AGENTE`), and its report, compared with the last complete one or with
+    `compare_to` (`--comparar-con`).
 
     Only with `ENTORNO=dev`, refused before reading the `.env`. Each pass runs the agent in a
     temporary folder with invented files and fixed sources: it touches neither the database of
-    the copy nor Todoist, Calendar or Telegram. `run_agent` and `clock` are for the tests."""
+    the copy nor Todoist, Calendar or Telegram. A wrong file, id or report of `--comparar-con`
+    fails before spending. `run_agent` and `clock` are for the tests."""
     paths = resolve_paths(environ)
     refuse_unless_dev(paths)
     if passes < 1:
@@ -131,13 +135,19 @@ def run_plan(
     suite = load_plan_suite(eval_file)
     chosen = suite.select(scenario_ids)
     settings = load_settings(paths)
+    folder = paths.data_dir / REPORTS
+    reference = plan_report.chosen(folder, compare_to) if compare_to is not None else None
+    complete = {s.id for s in chosen} == {s.id for s in suite.everything}
     started = (clock or SystemClock(settings.timezone)).now().astimezone(settings.timezone)
     results = asyncio.run(run_plan_scenarios(settings, suite, chosen, passes, run_agent))
-    folder = paths.data_dir / REPORTS
-    comparison = plan_report.compare_with_previous(folder, [item.outcome for item in results])
+    outcomes = [item.outcome for item in results]
+    if reference is not None:
+        comparison = plan_report.compare(reference[0], outcomes, reference[1])
+    else:
+        comparison = plan_report.compare_with_previous(folder, outcomes)
     model = settings.agent_model
     screen = plan_report.summary(model, passes, results, comparison)
-    document = plan_report.document(started, model, passes, results, comparison)
+    document = plan_report.document(started, model, passes, results, comparison, complete)
     json_path, md_path = report.write_report(
         folder,
         started,

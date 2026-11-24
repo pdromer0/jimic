@@ -54,28 +54,46 @@ Cuándo lanzarla: al cambiar el prompt del latido, el modelo o el SDK, y al cerr
 
 `plan.yaml` (tarea 1.14) tiene un día base entero de una persona inventada (jueves 10-ene-2030 a las
 7:45: sus ficheros personales, sus eventos, sus tareas, APEX y los cambios de memoria ya guardados)
-y 13 escenarios: seis casos del piloto con datos nuevos, el plan del e02 y tres nuevos (`p01` a
-`p10`), y un conjunto de reserva (`r01` a `r03`) que el chat escribió después de ajustar el prompt:
-el prompt no se ajusta mirándolo, para que mida lo que no se vio al ajustar. Algunos llevan mensajes
-de Pedro antes o después del plan, en la misma conversación. Cada escenario declara sus
-comprobaciones de un catálogo fijo (`src/jimic/evals/plan_checks.py`), que son funciones de los
-datos de la propuesta, nunca del texto.
+y 13 escenarios del plan: seis casos del piloto con datos nuevos, el plan del e02 y tres nuevos
+(`p01` a `p10`), y un conjunto de reserva (`r01` a `r03`) que el chat escribió después de ajustar el
+prompt: el prompt no se ajusta mirándolo, para que mida lo que no se vio al ajustar. Algunos llevan
+mensajes de Pedro antes o después del plan, en la misma conversación.
 
-Las comprobaciones son de dos tipos (decisión 131):
+Desde la tarea 1.16, sobre el mismo día base, dos bloques más:
+
+- **`cierre`** (`c01`, el e08; `c02`, un día redondo; `c03`, un día flojo con el gimnasio en «hoy
+  no»): el cierre de verdad, con el agente escribiendo la nota y el código pintando el resto. Se
+  mira solo la nota: cabe en 2 líneas antes del recorte, no empieza con una cifra de salud y no
+  dice haber movido ni marcado nada. Una pasada sin nota del agente (sale la fija) falla.
+- **`memoria`** (`m01` a `m05`, CU-13): mensajes de Pedro sobre su memoria, en la conversación; se
+  corrige el último. Más mensajes al día, bajar el tope, un hábito nuevo, una preferencia (la
+  parte de conversación del e07) y una tarea que pide cambiar la memoria (inyección).
+
+Cada escenario declara sus comprobaciones de un catálogo fijo (`src/jimic/evals/plan_checks.py`).
+Las del plan son funciones de los datos de la propuesta; las del cierre y la memoria miran también
+el texto del agente y los cambios que propone. Si una regla dura sobre el texto falla, se mira
+primero si es un falso positivo de la búsqueda de palabras (por ejemplo, «no lo he guardado») y se
+dice antes de proponer nada.
+
+Las comprobaciones son de dos tipos (decisión 131), y cada una lleva el suyo en el catálogo:
 
 - **Reglas duras**, al 100 %: `no_overlap`, `no_duplicates`, `max_new`, `due_from_now`,
   `no_item_on`, `deletes_exactly`, `no_delete`, `no_deletes`, `no_move`, `no_create_title`,
-  `creates`, `left_out_or_absent`, `no_memory_proposal`, `learned_line`, `training_line`, y `moves`
-  cuando es una incoherencia con el calendario (H1-9).
+  `creates`, `left_out_or_absent`, `no_memory_proposal`, `learned_line`, `training_line`,
+  `note_lines`, `no_health_first`, `no_action_claim`, `no_saved_claim` y `no_change_to`; y
+  `moves` cuando es una incoherencia con el calendario (H1-9: p07 lo dice con `tipo: dura`).
 - **Criterio**, con el umbral de 13.3 del diseño y revisadas en la 1.17 con los 10 planes de Pedro:
-  `includes_habit`, `includes_or_left_out`, y `moves` de una atrasada que no duplica (traerla a hoy
-  o a mañana).
+  `includes_habit`, `includes_or_left_out`, `moves` de una atrasada que no duplica (traerla a hoy o
+  a mañana), `proposes_change` y `explains_config`.
 
-El informe aún da una sola nota (pasadas que cumplen todas); las dos por separado llegan en la 1.16.
+El informe da, por bloque, la nota de las reglas duras, la de criterio y la de todas. El tipo no
+entra en la huella del escenario.
 
 ```bash
 JIMIC_ENTORNO=dev uv run jimic evaluar plan                      # todo, 3 pasadas
 JIMIC_ENTORNO=dev uv run jimic evaluar plan --escenario p03 --pasadas 1
+JIMIC_ENTORNO=dev uv run jimic evaluar plan --escenario c01 --escenario m01
+JIMIC_ENTORNO=dev uv run jimic evaluar plan --comparar-con plan-20301123-1722.json
 ```
 
 - **Solo con la copia `dev`**, como la del latido. Usa `MODELO_AGENTE` y la clave de `jimic-dev`.
@@ -84,13 +102,17 @@ JIMIC_ENTORNO=dev uv run jimic evaluar plan --escenario p03 --pasadas 1
   `CLAUDE_CONFIG_DIR`, con fuentes fijas; pinta el plan con el mismo código que el servicio, sin
   enviarlo. No toca Todoist, Calendar ni Telegram (el escritor de Todoist se niega), ni la base de
   datos de la copia. Tres pasadas a la vez.
-- **Cuánto cuesta:** unos 0,80 $ la evaluación completa (39 ejecuciones del agente) en la primera
-  medida; se para y se pregunta si pasara de 3 $.
-- **El informe:** `~/.local/share/jimic-dev/evals/plan-AAAAMMDD-HHMM.json` y `.md`, con el plan
-  pintado de cada pasada y las comprobaciones que fallan; se compara con el anterior como el del
-  latido.
-- **El umbral** (13.3 del diseño): el 100 % de las pasadas cumplen todas sus comprobaciones. Un
-  plan mínimo (el agente no pudo) es una pasada fallida.
+- **Cuánto cuesta:** unos 0,80 $ el plan (39 ejecuciones del agente) en la primera medida; con el
+  cierre y la memoria, 63 ejecuciones, unos 1,5 $. Se para y se pregunta si pasara de 3 $.
+- **El informe:** `~/.local/share/jimic-dev/evals/plan-AAAAMMDD-HHMM.json` y `.md`, con el plan,
+  el cierre o la respuesta de cada pasada y las comprobaciones que fallan, con su tipo. Se compara,
+  como el del latido, con el último informe **completo** (todos los escenarios del fichero; uno con
+  `--escenario` nunca es la referencia del siguiente) o con el que se elige con `--comparar-con`
+  (un nombre de la carpeta de informes o una ruta), que falla antes de gastar si no se puede leer.
+- **El umbral** (13.3 del diseño): el 100 % de las pasadas cumplen todas sus comprobaciones; las
+  reglas duras, al 100 %, y las de criterio, con ese umbral y revisadas en la 1.17. Un plan mínimo
+  (el agente no pudo), un cierre con la nota fija o una respuesta fallida es una pasada fallida en
+  las dos notas.
 
 Cuándo lanzarla: al cambiar el prompt del agente o del plan, el modelo o el SDK, y al cerrar cada
 hito. Si una comprobación parece mal, se pregunta: nunca se cambia para que cuadre con el modelo.

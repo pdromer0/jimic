@@ -11,16 +11,21 @@ A scenario may have messages of Pedro **before** the plan (`before`, in the same
 wrote them that morning) and **after** it (`after`): `checks` grade the run of the plan and
 `checks_after` the run of the last message after it. Every value is invented (decision 43).
 
+Two more blocks (task 1.16), over the same base day: `cierre`, the close of the day with the
+real agent writing its note (the tasks completed today, tomorrow's events and tasks, the tasks of
+the plan and the state of the key tasks), and `memoria`, Pedro's messages to the agent about his
+memory (CU-13), graded on the last one. They take nothing from the scenarios of the plan.
+
 The sources of a pass are fixed (`FixedSources`): the calendar gives the events of the day it is
 asked for, Todoist its open tasks, APEX its snapshot at the moment of the clock, and the writer of
 Todoist refuses: the evaluation never writes.
 """
 
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, datetime, time
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
@@ -101,6 +106,58 @@ class ScenarioIn(_State):
         return self
 
 
+class CompletedIn(_Input):
+    """A task completed today: `completed_at` in local time (without a zone)."""
+
+    id: str
+    title: str
+    due: date | datetime
+    completed_at: datetime
+
+
+type KeyState = Literal["pending", "done_button", "done_apex", "not_today"]
+
+
+class KeyIn(_Input):
+    """The state of a key task at the close."""
+
+    intent: str
+    state: KeyState
+
+
+class CloseIn(_Input):
+    """A scenario of the close (task 1.16): what changes over the base day."""
+
+    id: ScenarioId
+    title: str
+    origin: str | None = None
+    now: Hour | None = None
+    files: dict[str, str] | None = None
+    events: list[EventIn] | None = None
+    tasks: list[TaskIn] | None = None
+    completed: list[CompletedIn] = []
+    apex: dict[str, Any] | None = None
+    plan: list[str] = []
+    keys: list[KeyIn] = []
+    unavailable: dict[Source, str] | None = None
+    checks: Annotated[list[Any], Field(min_length=1)]
+    why: str | None = None
+
+
+class MemoryIn(_Input):
+    """A scenario of the memory (CU-13, task 1.16): Pedro's messages, the last one graded."""
+
+    id: ScenarioId
+    title: str
+    origin: str | None = None
+    now: Hour | None = None
+    files: dict[str, str] | None = None
+    tasks: list[TaskIn] | None = None
+    messages: Annotated[list[MessageIn], Field(min_length=1)]
+    checks: Annotated[list[Any], Field(min_length=1)]
+    why: str | None = None
+
+
 class BaseDay(_Input):
     day: date
     now: Hour
@@ -115,6 +172,8 @@ class BaseDay(_Input):
 class PlanFile(_Input):
     base: BaseDay
     scenarios: list[ScenarioIn]
+    cierre: list[CloseIn] = []
+    memoria: list[MemoryIn] = []
 
 
 @dataclass(frozen=True)
@@ -138,9 +197,66 @@ class PlanScenario:
     checks_after: tuple[Check, ...]
     why: str | None
     fingerprint: str
+    completed: tuple[TodoistTask, ...] = ()
+    block: str = "plan"
 
     def at(self, moment: time) -> datetime:
         return datetime.combine(self.now.date(), moment, tzinfo=self.now.tzinfo)
+
+
+@dataclass(frozen=True)
+class CloseScenario:
+    """The close at `now` (task 1.16): the agent writes the note, the code paints the rest."""
+
+    id: str
+    title: str
+    origin: str | None
+    now: datetime
+    files: dict[str, str]
+    intentions: Intentions
+    events: tuple[CalendarEvent, ...]
+    tasks: tuple[TodoistTask, ...]
+    """Open: today's, the overdue ones and tomorrow's."""
+    completed: tuple[TodoistTask, ...]
+    apex: ApexData | None
+    unavailable: dict[str, str]
+    plan: tuple[str, ...]
+    keys: tuple[KeyIn, ...]
+    checks: tuple[Check, ...]
+    why: str | None
+    fingerprint: str
+    block: str = "cierre"
+    checks_after: tuple[Check, ...] = ()
+
+
+@dataclass(frozen=True)
+class MemoryScenario:
+    """Pedro's messages about his memory (CU-13, task 1.16); the last run is graded."""
+
+    id: str
+    title: str
+    origin: str | None
+    now: datetime
+    files: dict[str, str]
+    intentions: Intentions
+    events: tuple[CalendarEvent, ...]
+    tasks: tuple[TodoistTask, ...]
+    apex: ApexData | None
+    messages: tuple[MessageIn, ...]
+    checks: tuple[Check, ...]
+    why: str | None
+    fingerprint: str
+    block: str = "memoria"
+    checks_after: tuple[Check, ...] = ()
+    unavailable: dict[str, str] = field(default_factory=dict)
+    completed: tuple[TodoistTask, ...] = ()
+
+    def at(self, moment: time) -> datetime:
+        return datetime.combine(self.now.date(), moment, tzinfo=self.now.tzinfo)
+
+
+type AnyScenario = PlanScenario | CloseScenario | MemoryScenario
+BLOCKS = ("plan", "cierre", "memoria")
 
 
 @dataclass(frozen=True)
@@ -148,14 +264,21 @@ class PlanSuite:
     timezone: ZoneInfo
     limits_text: str
     scenarios: tuple[PlanScenario, ...]
+    closes: tuple[CloseScenario, ...] = ()
+    memories: tuple[MemoryScenario, ...] = ()
 
-    def select(self, ids: Sequence[str] | None) -> tuple[PlanScenario, ...]:
+    @property
+    def everything(self) -> tuple[AnyScenario, ...]:
+        """Every scenario of the file: the plan's, the close's and the memory's, in that order."""
+        return (*self.scenarios, *self.closes, *self.memories)
+
+    def select(self, ids: Sequence[str] | None) -> tuple[AnyScenario, ...]:
         if not ids:
-            return self.scenarios
-        unknown = sorted(set(ids) - {scenario.id for scenario in self.scenarios})
+            return self.everything
+        unknown = sorted(set(ids) - {scenario.id for scenario in self.everything})
         if unknown:
             raise EvalError(f"escenarios desconocidos: {', '.join(unknown)}")
-        return tuple(scenario for scenario in self.scenarios if scenario.id in ids)
+        return tuple(scenario for scenario in self.everything if scenario.id in ids)
 
 
 STATE_FIELDS = ("events", "tasks", "changes", "unavailable")
@@ -212,6 +335,21 @@ def _task(task: TaskIn, timezone: ZoneInfo) -> TodoistTask:
         is_recurring=False,
         has_subtasks=False,
         duration_minutes=task.duration_minutes,
+    )
+
+
+def _completed(task: CompletedIn, timezone: ZoneInfo) -> TodoistTask:
+    due: Due = local(task.due, timezone) if isinstance(task.due, datetime) else task.due
+    return TodoistTask(
+        id=task.id,
+        title=task.title,
+        project_id=PROJECT,
+        due=due,
+        is_recurring=False,
+        has_subtasks=False,
+        duration_minutes=None,
+        completed=True,
+        completed_at=local(task.completed_at, timezone),
     )
 
 
@@ -310,14 +448,152 @@ def load_plan_suite(path: Path = PLAN_FILE) -> PlanSuite:
                 ),
             )
         )
-    return PlanSuite(timezone, limits_text, tuple(scenarios))
+    closes = tuple(
+        _close(path, base, timezone, limits_text, item, seen) for item in document.cierre
+    )
+    memories = tuple(
+        _memory(path, base, timezone, limits_text, item, seen) for item in document.memoria
+    )
+    return PlanSuite(timezone, limits_text, tuple(scenarios), closes, memories)
+
+
+def _unique(path: Path, scenario: str, seen: set[str]) -> None:
+    if scenario in seen:
+        raise EvalError(f"{path}: el escenario {scenario} está repetido")
+    seen.add(scenario)
+
+
+def _files(path: Path, base: BaseDay, scenario: str, own: dict[str, str] | None):
+    files = {**base.files, **(own or {})}
+    unknown = sorted(set(files) - set(PERSONAL_FILES))
+    if unknown:
+        raise EvalError(f"{path}: escenario {scenario}: ficheros desconocidos: {unknown}")
+    return files, _intentions(path, scenario, files)
+
+
+def _apex(path: Path, scenario: str, base: BaseDay, own: dict[str, Any] | None, down: dict):
+    document = {**base.apex, **(own or {})}
+    try:
+        return document, None if "apex" in down else ApexData.model_validate(document)
+    except ValidationError as error:
+        raise EvalError(
+            f"{path}: escenario {scenario}: APEX no vale ({error.error_count()} errores)"
+        ) from None
+
+
+def _close(
+    path: Path,
+    base: BaseDay,
+    timezone: ZoneInfo,
+    limits_text: str,
+    item: CloseIn,
+    seen: set[str],
+) -> CloseScenario:
+    _unique(path, item.id, seen)
+    files, intentions = _files(path, base, item.id, item.files)
+    if not any(intention.type == "day_close" for intention in intentions.intentions):
+        raise EvalError(f"{path}: escenario {item.id}: no hay intención day_close")
+    down = {str(source): code for source, code in (item.unavailable or {}).items()}
+    apex_doc, apex = _apex(path, item.id, base, item.apex, down)
+    events = item.events if item.events is not None else base.events
+    tasks = item.tasks if item.tasks is not None else base.tasks
+    known = {task.id for task in tasks} | {task.id for task in item.completed}
+    missing = sorted(set(item.plan) - known)
+    if missing:
+        raise EvalError(f"{path}: escenario {item.id}: el plan nombra tareas que no hay: {missing}")
+    key_ids = {i.id for i in intentions.intentions if i.type == "key_task"}
+    for key in item.keys:
+        if key.intent not in key_ids:
+            raise EvalError(f"{path}: escenario {item.id}: {key.intent} no es una tarea clave")
+    now = item.now or base.now
+    checks = _checks(path, item.id, item.checks, plan=False)
+    return CloseScenario(
+        id=item.id,
+        title=item.title,
+        origin=item.origin,
+        now=datetime.combine(base.day, now, tzinfo=timezone),
+        files=files,
+        intentions=intentions,
+        events=tuple(_event(event, timezone) for event in events),
+        tasks=tuple(_task(task, timezone) for task in tasks),
+        completed=tuple(_completed(task, timezone) for task in item.completed),
+        apex=apex,
+        unavailable=down,
+        plan=tuple(item.plan),
+        keys=tuple(item.keys),
+        checks=checks,
+        why=item.why,
+        fingerprint=fingerprint_of(
+            {
+                "block": "cierre",
+                "timezone": base.timezone,
+                "limits": limits_text,
+                "day": base.day,
+                "now": now,
+                "files": files,
+                "events": events,
+                "tasks": tasks,
+                "completed": item.completed,
+                "apex": apex_doc,
+                "plan": item.plan,
+                "keys": item.keys,
+                "unavailable": down,
+                "checks": [str(check) for check in checks],
+            }
+        ),
+    )
+
+
+def _memory(
+    path: Path,
+    base: BaseDay,
+    timezone: ZoneInfo,
+    limits_text: str,
+    item: MemoryIn,
+    seen: set[str],
+) -> MemoryScenario:
+    _unique(path, item.id, seen)
+    files, intentions = _files(path, base, item.id, item.files)
+    apex_doc, apex = _apex(path, item.id, base, None, {})
+    tasks = item.tasks if item.tasks is not None else base.tasks
+    now = item.now or base.now
+    checks = _checks(path, item.id, item.checks, plan=False)
+    return MemoryScenario(
+        id=item.id,
+        title=item.title,
+        origin=item.origin,
+        now=datetime.combine(base.day, now, tzinfo=timezone),
+        files=files,
+        intentions=intentions,
+        events=tuple(_event(event, timezone) for event in base.events),
+        tasks=tuple(_task(task, timezone) for task in tasks),
+        apex=apex,
+        messages=tuple(item.messages),
+        checks=checks,
+        why=item.why,
+        fingerprint=fingerprint_of(
+            {
+                "block": "memoria",
+                "timezone": base.timezone,
+                "limits": limits_text,
+                "day": base.day,
+                "now": now,
+                "files": files,
+                "events": base.events,
+                "tasks": tasks,
+                "apex": apex_doc,
+                "messages": item.messages,
+                "checks": [str(check) for check in checks],
+            }
+        ),
+    )
 
 
 # --- The fixed sources of a pass -----------------------------------------------------------------
 
 
 class FixedCalendar:
-    def __init__(self, scenario: PlanScenario) -> None:
+    def __init__(self, scenario: AnyScenario) -> None:
         self._scenario = scenario
 
     async def read_day(self, day: date) -> CalendarDay:
@@ -334,25 +610,39 @@ class FixedCalendar:
 
 
 class FixedTasks:
-    """The open tasks of the scenario: those of today and the overdue ones."""
+    """The tasks of the scenario: the open ones (today's and the overdue ones for `read_today`,
+    those of a day for `read_day`) and the ones completed today (the close, task 1.16)."""
 
-    def __init__(self, scenario: PlanScenario) -> None:
+    def __init__(self, scenario: AnyScenario) -> None:
         self._scenario = scenario
 
-    def _list(self) -> TaskList:
+    def _list(self, keep=lambda day: True) -> TaskList:
         down = self._scenario.unavailable
         if "tasks" in down:
             return TaskList.unavailable(down["tasks"])
-        return TaskList(available=True, tasks=list(self._scenario.tasks))
+        tasks = [t for t in self._scenario.tasks if t.due is not None and keep(_day_of(t.due))]
+        return TaskList(available=True, tasks=tasks)
+
+    def _today(self) -> date:
+        return self._scenario.now.date()
 
     async def read_today(self, project_id: str | None = None) -> TaskList:
-        return self._list()
+        return self._list(lambda day: day <= self._today())
 
     async def read_project(self, project_id: str) -> TaskList:
         return self._list()
 
+    async def read_day(self, day: date, project_id: str | None = None) -> TaskList:
+        return self._list(lambda due: due == day)
+
+    async def read_completed_today(self) -> TaskList:
+        if "tasks" in self._scenario.unavailable:
+            return TaskList.unavailable(self._scenario.unavailable["tasks"])
+        return TaskList(available=True, tasks=list(self._scenario.completed))
+
     async def get_task(self, task_id: str) -> TodoistTask | None:
-        return next((task for task in self._scenario.tasks if task.id == task_id), None)
+        everything = (*self._scenario.tasks, *self._scenario.completed)
+        return next((task for task in everything if task.id == task_id), None)
 
     async def get_photo(self, task_id: str) -> TaskPhoto | None:
         return None
@@ -366,7 +656,7 @@ class RefusingWriter:
 
 
 class FixedApex:
-    def __init__(self, scenario: PlanScenario, clock: Clock) -> None:
+    def __init__(self, scenario: AnyScenario, clock: Clock) -> None:
         self._scenario = scenario
         self._clock = clock
 
@@ -383,7 +673,11 @@ async def _nothing() -> None:
     return None
 
 
-def fixed_sources(scenario: PlanScenario, clock: Clock) -> Sources:
+def _day_of(due: Due) -> date:
+    return due.date() if isinstance(due, datetime) else due
+
+
+def fixed_sources(scenario: AnyScenario, clock: Clock) -> Sources:
     todoist = TodoistTools(FixedTasks(scenario), RefusingWriter(), _nothing)  # pyright: ignore[reportArgumentType] - a writer that refuses
     return Sources(
         todoist=todoist, calendar=FixedCalendar(scenario), apex=FixedApex(scenario, clock)

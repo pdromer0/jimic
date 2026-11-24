@@ -6,6 +6,7 @@ import signal
 import sqlite3
 import threading
 import time
+from collections.abc import Awaitable, Callable
 from datetime import datetime, timedelta
 from datetime import time as dt_time
 from decimal import Decimal
@@ -354,6 +355,7 @@ class FakeRuntimeChannel:
         self.events = events
         self.fail_start = fail_start
         self.scheduled: list[tuple] = []
+        self.tasks: dict[str, Callable[[], Awaitable[object]]] = {}
 
     async def start(self) -> None:
         self.events.append("channel start")
@@ -377,6 +379,7 @@ class FakeRuntimeChannel:
 
     def schedule_every(self, task, interval, first, name) -> None:
         self.scheduled.append((name, interval, first))
+        self.tasks[name] = task
 
     def schedule_daily(self, task, at, name) -> None:
         self.scheduled.append((name, at))
@@ -454,7 +457,13 @@ def test_el_runtime_programa_el_latido_alineado_y_la_purga_y_para_en_orden(tmp_p
         "undo_list",
         "key_task",
         "key_undo",
+        "close",
+        "close_undo",
     }
+    # Tarea 1.16: el cierre que pasa el latido va a su runner (el del plan le pasa lo que no es
+    # un plan), y sus botones a sus manejadores.
+    assert runtime.close is not None
+    assert runtime.plan._fallback == runtime.close.handover  # lo que se prueba es la conexión
     # Decisión 1.14-h: el [✏️] del canal pasa por el asistente, que lo recuerda.
     create: dict[str, JsonValue] = {
         "action": "create",
@@ -515,3 +524,40 @@ def test_si_falla_la_purga_de_la_base_la_del_agente_sigue(tmp_path, monkeypatch)
     finally:
         conn.close()
     assert not transcript.exists()
+
+
+def test_cada_cuarto_de_hora_late_asienta_la_cifra_y_barre_aunque_un_paso_falle(tmp_path):
+    """Tarea 1.16: el cierre caduca a la mañana siguiente, así que el barrido no puede esperar a
+    las 00:01; la cifra definitiva se calcula tras el latido. Pilla un paso que falta, fuera de
+    orden, o un fallo que corta los demás."""
+    conn = open_database(tmp_path / "jimic.db")
+    events: list[str] = []
+    runtime, channel, _ = runtime_with(conn, events)
+    steps: list[str] = []
+
+    async def step(name: str, fails: bool = False) -> None:
+        steps.append(name)
+        if fails:
+            raise RuntimeError("roto")
+
+    async def scenario():
+        await runtime.start()
+        assert runtime.heartbeat is not None and runtime.close is not None
+        assert runtime._ticks == (
+            runtime.heartbeat.beat,
+            runtime.close.settle,
+            channel.sweep,
+        )  # lo que se prueba es la conexión
+        runtime._ticks = (
+            lambda: step("latido"),
+            lambda: step("cifra", fails=True),
+            lambda: step("barrido"),
+        )
+        await channel.tasks["latido"]()
+        await runtime.stop()
+
+    try:
+        asyncio.run(scenario())
+    finally:
+        conn.close()
+    assert steps == ["latido", "cifra", "barrido"]

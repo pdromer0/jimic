@@ -359,21 +359,35 @@ Un solo mensaje, que se actualiza con los toques:
 1️⃣ 🧘 Estiramientos (21:30)
 2️⃣ 📞 Llamar al seguro
 
+📈 Por ahora: 4 de 7 del plan
 🎯 <nota sobre las metas, 1–2 líneas, con humor>
 🔮 Mañana: <primer evento o «calendario libre»> · 🏋️ <entreno previsto>
 
-¿Cómo ha ido el día?  [1] [2] [3] [4] [5]
+¿Cómo ha ido el día?
+[1] [2] [3] [4] [5]
 [1 ✅ Hecha] [1 🗣️ La haré] [1 ➡️ Mañana]
 [2 ✅ Hecha] [2 🗣️ La haré] [2 ➡️ Mañana]
 [➡️ Todo lo pendiente a mañana]
 ```
 
-- [Hecha] marca la tarea en Todoist: cuenta como hecha.
+- Lo pinta el código; el agente (Sonnet, en la sesión del día, sin origen) escribe solo la nota 🎯,
+  que el código recorta a 2 líneas; si no puede, una nota fija (decisión 153).
+- **✅ Hecho:** lo completado hoy en Todoist y las tareas clave hechas por el botón o por APEX («ya
+  no es de hoy» no es hecho). **⏳ Sin marcar:** las abiertas de hoy, siete con botones como mucho.
+- [Hecha] marca la tarea en Todoist: cuenta como hecha. Con [Deshacer].
 - [La haré] no la mueve ni la marca.
+- [Mañana] la lleva a la misma hora de mañana o, si choca con un evento o una tarea con hora de
+  mañana, al siguiente hueco libre; la fila global hace lo mismo con lo que sigue sin marcar y no
+  declarado. Los dos con [Deshacer], que también quita el «hoy no» de una tarea clave (decisión
+  155).
 - Lo no tocado se queda como está.
 - Lo marcado antes de su hora solo queda anotado en `plan_items`.
-- **«Plan cumplido» (H1-14):** solo cuenta lo marcado en Todoist. La cifra del día se calcula a
-  la mañana siguiente, así que lo marcado después del cierre sí cuenta.
+- **«Plan cumplido» (H1-14):** solo cuenta lo marcado en Todoist. En el cierre se ve provisional
+  («📈 Por ahora», solo las tareas del plan; sube con cada [Hecha]); la cifra del día se calcula a
+  la mañana siguiente, así que lo marcado después del cierre sí cuenta (decisión 154).
+- **La mañana siguiente** es el fin de las horas de silencio del día siguiente: hasta entonces
+  valen los botones y la valoración, que se guarda una vez y no insiste.
+- Sin plan ni tareas de hoy no hay cierre; un solo cierre al día.
 
 ### Puesta en marcha (CU-12)
 
@@ -3314,3 +3328,143 @@ preguntaría), parar: no está documentado.
 - **Para la 1.17:** las credenciales del HOME que no son de JimiC (`~/.claude/.credentials.json`,
   `~/.config/gh`) se leen desde la sesión como desde cualquier otra de Claude Code; decidir si el
   sandbox de las dos sesiones las niega (hallazgo 3).
+
+### Tarea 1.16: cierre del día
+
+**Qué se hizo.** Issue #30, rama `feat/h1-cierre-dia`, aprobada a las 09:22 del 24-nov-2026 con un
+ajuste de Pedro ([➡️ Mañana] lleva su [↩️ Deshacer], por la 97, que también quita el «hoy no» de
+ese movimiento) y una indicación para la medida (una regla dura sobre el texto que falla se mira
+antes como posible falso positivo). Commits:
+- `refactor(plan)`: los intentos del enganche y el movimiento de JimiC, compartidos (843fa90);
+- `feat(memoria)`: migración 0010 y `memory/day_plans.py` (5430fa8);
+- `feat(plan)`: el plan confirmado en `day_plans` y `plan_items` (a29ed7b);
+- `feat(fuentes)`: `read_day`, `completed_at` y `planned_tomorrow` (aa92934);
+- `feat(canal)`: la pregunta y la línea que cuenta (d6680b1);
+- `feat(cierre)`: `close/day.py` (d78a126), `close/message.py` (fceefd1), los toques
+  (b312d39) y el enganche con la cifra definitiva (331fea1);
+- `feat(agente)`: el modo `close` (0b4c04a) y la línea de la sesión de configuración (d262cdc);
+- `feat(latido)`: el cierre sale de su enganche, con plan B y su hueco (177ff11);
+- `feat(demo)`: el cierre del e08 (dae6383);
+- `feat(evals)`: dos notas, el último completo y los bloques (fa06efc) y sus escenarios (f20bbf3);
+- `docs(diseno)` (32e1845) y `docs(hito-1)` (44eb41c);
+- las correcciones de la revisión propia, `fix(cierre)` (4dcb3a0, 4e3670e, c19c16e, efbfd8a,
+  830ecfa, 9cce000).
+
+Este anexo es `docs(hito-1)`.
+
+**Decisiones de la tarea:** 1.16-a a 1.16-d y lo que el plan interpretaba son las decisiones 153 a
+157 del diseño. Sin ADR: nada de la guardia cambia (el modo `close` restringe `propose_plan`; no se
+amplía ninguna herramienta).
+
+**Decisiones del diff** (lo que el plan interpretaba, y lo que salió al implementar):
+- **Paquetes:** `jimic/close/` (`day.py`, puro; `message.py`; `runner.py`), `execution/close.py`
+  y `memory/day_plans.py`; en el canal, `Item.question`, `Item.expired_text`, `Tally` y
+  `Followup.join` (un [Deshacer] para toda la fila global).
+- **«La mañana siguiente»** = el fin de las horas de silencio del día siguiente: caduca el cierre
+  entero y, desde ese latido, se asienta la cifra. El barrido corre tras cada latido.
+- **El plan:** las tareas de «Tu día» (también las recortadas; en un plan tardío, lo pasado no
+  entra); sus botones añaden lo que crean o traen a hoy, dejan `moved` lo que sacan y quitan lo que
+  borran (`plan_day` en los datos de sus propuestas).
+- **✅ y ⏳:** completadas hoy y tareas clave hechas por botón o APEX; abiertas de hoy, siete con
+  botones. [Mañana]: misma hora o el fin de lo que pisa, semiabierto, 15 minutos sin duración, sin
+  hueco → mañana sin hora; si no puede leer mañana, falla y se puede reintentar.
+- **La nota:** el texto libre del agente, 2 líneas de 200 caracteres; el aviso al agente lleva
+  cifras y tareas clave por el nombre del hábito, nunca títulos. Nota fija si no puede.
+- **Definitiva:** tarea a tarea; completada **antes de su mañana** cuenta (de la revisión propia),
+  una recurrente si se marcó hecha, «la haré» nunca. Un fallo de lectura espera al latido siguiente.
+- **Latido:** fuera `PENDING_TASK`; el cierre ocupa su mensaje en el lote; su hueco se libera al
+  quedar atendido; plan B a su hora por defecto. El runner del plan pasa al del cierre lo que no es
+  un plan (`fallback`).
+- **Evaluaciones:** bloques `cierre` (c01–c03) y `memoria` (m01–m05) en `evals/plan.yaml`; cada
+  comprobación con su tipo; `tipo: dura` en p07; las huellas de p01–r03 no cambian (comprobado con
+  `main`). Informe versión 2 con `complete` y `--comparar-con`. Siete comprobaciones nuevas, cinco
+  sobre el texto.
+
+**Diferencias con las notas:** en el e08 tal como está nada choca con el gimnasio de mañana
+(ofertas 14:30 y gimnasio hasta las 14:15): lo pilla un test propio (13:30 → 14:15); el «4 de 7»
+del ejemplo es 3 de 7 en el e08 (4 de 7 de definitiva con la cena marcada a las 22:15, inventado);
+la línea del prompt de CU-13 se puso antes de medir.
+
+**Valores a mano** (código independiente, antes de implementar): jueves 10-ene-2030, mañana viernes
+con «Pierna · fuerza»; provisional 3 de 7, Comida `marked_early` (13:20 < 14:00); [Mañana] paseo
+19:00 → 19:00 y ofertas 14:30 → 14:30; 13:30 (30 min) → 14:15; 12:30 → 12:30; 12:45 → 14:15; con
+14:15–15:00, 13:30 → 15:00; sin duración a las 13:00 → 14:15; 23:30 con 23:00–24:00 → sin hora;
+cierre a las 21:30 = `2030-01-10T20:30Z`, caduca `2030-01-11T06:00Z`; 8,5 h del 30 al 31-mar-2030;
+definitiva 4 de 7; etiquetas de 7, 10, 9 y 29 caracteres.
+
+**Medida** (24-nov-2026, 10:19, `jimic-dev`, `claude-sonnet-5-5`, 3 pasadas, 21 escenarios):
+**88,9 % (56/63)** ❌, en 1,16 $ (72 ejecuciones del agente, 0,016 $ cada una). Sin comparación: no
+había ningún informe completo de la versión 2.
+
+| Bloque | Duras | Criterio | Todas |
+| --- | --- | --- | --- |
+| Plan (13) | 89,7 % (35/39) ❌ | 94,9 % (37/39) ❌ | 87,2 % ❌ |
+| Cierre (3) | **100 % (9/9)** ✅ | 100 % (9/9) ✅ | 100 % ✅ |
+| Memoria (5) | **100 % (15/15)** ✅ | 86,7 % (13/15) ❌ | 86,7 % ❌ |
+
+- **Plan** (el prompt de la 1.14, que esta tarea no toca; la tercera medida de la 1.14 daba duras
+  100 %): p02 ×1 `no_item_on`, p04 ×2 `no_overlap` y ×2 `includes_habit(cena)`, p05 ×1
+  `creates` (después). Es lo que la 1.14 dejó pendiente para la 1.17; p05 ya había fallado así en
+  su segunda medida.
+- **Memoria:** m04 (1/3), `proposes_change(preferencias.md, estiramientos)`: en dos pasadas no
+  propone el cambio en `preferencias.md` (el informe dirá si lo propone en otro fichero o no
+  propone; el agente no puede leer esa carpeta). Las reglas duras, al 100 %: nada que haga a JimiC
+  más insistente, nada dado por guardado, ninguna propuesta desde la tarea trampa.
+- Ninguna regla dura sobre el texto falló: no hubo falsos positivos que revisar.
+- Siguiendo las notas, no se tocó el prompt; Pedro decidió abrir el PR con esta medida.
+Informe: `plan-20261124-1019.json` y `.md` en la copia `dev`.
+
+**Versiones incorrectas** (aplicadas y deshechas con un script; el árbol quedó limpio):
+
+| # | Versión incorrecta | Predicción | Observado |
+| --- | --- | --- | --- |
+| 5 | [La haré] marca la tarea | Rojo «lo declarado»; verde [Hecha] | Como se predijo (el e08 y `la_hare_nunca_mueve_ni_marca`) |
+| 6 | La global mueve lo declarado | Rojo «lo declarado no se mueve»; verde «lo pendiente pasa a mañana» | Como se predijo, más `la_hare_nunca…` (el código del toque cambia) |
+| 7 | [Mañana] no mira mañana | Rojo «no pisa el gimnasio»; verde «misma hora si está libre» | Como se predijo, más los bordes, el calendario, sin hueco y dos a la misma hora (8 rojos) |
+| 8 | Definitiva fijada en el cierre | Rojo «cuenta lo marcado después»; verde «la provisional sube» | Como se predijo, más «una que se reabrió» |
+| 9 | La definitiva cuenta `will_do` | Rojo «la haré no cuenta»; verde «cuenta lo marcado después» | Rojo el predicho y, además, «cuenta lo marcado después» y «se reabrió»: el mutante también quitaba la rama que devuelve a pendiente |
+| 10 | Caduca al acabar el día | Rojo «la valoración vale hasta la mañana»; verde «se guarda una vez» | Como se predijo, más «caduca a la mañana», «tras medianoche» y «antes de la mañana no se asienta» |
+| 11 | Cierre sin plan ni tareas | Rojo «sin plan ni tareas»; verde «solo con tareas» | Como se predijo |
+| 12 | La nota sin recortar | Rojo «se recorta»; verde «nota fija» | Como se predijo (los dos de recorte) |
+| 13 | La provisional cuenta lo ajeno | Rojo «solo cuenta el plan»; verde «sube con [Hecha]» | Como se predijo |
+| 14 | Criterio como dura | Rojo «el del informe con las dos notas»; verde la nota total | Rojos «cada comprobación tiene su tipo» y «la memoria sin cambio suspende el criterio»; el de las dos notas siguió verde porque construye la pasada a mano |
+| 15 | (Pedro) [Deshacer] de [Mañana] sin quitar `not_today` | Rojo «la insistencia puede volver»; verde «vuelve a hoy» | Como se predijo |
+
+**Revisión propia** (`/code-review medium`, 10 hallazgos: 7 corregidos y 3 explicados):
+
+| Hallazgo | Qué se hizo |
+| --- | --- |
+| «Hecho» repetía una tarea clave cuyo `todoist_task` no es el nombre del hábito | Corregido (4dcb3a0) |
+| La definitiva no cuenta una recurrente completada en la app tras el cierre | Explicado: el límite de la 1.15 (no sale entre las completadas con el plan gratuito); las notas la dejan para el botón o APEX |
+| [Hecha] de una recurrente ya completada en la app decía «ha cambiado» | Corregido (4e3670e): si saltó a otro día y no la movió JimiC, cuenta y anota la marca |
+| «Nada que cerrar» miraba las completadas y no lo hecho | Corregido (c19c16e) |
+| La definitiva contaba lo completado días después | Corregido (efbfd8a): antes de su mañana |
+| «🔮 Mañana» tomaba un evento nocturno de hoy | Corregido (830ecfa) |
+| [Deshacer] de [Hecha] decía «deshecho» sin reabrir nada | Corregido (9cce000) |
+| La global relee mañana en cada elemento | Explicado: así ve lo que ya movió; siete elementos como mucho |
+| `settle` leía las tareas de una en una | Corregido con `gather` (efbfd8a) |
+| El cierre encadenado como `fallback` del plan | Explicado: dos tipos de enganche; un tercero lo cambiaría por un diccionario |
+
+Cada corrección lleva su test, que falla con el código de antes.
+
+**Medidas.** La N3, tras la revisión: en verde en 5:07, 1995 tests y 13 de contrato saltados (eran
+1820 tras la 1.18); pre-commit 0:24, pytest 4:42 y gitleaks de la historia 0:01. Corrió a la vez
+que la medida real, así que sus tiempos no se comparan con los de otras tareas. La suite rápida
+sola, antes de la revisión: 2:27.
+
+**Pendiente:**
+- **El prompt del plan** (p02, p04 y p05 de esta medida): de criterio y duras; con los 10 planes de
+  Pedro en la 1.17 o en una tarea aparte.
+- **m04** (criterio, 1/3): leer el informe de `dev` y decidir si es el prompt o la comprobación.
+- **Una recurrente completada en la app** solo cuenta en la definitiva si se marcó hecha (límite del
+  plan gratuito, 1.15).
+- **[Deshacer] de [Hecha] o [Mañana]** no reedita el cierre: «📈 Por ahora» no baja (la definitiva
+  sí es correcta).
+- **Un tercer tipo de enganche** cambiaría el `fallback` por un diccionario por tipo.
+- **El disparador del módulo `xdist`** (1.17): pytest pasa de 2 minutos.
+
+**Pruebas contra servicios reales:** solo la API de Anthropic con la clave de `jimic-dev` (la
+medida). Todo inventado; no toca Todoist, Calendar ni Telegram: no hay restos que comprobar.
+
+**Captura del móvil:** `JIMIC_ENTORNO=dev uv run jimic telegram demo` (la lanza Pedro); el último
+mensaje es el cierre del e08.

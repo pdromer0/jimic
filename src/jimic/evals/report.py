@@ -17,7 +17,7 @@ the next one. `--comparar-con` names another by hand. The scenarios of the reser
 
 import json
 import re
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
 from datetime import datetime
 from decimal import Decimal
@@ -212,11 +212,11 @@ class Latest:
     skipped: tuple[str, ...]
 
 
-def latest_complete(folder: Path) -> Latest:
-    """The most recent heartbeat report of `folder` that is complete. One that cannot be read
-    cannot say so: it is skipped, and named."""
+def latest_complete(folder: Path, prefix: str = PREFIX) -> Latest:
+    """The most recent report of `folder` named `<prefix>-…` that is complete. One that cannot
+    be read cannot say so: it is skipped, and named."""
     skipped: list[str] = []
-    for path in _reports(folder, PREFIX):
+    for path in _reports(folder, prefix):
         try:
             document = _read(path)
         except OSError, ValueError:
@@ -227,14 +227,16 @@ def latest_complete(folder: Path) -> Latest:
     return Latest(None, None, tuple(skipped))
 
 
-def chosen_report(folder: Path, name: str) -> tuple[str, list[Outcome]]:
-    """The report of `--comparar-con` and its outcomes: a path (with a folder, `./` included),
-    or a bare file name looked up in `folder`. `EvalError` if it does not exist or cannot be
-    read, before spending anything."""
+def chosen_report[T](
+    folder: Path, name: str, read: Callable[[object], list[T]] = read_outcomes
+) -> tuple[str, list[T]]:
+    """The report of `--comparar-con` and its outcomes (read with `read`): a path (with a
+    folder, `./` included), or a bare file name looked up in `folder`. `EvalError` if it does not
+    exist or cannot be read, before spending anything."""
     bare = "/" not in name and "\\" not in name and not name.startswith("~")
     path = folder / name if bare else Path(name).expanduser()
     try:
-        return path.name, read_outcomes(_read(path))
+        return path.name, read(_read(path))
     except FileNotFoundError:
         raise EvalError(f"--comparar-con: no existe {path}") from None
     except (OSError, ValueError, UnreadableReport) as error:

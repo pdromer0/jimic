@@ -108,9 +108,14 @@ class ManualChange:
     after: str | None
 
 
-type RunMode = Literal["message", "plan", "follow_up"]
-"""What started a run: a message of Pedro, the plan the heartbeat hands over (task 1.14), or the
-follow-up after Pedro's taps (decision 1.13-c). Only `message` has an origin."""
+type RunMode = Literal["message", "plan", "follow_up", "close"]
+"""What started a run: a message of Pedro, the plan the heartbeat hands over (task 1.14), the
+follow-up after Pedro's taps (decision 1.13-c), or the note of the close of the day (task 1.16).
+Only `message` has an origin."""
+CLOSE_REFUSAL = (
+    "En el cierre del día no se propone nada: el mensaje lo pinta el código. Escribe solo la"
+    " nota, sin decir que has movido ni marcado nada"
+)
 
 
 @dataclass
@@ -293,8 +298,11 @@ def build_tools(ctx: ToolContext) -> list[SdkMcpTool[Any]]:
                 )
 
     async def propose_plan(args: dict[str, Any]) -> Result:
-        proposal = _validated(PlanProposal, args)
         run = ctx.run
+        if run.mode == "close":
+            # Only the note is the agent's in the close (decision 1.16-a): restricted, not widened.
+            raise AgentInputError(CLOSE_REFUSAL)
+        proposal = _validated(PlanProposal, args)
         if run.mode == "plan":
             plan_rules(proposal)
         elif not proposal.items:

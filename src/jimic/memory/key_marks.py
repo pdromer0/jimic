@@ -91,6 +91,18 @@ def note_moved(conn: sqlite3.Connection, day: date, task_id: str, moment: dateti
     )
 
 
+def note_jimic_move(
+    conn: sqlite3.Connection, day: date, task_id: str, moment: datetime, to_day: date | None
+) -> int:
+    """JimiC moved `task_id` on the local `day` to `to_day` (`None`: no date): a move of JimiC is
+    not the jump of a key task (decision 1.15-j), and one out of `day` is «hoy no» for the key
+    tasks that saw it as theirs (decision 145). Returns how many «hoy no» it wrote."""
+    note_moved(conn, day, task_id, moment)
+    if to_day == day:
+        return 0
+    return moved_off_today(conn, day, task_id, moment)
+
+
 def of_day(conn: sqlite3.Connection, day: date) -> DayMarks:
     """Every mark of the local `day`, by intention, and the tasks JimiC moved."""
     rows = conn.execute(
@@ -124,6 +136,20 @@ def of_day(conn: sqlite3.Connection, day: date) -> DayMarks:
         "SELECT DISTINCT todoist_task_id FROM task_moves WHERE day = ?", (day.isoformat(),)
     ).fetchall()
     return DayMarks(by_intent, frozenset(task_id for (task_id,) in moved))
+
+
+def done_tasks(conn: sqlite3.Connection, day: date) -> dict[str, frozenset[str]]:
+    """The tasks each key task's [Ya entrené]/[Hecho] closed on the local `day` (task 1.16: a
+    recurring one is no longer among today's, but it was done)."""
+    rows = conn.execute(
+        "SELECT intent, todoist_task_id FROM key_task_marks"
+        " WHERE day = ? AND mark = 'done' AND todoist_task_id IS NOT NULL",
+        (day.isoformat(),),
+    ).fetchall()
+    found: dict[str, set[str]] = defaultdict(set)
+    for intent, task_id in rows:
+        found[intent].add(task_id)
+    return {intent: frozenset(ids) for intent, ids in found.items()}
 
 
 def moved_off_today(conn: sqlite3.Connection, day: date, task_id: str, moment: datetime) -> int:

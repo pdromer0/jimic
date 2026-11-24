@@ -81,6 +81,10 @@ def next_day(due: str) -> str:
     return moment.isoformat() + ("Z" if utc else "")
 
 
+def _local_day(due: date | datetime) -> date:
+    return due.date() if isinstance(due, datetime) else due
+
+
 def _moment(text: str) -> datetime:
     return datetime.fromisoformat(text.replace("Z", "+00:00"))
 
@@ -340,6 +344,12 @@ class FixedTodoistReader:
 
     async def read_project(self, project_id: str) -> TaskList:
         return self._tasks
+
+    async def read_day(self, day: date, project_id: str | None = None) -> TaskList:
+        if not self._tasks.available:
+            return self._tasks
+        kept = [t for t in self._tasks.tasks if t.due is not None and _local_day(t.due) == day]
+        return self._tasks.model_copy(update={"tasks": kept})
 
     async def get_task(self, task_id: str):
         return next((t for t in self._tasks.tasks if t.id == task_id), None)

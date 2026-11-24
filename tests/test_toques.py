@@ -455,3 +455,22 @@ def test_answer_con_then_deja_el_elemento_pendiente_con_sus_opciones_y_la_nota(
     item = stored.message.items[0]
     assert item.pending and [o.key for o in item.options] == ["y"]
     assert item.note == "🏃 a por ello" and item.title == "Gimnasio 13:00"
+
+
+def test_los_mensajes_que_comparten_join_salen_en_uno_y_los_demas_igual():
+    """Tarea 1.16: la global del cierre deja un solo [Deshacer]. Pilla un `join` que pierde los
+    demás mensajes o cambia su orden."""
+    from datetime import UTC, datetime
+
+    from jimic.channel.taps import Followup, joined
+
+    def make(title: str, join=None) -> Followup:
+        yes = Option(key="y", label="Sí")
+        message = InteractiveMessage(header="h", items=(Item(title=title, options=(yes,)),))
+        return Followup("k", message, datetime(2030, 1, 8, tzinfo=UTC), title, join)
+
+    def together(group):
+        return make(" + ".join(f.if_unsent for f in group))
+
+    result = joined([make("a"), make("b", together), make("c"), make("d", together)])
+    assert [f.if_unsent for f in result] == ["a", "b + d", "c"]

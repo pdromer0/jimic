@@ -18,7 +18,7 @@ import logging
 import re
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
-from datetime import date, datetime, time
+from datetime import UTC, date, datetime, time
 from typing import Literal, Protocol
 from zoneinfo import ZoneInfo
 
@@ -69,6 +69,9 @@ class TodoistTask(BaseModel):
     completed: bool = Field(default=False, exclude=True)
     """Closed: a completed task is still readable by its id (contract of 23-nov-2026). For the
     code (the key tasks, task 1.15); it never goes to the model."""
+    completed_at: datetime | None = Field(default=None, exclude=True)
+    """When it was closed, in the zone of the settings: what tells a task marked before its time
+    (task 1.16). For the code; it never goes to the model."""
 
 
 class TaskPhoto(BaseModel):
@@ -127,6 +130,11 @@ class TodoistReader(Protocol):
 
     async def read_project(self, project_id: str) -> TaskList:
         """The active tasks of a project. It does not raise."""
+        ...
+
+    async def read_day(self, day: date, project_id: str | None = None) -> TaskList:
+        """The open tasks due on `day` (local), by time like `read_today`: what is already on
+        tomorrow when the close moves a task there (task 1.16). For the code. It does not raise."""
         ...
 
     async def get_task(self, task_id: str) -> TodoistTask | None:
@@ -314,7 +322,14 @@ def _to_task(raw: Task, timezone: ZoneInfo, has_subtasks: bool) -> TodoistTask:
         has_subtasks=has_subtasks,
         duration_minutes=_minutes(raw),
         completed=raw.is_completed,
+        completed_at=None if raw.completed_at is None else _local(raw.completed_at, timezone),
     )
+
+
+def _local(moment: datetime, timezone: ZoneInfo) -> datetime:
+    """A moment of Todoist in the zone of the settings; one without a zone is UTC (API v1)."""
+    aware = moment if moment.tzinfo is not None else moment.replace(tzinfo=UTC)
+    return aware.astimezone(timezone)
 
 
 def _day(due: Due) -> date:
@@ -343,6 +358,15 @@ class ApiTodoistReader:
 
     async def read_project(self, project_id: str) -> TaskList:
         return await self._read(project_id, today_only=False)
+
+    async def read_day(self, day: date, project_id: str | None = None) -> TaskList:
+        result = await self._read(project_id, today_only=False)
+        if not result.available:
+            return result
+        tasks = sorted(
+            (t for t in result.tasks if t.due is not None and _day(t.due) == day), key=_order
+        )
+        return result.model_copy(update={"tasks": tasks})
 
     async def get_task(self, task_id: str) -> TodoistTask | None:
         photo = await self.get_photo(task_id)
@@ -517,6 +541,11 @@ class GuardedReader:
         if project_id != self._project_id:
             return TaskList.unavailable(OUTSIDE_TEST_PROJECT)
         return self._only_the_project(await self._inner.read_project(self._project_id))
+
+    async def read_day(self, day: date, project_id: str | None = None) -> TaskList:
+        if project_id not in (None, self._project_id):
+            return TaskList.unavailable(OUTSIDE_TEST_PROJECT)
+        return self._only_the_project(await self._inner.read_day(day, self._project_id))
 
     async def get_task(self, task_id: str) -> TodoistTask | None:
         photo = await self.get_photo(task_id)
