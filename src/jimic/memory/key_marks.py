@@ -138,6 +138,20 @@ def of_day(conn: sqlite3.Connection, day: date) -> DayMarks:
     return DayMarks(by_intent, frozenset(task_id for (task_id,) in moved))
 
 
+def done_tasks(conn: sqlite3.Connection, day: date) -> dict[str, frozenset[str]]:
+    """The tasks each key task's [Ya entrené]/[Hecho] closed on the local `day` (task 1.16: a
+    recurring one is no longer among today's, but it was done)."""
+    rows = conn.execute(
+        "SELECT intent, todoist_task_id FROM key_task_marks"
+        " WHERE day = ? AND mark = 'done' AND todoist_task_id IS NOT NULL",
+        (day.isoformat(),),
+    ).fetchall()
+    found: dict[str, set[str]] = defaultdict(set)
+    for intent, task_id in rows:
+        found[intent].add(task_id)
+    return {intent: frozenset(ids) for intent, ids in found.items()}
+
+
 def moved_off_today(conn: sqlite3.Connection, day: date, task_id: str, moment: datetime) -> int:
     """JimiC moved `task_id` out of the local `day`: «hoy no», with the task's id, for each key
     task that saw it as today's (decision 145). Returns how many it marked."""

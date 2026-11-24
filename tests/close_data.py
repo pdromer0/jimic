@@ -10,18 +10,28 @@ A Thursday, 10-ene-2030, close at 21:30. Done today: «Meditación» (7:10, mark
 import asyncio
 import sqlite3
 from datetime import date, datetime
+from pathlib import Path
 from typing import Any
 
+from agent_data import FakeAgent
+from apex_data import FixedApexReader
 from conftest import FixedClock
-from heartbeat_data import MADRID, intentions, limits
+from execution_data import AssistantWorld
+from heartbeat_data import CLOSE as CLOSE_INTENT
+from heartbeat_data import GYM, MADRID, day_state, intentions, limits
+from heartbeat_data import PLAN as PLAN_INTENT
 from todoist_data import FakeTodoistApi, raw_task
 
 from jimic.channel import store
+from jimic.channel.bot import SendError
 from jimic.channel.message import InteractiveMessage, Tap
 from jimic.channel.taps import TapResult, process_tap
 from jimic.close.day import close_view, morning_after
 from jimic.close.message import CLOSE_KIND, CloseContent, paint
+from jimic.close.runner import DayCloseRunner
 from jimic.execution.close import CloseActions
+from jimic.heartbeat.sources import Sources
+from jimic.memory import day_plans
 from jimic.memory.live import LiveConfig
 from jimic.tools.apex_schema import ApexSnapshot, TodayWorkout
 from jimic.tools.calendar import CalendarDay
@@ -207,3 +217,90 @@ class CloseWorld:
             if arguments.get("task_id") == task_id
             and name in ("update_task", "complete_task", "uncomplete_task", "delete_task")
         ]
+
+
+# --- The world of the hook: the assistant's, with the close runner --------------------------
+
+RAW_DONE = (
+    ("t-meditacion", "Meditación", "2030-01-10T07:10:00", "2030-01-10T08:30:00.000000Z"),
+    ("t-comida", "Comida", "2030-01-10T14:00:00", "2030-01-10T12:20:00.000000Z"),
+    ("t-trabajo", "Trabajo en el proyecto", "2030-01-10T15:30:00", "2030-01-10T15:45:00.000000Z"),
+)
+"""Completed at 9:30, 13:20 and 16:45 in Madrid (UTC + 1)."""
+
+
+def raw_done() -> list[dict[str, Any]]:
+    return [
+        raw_task(task_id, title, project_id="proyecto-inventado", due=due)
+        | {"checked": True, "completed_at": completed}
+        for task_id, title, due, completed in RAW_DONE
+    ]
+
+
+class SpyCloseSender:
+    """Stands in for the channel: records what it delivers and until when."""
+
+    def __init__(self) -> None:
+        self.delivered: list[tuple[str, InteractiveMessage, datetime]] = []
+        self.tries = 0
+        self.fail: str | None = None
+
+    async def deliver(self, kind: str, content: InteractiveMessage, expires_at: datetime) -> int:
+        self.tries += 1
+        if self.tries > 10:
+            raise AssertionError("the close was delivered in a loop")
+        if self.fail is not None:
+            raise SendError(self.fail)
+        self.delivered.append((kind, content, expires_at))
+        return 950 + len(self.delivered)
+
+
+class CloseRunWorld(AssistantWorld):
+    def __init__(
+        self,
+        conn: sqlite3.Connection,
+        tmp_path: Path,
+        agent: FakeAgent,
+        tasks: list[dict[str, Any]] | None = None,
+    ):
+        chosen = tasks if tasks is not None else [*raw_e08(), *raw_done()]
+        super().__init__(conn, tmp_path, agent, chosen)
+        self.clock.moment = at(CLOSE_AT)
+        self.config = LiveConfig.fixed(intentions(PLAN_INTENT, CLOSE_INTENT, GYM), limits())
+        self.calendar = DayCalendar()
+        self.apex = FixedApexReader(apex_e08())
+        self.close_sources = Sources(todoist=self.todoist, calendar=self.calendar, apex=self.apex)
+        self.sender = SpyCloseSender()
+        self.runner = DayCloseRunner(
+            conversation=self.conversation,
+            sources=self.close_sources,
+            config=self.config,
+            conn=conn,
+            clock=self.clock,
+            timezone=MADRID,
+            config_dir=self.paths.config_dir,
+            sender=self.sender,
+        )
+
+    def with_plan(self, task_ids=tuple(task.id for task in PLAN)) -> None:
+        scheduled = {task.id: task.due for task in PLAN if isinstance(task.due, datetime)}
+        day_plans.record_plan(
+            self.conn,
+            THURSDAY,
+            at("2030-01-10T07:45"),
+            [(task_id, scheduled.get(task_id)) for task_id in task_ids],
+            {},
+        )
+
+    def handover(self, intent: str = "cierre_del_dia") -> None:
+        state = day_state(self.conn, self.clock.now(), self.config.intentions)
+        asyncio.run(self.runner.handover(intent, state))
+
+    def closes(self) -> list[InteractiveMessage]:
+        return [message for _, message, _ in self.sender.delivered]
+
+    def build_close(self, statuses=()):
+        return asyncio.run(self.runner.build(statuses))
+
+    def settle(self) -> None:
+        asyncio.run(self.runner.settle())
