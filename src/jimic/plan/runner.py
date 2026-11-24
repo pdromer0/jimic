@@ -22,7 +22,7 @@ import sqlite3
 from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
-from typing import Protocol
+from typing import Any, Protocol
 from zoneinfo import ZoneInfo
 
 from jimic.agent.conversation import Conversation
@@ -30,10 +30,11 @@ from jimic.agent.proposals import expires_at
 from jimic.agent.tools import RunState
 from jimic.channel.message import InteractiveMessage, MessageTooLong
 from jimic.clock import Clock
-from jimic.execution.plan_message import PLAN_KIND
+from jimic.execution.plan_message import PLAN_DAY, PLAN_KIND
 from jimic.heartbeat.beat import log_handover
 from jimic.heartbeat.sources import Sources
 from jimic.heartbeat.state import DayState
+from jimic.memory import day_plans
 from jimic.memory.changes import read_text
 from jimic.memory.live import LiveConfig
 from jimic.memory.markdown_checks import icon_rows
@@ -41,7 +42,7 @@ from jimic.memory.notices import record_sent
 from jimic.memory.onboarding import PREFERENCES_FILE
 from jimic.memory.schemas import DailyPlan
 from jimic.plan import minimal
-from jimic.plan.day import day_view, hour, late_after, normalized
+from jimic.plan.day import day_view, hour, late_after, normalized, plan_tasks
 from jimic.plan.message import (
     DEFAULT_GREETING,
     PlanContent,
@@ -90,6 +91,17 @@ class BuiltPlan:
     """`agent`, or `minimal:<why>` (`no_agent`, `no_proposal`, the code of the run)."""
     run: RunState | None = None
     """The run of the agent, when the plan is its own."""
+    day: date | None = None
+    """The local day of the plan."""
+    tasks: tuple[tuple[str, datetime | None], ...] = ()
+    """The tasks of «Tu día»: what the plan of the day keeps (task 1.16)."""
+    proposals: int = 0
+
+
+def for_the_plan(entries: list[dict[str, Any]], day: date) -> list[dict[str, Any]]:
+    """The proposals of the plan of `day`, marked as its own: what its buttons create or bring
+    to that day goes into the plan (`plan_day`, task 1.16)."""
+    return [entry | {PLAN_DAY: day.isoformat()} for entry in entries]
 
 
 def is_late(intention: DailyPlan, now: datetime) -> bool:
@@ -157,7 +169,11 @@ class DailyPlanRunner:
         message_id = await self._sender.deliver(
             PLAN_KIND, built.plan, expires_at(self._clock, self._timezone)
         )
-        record_sent(self._conn, intent, self._clock.now(), message_id)
+        sent = self._clock.now()
+        record_sent(self._conn, intent, sent, message_id)
+        summary: dict[str, str | int] = {"code": built.code, "proposals": built.proposals}
+        day = built.day if built.day is not None else self._now().date()
+        day_plans.record_plan(self._conn, day, sent, built.tasks, summary)
 
     async def _read(self, day: date):
         sources = self._sources
@@ -179,14 +195,17 @@ class DailyPlanRunner:
             turn = await self._conversation.run_note(plan_note(intention, late), "plan")
         run = turn.run if turn is not None and turn.code == "ok" else None
         now = self._now()
-        calendar, tasks, apex = await self._read(now.date())
-        view = day_view(calendar, tasks, now, late)
+        calendar, read_tasks, apex = await self._read(now.date())
+        view = day_view(calendar, read_tasks, now, late)
         table = self._icons()
         learned = learned_line(self._conn, now, self._plan_intents())
+        day = now.date()
+        tasks = tuple(plan_tasks(view))
         if run is not None and run.proposed_plan:
+            entries = for_the_plan(run.items, day)
             content = PlanContent(
                 greeting=run.plan.get("greeting") or DEFAULT_GREETING,
-                entries=run.items,
+                entries=entries,
                 left_out=[entry["line"] for entry in run.plan.get("left_out", [])],
                 training=run.plan.get("training_line"),
                 learned=learned,
@@ -196,7 +215,8 @@ class DailyPlanRunner:
                 },
             )
             try:
-                return BuiltPlan(paint(content, view, late, now, table), "agent", run)
+                plan = paint(content, view, late, now, table)
+                return BuiltPlan(plan, "agent", run, day, tasks, len(entries))
             except MessageTooLong:
                 why = "too_long"
         elif not use_agent:
@@ -205,10 +225,14 @@ class DailyPlanRunner:
             why = turn.code
         else:
             why = "no_proposal"
+        entries = for_the_plan(
+            minimal.minimal_entries(self._config.intentions.habits, read_tasks, day), day
+        )
         content = PlanContent(
             greeting=minimal.GREETING,
-            entries=minimal.minimal_entries(self._config.intentions.habits, tasks, now.date()),
+            entries=entries,
             training=minimal.training_line(apex),
             learned=learned,
         )
-        return BuiltPlan(paint(content, view, late, now, table), f"minimal:{why}", run)
+        plan = paint(content, view, late, now, table)
+        return BuiltPlan(plan, f"minimal:{why}", run, day, tasks, len(entries))

@@ -26,6 +26,8 @@ from jimic.channel.message import GlobalOption, InteractiveMessage, Item, Option
 from jimic.tools.todoist import Due
 
 UNDO_KIND = "undo"
+PLAN_DAY = "plan_day"
+"""In the data of a proposal of the plan of the day: its local day (task 1.16)."""
 PROPOSAL_HEADER = "Te propongo"
 DONE_HEADER = "✅ Hecho"
 UNDO_EXPIRED = "Deshacer caducado"
