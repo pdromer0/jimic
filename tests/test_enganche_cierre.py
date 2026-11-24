@@ -367,3 +367,22 @@ def test_sin_plan_y_con_las_completadas_caidas_hay_cierre(conn, tmp_path):
     setattr(w.todoist.reader, "read_completed_today", down)  # noqa: B010 - un doble de un método
     built = w.build_close()
     assert built.message is not None
+
+
+def test_lo_marcado_despues_de_la_manana_siguiente_no_es_de_ese_dia(conn, tmp_path):
+    """Revisión propia: con la cifra asentada tarde (el servicio parado), una tarea del jueves
+    completada el sábado no cuenta para el jueves. Valor a mano: la mañana del jueves acaba el
+    viernes a las 07:00."""
+    w = CloseRunWorld(conn, tmp_path, noting(), tasks=raw_e08())
+    w.with_plan(("t-cena", "t-paseo"))
+    for task_id, moment in (
+        ("t-cena", "2030-01-11T05:59:00.000000Z"),  # 06:59 del viernes: cuenta
+        ("t-paseo", "2030-01-12T09:00:00.000000Z"),  # sábado: no
+    ):
+        found = w.api.find(task_id)
+        assert found is not None
+        found |= {"checked": True, "completed_at": moment}
+    w.clock.moment = at("2030-01-13T10:00")
+    w.settle()
+    figures = day_plans.figures(conn, THURSDAY)
+    assert figures is not None and (figures.fulfilled, figures.planned) == (1, 2)

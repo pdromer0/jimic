@@ -264,7 +264,7 @@ class DayCloseRunner:
             for day in day_plans.unsettled(self._conn, now.date()):
                 if now < morning_after(day, quiet, self._timezone):
                     continue
-                fulfilled = await self._fulfilled(day)
+                fulfilled = await self._fulfilled(day, morning_after(day, quiet, self._timezone))
                 day_plans.settle(self._conn, day, fulfilled, self._clock.now())
                 logger.info("close: day settled")
         except ToolFailure as error:
@@ -272,16 +272,20 @@ class DayCloseRunner:
         except Exception as error:
             logger.error("close: settle failed (%s)", type(error).__name__)
 
-    async def _fulfilled(self, day: date) -> int:
-        """How many tasks of the plan of `day` are marked; raises `ToolFailure` if one cannot
-        be read (nothing is written then)."""
+    async def _fulfilled(self, day: date, morning: datetime) -> int:
+        """How many tasks of the plan of `day` were marked before its `morning`; raises
+        `ToolFailure` if one cannot be read (nothing is written then). One marked later (the
+        figure settled late, after the service was down) is not of that day."""
         reader = self._sources.todoist.reader
         items = day_plans.items(self._conn, day)
-        tasks = [await reader.get_task(item.task_id) for item in items]
+        tasks = await asyncio.gather(*(reader.get_task(item.task_id) for item in items))
         count = 0
         now = self._clock.now()
         for item, task in zip(items, tasks, strict=True):
-            if task is not None and task.completed:
+            in_time = task is not None and (
+                task.completed_at is None or task.completed_at < morning
+            )
+            if task is not None and task.completed and in_time:
                 count += 1
                 if item.status != "done":
                     marked = task.completed_at or now
