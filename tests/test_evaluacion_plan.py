@@ -641,6 +641,22 @@ def test_propone_el_cambio_en_su_fichero_y_no_en_otro():
     assert holds({"no_change_to": "preferencias.md"}, data)
 
 
+def test_propone_days_en_el_habito_con_todos_sus_textos():
+    """m04 (decisión F2-a): el hábito y sus `days`, todo en el texto nuevo; un argumento solo, el
+    fichero, no es una comprobación."""
+    after = (
+        '- {id: estiramientos, name: "Estiramientos", priority: medium, duration: 15m,\n'
+        '   moment: evening, todoist_task: "Estiramientos", days: [sat, sun]}'
+    )
+    days = {"action": "change", "file": "intenciones.yaml", "after": after}
+    m04 = {"proposes_change": ["intenciones.yaml", "estiramientos", "days", "sat", "sun"]}
+    assert holds(m04, on_text("x", [days]))
+    note = {"action": "change", "file": "intenciones.yaml", "after": "# estiramientos: sat y sun"}
+    assert not holds(m04, on_text("x", [note]))
+    with pytest.raises(CheckError, match="no lleva 1 argumentos"):
+        parse_check({"proposes_change": ["intenciones.yaml"]})
+
+
 @pytest.mark.parametrize(
     ("text", "ok"),
     [

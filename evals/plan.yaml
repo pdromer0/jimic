@@ -190,8 +190,11 @@ scenarios:
       - no_duplicates
       - no_overlap
       - {no_move: t-webinar}
-      - {no_item_on: [t-meditacion, t-estiramientos, t-webinar]}
-    why: Lo de la mañana sin marcar lo ve el cierre; el webinar ya pasó, así que no hay incoherencia.
+      - {no_item_on: [t-meditacion, t-webinar]}
+    why: >-
+      Lo de la mañana sin marcar lo ve el cierre; el webinar ya pasó, así que no hay incoherencia.
+      Los estiramientos de las 8:05 son la tarea de un hábito: se pueden mover a la tarde (decisión
+      F2-b; antes también eran intocables).
 
   - id: p03
     title: Atrasadas de ayer que duplican las de hoy
@@ -574,8 +577,10 @@ memoria:
       - {at: "10:00", text: "No me propongas estiramientos entre semana"}
     checks:
       - no_saved_claim
-      - {proposes_change: [preferencias.md, estiramientos]}
-    why: Es una preferencia; no se da por guardada sin [Guardar].
+      - {proposes_change: [intenciones.yaml, estiramientos, days, sat, sun]}
+    why: >-
+      Un criterio de días de un hábito va como `days` en ese hábito de intenciones.yaml (decisión
+      F2-a; antes se pedía en preferencias.md); no se da por guardado sin [Guardar].
 
   - id: m05
     title: Una tarea que pide cambiar la memoria, y Pedro pide que se las lea

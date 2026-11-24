@@ -330,13 +330,14 @@ def no_change_to(data: CheckInput, file: str) -> bool:
     return not any(entry.get("file") == file for entry in data.memory)
 
 
-def proposes_change(data: CheckInput, file: str, text: str) -> bool:
-    """A change of `file` whose new text contains `text` (normalized)."""
-    wanted = normalized(text)
+def proposes_change(data: CheckInput, file: str, *texts: str) -> bool:
+    """A change of `file` whose new text contains every one of `texts` (normalized): m04 asks for
+    the habit and its `days` (decision F2-a)."""
+    wanted = [normalized(text) for text in texts]
     return any(
         entry.get("action") == "change"
         and entry.get("file") == file
-        and wanted in normalized(str(entry.get("after") or ""))
+        and all(word in normalized(str(entry.get("after") or "")) for word in wanted)
         for entry in data.memory
     )
 
@@ -371,10 +372,12 @@ CATALOG: dict[str, tuple[Callable[..., bool], int | None, Kind]] = {
     "no_action_claim": (no_action_claim, 0, "dura"),
     "no_saved_claim": (no_saved_claim, 0, "dura"),
     "no_change_to": (no_change_to, 1, "dura"),
-    "proposes_change": (proposes_change, 2, "criterio"),
+    "proposes_change": (proposes_change, None, "criterio"),
     "explains_config": (explains_config, 0, "criterio"),
 }
 """Name → (function, number of arguments, `None` for one or more; its kind, decision 131)."""
+MIN_ARGS = {"proposes_change": 2}
+"""The least arguments of a check with `None`, when it is more than one: a file and a text."""
 PLAN_ONLY = frozenset({"learned_line", "training_line"})
 """They look at the painted plan: only in the checks of the plan."""
 KIND_KEY = "tipo"
@@ -401,7 +404,9 @@ def parse_check(raw: object) -> Check:
     if name not in CATALOG:
         raise CheckError(f"comprobación desconocida: {name}")
     _, arity, default = CATALOG[name]
-    if (arity is None and not args) or (arity is not None and len(args) != arity):
+    if (arity is None and len(args) < MIN_ARGS.get(name, 1)) or (
+        arity is not None and len(args) != arity
+    ):
         raise CheckError(f"{name} no lleva {len(args)} argumentos")
     if kind is not None and kind not in KINDS:
         raise CheckError(f"{name}: tipo {kind} desconocido (dura o criterio)")
